@@ -18,6 +18,7 @@ this README is executed by the test suite.
 - [Transactions](#transactions)
 - [Deletion](#deletion)
 - [Traversal](#traversal)
+- [Query language](#query-language)
 - [Persistence](#persistence)
 - [License](#license)
 
@@ -246,6 +247,77 @@ Path enumeration is exponential in the worst case because a graph can contain
 many trails between the same pair of nodes. Always set the smallest useful
 `max_depth`, and pass `limit` when only the first few paths are needed. Paths
 are generated lazily, so stopping iteration early stops further computation.
+
+## Query language
+
+`Graph.query` runs one read-only pattern query and returns a materialized
+`QueryResult` with ordered columns and immutable rows. A query combines a
+fixed-length `MATCH` pattern with an optional `WHERE` filter and a required
+`RETURN` projection. `DISTINCT`, `ORDER BY`, `SKIP`, and `LIMIT` are supported,
+as are `$name` parameters.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+    quorra = graph.add_node("Program", "ISO", designation="Quorra", cycles=37)
+    graph.add_relationship(kevin, "ALLIES_WITH", quorra, since_cycle=2020)
+
+    result = graph.query(
+        "MATCH (p:Program {designation: $name}) RETURN p.designation AS name, p.cycles",
+        {"name": "Quorra"},
+    )
+    print(result.columns)  # ('name', 'p.cycles')
+    print([tuple(row.values()) for row in result])  # [('Quorra', 37)]
+```
+
+Patterns support labels, relationship types, all three directions, property
+maps, path variables, and repeated variables. Projections can contain scalar
+functions and aggregates.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+    quorra = graph.add_node("Program", designation="Quorra", cycles=37)
+    tron = graph.add_node("Program", designation="Tron", cycles=40)
+    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+    graph.add_relationship(quorra, "ALLIES_WITH", tron)
+
+    result = graph.query(
+        "MATCH (a:Program)-[r:ALLIES_WITH]->(b:Program) "
+        "RETURN a.designation AS source, type(r) AS kind, b.designation AS target "
+        "ORDER BY target"
+    )
+    print([tuple(row.values()) for row in result])
+    # [('Kevin Flynn', 'ALLIES_WITH', 'Quorra'), ('Quorra', 'ALLIES_WITH', 'Tron')]
+```
+
+Use `Graph.prepare` when the same statement runs more than once. Prepared
+columns are available before the first execution, and parameters may change on
+each call.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+    graph.add_node("Program", designation="Quorra", cycles=37)
+    graph.add_node("Program", designation="Tron", cycles=40)
+
+    prepared = graph.prepare(
+        "MATCH (n:Program) WHERE n.cycles > $minimum RETURN count(*) AS total"
+    )
+    print(prepared.columns)  # ('total',)
+    print(prepared.execute({"minimum": 36}).rows[0]["total"])  # 2
+```
+
+Queries are read-only and reject write clauses. See
+[`docs/query-language.md`](docs/query-language.md) for the complete grammar,
+value and null semantics, functions, aggregation, ordering rules, parameters,
+errors, and the supported core profile.
 
 ## Persistence
 

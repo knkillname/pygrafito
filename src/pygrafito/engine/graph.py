@@ -3,11 +3,18 @@
 # SPDX-License-Identifier: MIT
 """Public graph facade."""
 
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path as FilePath
 from types import TracebackType
 from typing import Self
 
+from pygrafito.engine.query.executor import QueryExecutor
+from pygrafito.engine.query.parser import Parser
+from pygrafito.engine.query.plan import PlanBuilder
+from pygrafito.engine.query.prepared import PreparedQuery
+from pygrafito.engine.query.results import QueryResult
+from pygrafito.engine.query.semantic import SemanticAnalyzer
+from pygrafito.engine.query.values import QueryValue
 from pygrafito.engine.transaction import Transaction
 from pygrafito.engine.traversal import (
     AdjacencySnapshot,
@@ -20,6 +27,7 @@ from pygrafito.model import (
     Node,
     Path,
     Relationship,
+    TransactionError,
     TraversalStep,
     Value,
 )
@@ -48,6 +56,13 @@ class Graph:
         self._relationships = RelationshipRepository(
             database.connection,
             self._codec,
+        )
+        self._query = QueryExecutor(
+            database.connection,
+            self._nodes,
+            self._relationships,
+            self._codec,
+            database,
         )
 
     @classmethod
@@ -126,6 +141,53 @@ class Graph:
             self._database.connection,
             self._nodes,
             self._relationships,
+            query_executor=self._query,
+        )
+
+    def query(
+        self,
+        text: str,
+        parameters: Mapping[str, QueryValue] | None = None,
+    ) -> QueryResult:
+        """Parse and execute one read-only query statement.
+
+        Parameters
+        ----------
+        text : str
+            Query source text.
+        parameters : Mapping[str, QueryValue] | None, optional
+            Query parameter values, by default none.
+
+        Returns
+        -------
+        QueryResult
+            Materialized query result.
+        """
+        self._database.ensure_open()
+        if self._database.connection.in_transaction:
+            message = "a graph transaction is active; use Transaction.query"
+            raise TransactionError(message)
+        return self.prepare(text).execute(parameters)
+
+    def prepare(self, text: str) -> PreparedQuery:
+        """Parse and validate a query for repeated execution.
+
+        Parameters
+        ----------
+        text : str
+            Query source text.
+
+        Returns
+        -------
+        PreparedQuery
+            Prepared statement whose columns are available before execution.
+        """
+        self._database.ensure_open()
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        return PreparedQuery(
+            self._query,
+            text,
+            PlanBuilder.build(analysis),
         )
 
     def add_node(

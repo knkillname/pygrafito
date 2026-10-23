@@ -4,6 +4,8 @@
 """Public package surface for the embedded property graph."""
 
 from pygrafito.engine.graph import Graph
+from pygrafito.engine.query.prepared import PreparedQuery
+from pygrafito.engine.query.results import QueryResult, Row
 from pygrafito.engine.transaction import Transaction
 from pygrafito.model import (
     ConnectedNodeError,
@@ -13,6 +15,10 @@ from pygrafito.model import (
     NotFoundError,
     Path,
     PygrafitoError,
+    QueryError,
+    QueryExecutionError,
+    QuerySemanticError,
+    QuerySyntaxError,
     Relationship,
     TransactionError,
     TraversalStep,
@@ -28,8 +34,15 @@ __all__ = [
     "Node",
     "NotFoundError",
     "Path",
+    "PreparedQuery",
     "PygrafitoError",
+    "QueryError",
+    "QueryExecutionError",
+    "QueryResult",
+    "QuerySemanticError",
+    "QuerySyntaxError",
     "Relationship",
+    "Row",
     "Transaction",
     "TransactionError",
     "TraversalStep",

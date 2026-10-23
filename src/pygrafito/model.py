@@ -53,6 +53,47 @@ class UnsupportedSqliteError(PygrafitoError):
     """Raised when the SQLite runtime cannot provide the required features."""
 
 
+class QueryError(PygrafitoError):
+    """Base class for every query-language failure.
+
+    Parameters
+    ----------
+    message : str
+        Description of the failure.
+    line : int | None, optional
+        One-based source line of the failure, by default ``None``.
+    column : int | None, optional
+        One-based source column of the failure, by default ``None``.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        line: int | None = None,
+        column: int | None = None,
+    ) -> None:
+        self.message = message
+        self.line = line
+        self.column = column
+        location = ""
+        if line is not None and column is not None:
+            location = f" (line {line}, column {column})"
+        super().__init__(f"{message}{location}")
+
+
+class QuerySyntaxError(QueryError):
+    """Raised when a query cannot be lexed or parsed."""
+
+
+class QuerySemanticError(QueryError):
+    """Raised when a parsed query violates the dialect's static rules."""
+
+
+class QueryExecutionError(QueryError):
+    """Raised when a query fails while it is being evaluated."""
+
+
 class _PropertyMapping(Mapping[str, Value]):
     """Read-only mapping behavior shared by element snapshots."""
 
@@ -270,6 +311,10 @@ __all__ = [
     "NotFoundError",
     "Path",
     "PygrafitoError",
+    "QueryError",
+    "QueryExecutionError",
+    "QuerySemanticError",
+    "QuerySyntaxError",
     "Relationship",
     "Scalar",
     "TransactionError",

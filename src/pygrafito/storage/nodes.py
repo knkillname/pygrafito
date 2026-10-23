@@ -124,6 +124,38 @@ class NodeRepository:
         ).fetchone()
         return row is not None
 
+    def get_many(self, node_ids: Iterable[int]) -> dict[int, Node]:
+        """Read several nodes and their labels in one batch.
+
+        Parameters
+        ----------
+        node_ids : Iterable[int]
+            Identifiers to read. Duplicates are collapsed and missing ids are
+            omitted from the result.
+
+        Returns
+        -------
+        dict[int, Node]
+            Node snapshots keyed by id.
+        """
+        unique_ids = tuple(dict.fromkeys(int(node_id) for node_id in node_ids))
+        if not unique_ids:
+            return {}
+        placeholders = ", ".join("?" for _ in unique_ids)
+        rows = self._connection.execute(
+            f"SELECT id, props FROM nodes WHERE id IN ({placeholders})",
+            list(unique_ids),
+        ).fetchall()
+        labels_by_node = self._labels_for([int(row[0]) for row in rows])
+        return {
+            int(row[0]): self._node_from_payload(
+                int(row[0]),
+                str(row[1]),
+                labels_by_node.get(int(row[0]), frozenset()),
+            )
+            for row in rows
+        }
+
     def add_labels(
         self,
         node_id: int,

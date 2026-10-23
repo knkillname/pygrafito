@@ -4,11 +4,17 @@
 """Explicit write transactions."""
 
 import contextlib
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from sqlite3 import Connection, Error
 from types import TracebackType
 from typing import Self
 
+from pygrafito.engine.query.executor import QueryExecutor
+from pygrafito.engine.query.parser import Parser
+from pygrafito.engine.query.plan import PlanBuilder
+from pygrafito.engine.query.results import QueryResult
+from pygrafito.engine.query.semantic import SemanticAnalyzer
+from pygrafito.engine.query.values import QueryValue
 from pygrafito.model import (
     Node,
     Relationship,
@@ -16,6 +22,7 @@ from pygrafito.model import (
     ValidationError,
     Value,
 )
+from pygrafito.storage.codec import PropertyCodec
 from pygrafito.storage.nodes import NodeRepository
 from pygrafito.storage.relationships import RelationshipRepository
 
@@ -31,6 +38,9 @@ class Transaction:
         Repository used for node writes.
     relationship_repository : RelationshipRepository
         Repository used for relationship writes.
+    query_executor : QueryExecutor | None, optional
+        Executor used by :meth:`query`, by default a new executor on the same
+        repositories.
     """
 
     def __init__(
@@ -38,10 +48,21 @@ class Transaction:
         connection: Connection,
         node_repository: NodeRepository,
         relationship_repository: RelationshipRepository,
+        query_executor: QueryExecutor | None = None,
     ) -> None:
         self._connection = connection
         self._node_repository = node_repository
         self._relationship_repository = relationship_repository
+        self._query = (
+            QueryExecutor(
+                connection,
+                node_repository,
+                relationship_repository,
+                PropertyCodec(),
+            )
+            if query_executor is None
+            else query_executor
+        )
         self._active = False
         self._finished = False
 
@@ -375,6 +396,34 @@ class Transaction:
         """
         self._require_active()
         return self._relationship_repository.find(rel_type, properties)
+
+    def query(
+        self,
+        text: str,
+        parameters: Mapping[str, QueryValue] | None = None,
+    ) -> QueryResult:
+        """Execute one read-only query inside the active transaction.
+
+        The query uses the transaction's connection, so it observes the
+        transaction's uncommitted writes and does not start or finish a
+        transaction of its own.
+
+        Parameters
+        ----------
+        text : str
+            Query source text.
+        parameters : Mapping[str, QueryValue] | None, optional
+            Query parameter values, by default none.
+
+        Returns
+        -------
+        QueryResult
+            Materialized query result.
+        """
+        self._require_active()
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        values: Mapping[str, QueryValue] = {} if parameters is None else parameters
+        return self._query.execute_active(PlanBuilder.build(analysis), values)
 
     def _require_active(self) -> None:
         """Reject operations outside an active transaction.

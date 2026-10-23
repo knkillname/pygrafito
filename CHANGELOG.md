@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-23
+
+### Added
+
+- Read-only pattern query language with `MATCH`, `WHERE`, `RETURN`, `DISTINCT`,
+  `ORDER BY`, `SKIP`, and `LIMIT`, including node and relationship property
+  maps, relationship directions and type alternatives, path variables, repeated
+  variables, and `$name` parameters.
+- `Graph.query`, `Graph.prepare`, `PreparedQuery`, and `Transaction.query`,
+  returning materialized `QueryResult` objects with ordered columns and
+  immutable `Row` mappings.
+- Scalar functions and `count`, `collect`, `sum`, `avg`, `min`, and `max`
+  aggregates with implicit grouping, `DISTINCT` variants, numeric equality,
+  query-only nulls, and documented ordering and empty-input semantics.
+- `QueryError`, `QuerySyntaxError`, `QuerySemanticError`, and
+  `QueryExecutionError` with optional source line and column positions.
+- A language reference in `docs/query-language.md`, executable query examples in
+  the README, and a dialect conformance suite.
+
 ## [0.2.0] - 2026-10-22
 
 ### Added

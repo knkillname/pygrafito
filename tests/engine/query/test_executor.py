@@ -1,0 +1,615 @@
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
+#
+# SPDX-License-Identifier: MIT
+"""Execution tests for the read-only query language."""
+
+import dataclasses
+import typing
+from collections.abc import Iterator
+
+import pytest
+
+from pygrafito import Graph
+from pygrafito.engine.query.results import QueryResult, Row
+from pygrafito.engine.query.values import QueryValue
+from pygrafito.model import (
+    Node,
+    Path,
+    QueryExecutionError,
+    QuerySemanticError,
+    Relationship,
+    TransactionError,
+)
+
+
+class _QueryGraph:
+    """Provide the shared TRON fixture for execution tests."""
+
+    @pytest.fixture
+    def graph(self) -> Iterator[Graph]:
+        with Graph.open(":memory:") as graph:
+            kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+            quorra = graph.add_node(
+                "Program",
+                "ISO",
+                designation="Quorra",
+                cycles=37,
+                tags=["ISO", "Program"],
+                active=True,
+            )
+            tron = graph.add_node("Program", designation="Tron", cycles=40)
+            clu = graph.add_node("Program", designation="Clu")
+            rinzler = graph.add_node("Program", designation="Rinzler", cycles=36.0)
+            sam = graph.add_node("Program", designation="Sam Flynn")
+            grid = graph.add_node("System", designation="The Grid")
+            encom = graph.add_node("Company", designation="ENCOM")
+            graph.add_node("Grid Node", designation="Grid Node", **{"a.b": 1})
+            graph.add_relationship(kevin, "ALLIES_WITH", quorra, since_cycle=2020)
+            graph.add_relationship(kevin, "ALLIES_WITH", quorra, since_cycle=2021)
+            graph.add_relationship(kevin, "TRUSTS", tron, since_cycle=2020)
+            graph.add_relationship(quorra, "ALLIES_WITH", clu)
+            graph.add_relationship(tron, "ALLIES_WITH", clu)
+            graph.add_relationship(clu, "OBSERVES", clu)
+            graph.add_relationship(rinzler, "OBSERVES", rinzler)
+            graph.add_relationship(clu, "TRUSTS", kevin)
+            graph.add_relationship(sam, "ALLIES_WITH", kevin)
+            graph.add_relationship(grid, "CONTAINS", encom)
+            yield graph
+
+    @staticmethod
+    def values(result: QueryResult) -> list[tuple[QueryValue, ...]]:
+        return [tuple(row.values()) for row in result]
+
+    def designations(self, result: QueryResult) -> list[str]:
+        return [str(value) for (value,) in self.values(result)]
+
+
+class TestQueryExecution(_QueryGraph):
+    """Verify matching, filtering, projection, and result values."""
+
+    def test_labels_and_properties(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Program:ISO) RETURN n.designation AS name")
+        assert result.columns == ("name",)
+        assert self.designations(result) == ["Quorra"]
+
+    def test_property_map_numeric_equality(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Program {cycles: 36}) RETURN n.designation")
+        assert sorted(self.designations(result)) == ["Kevin Flynn", "Rinzler"]
+
+    def test_property_map_boolean_and_list(self, graph: Graph) -> None:
+        active = graph.query("MATCH (n {active: true}) RETURN n.designation")
+        tags = graph.query("MATCH (n {tags: ['ISO', 'Program']}) RETURN n.designation")
+        assert self.designations(active) == ["Quorra"]
+        assert self.designations(tags) == ["Quorra"]
+
+    def test_backtick_property_key(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n {`a.b`: 1}) RETURN n.designation")
+        assert self.designations(result) == ["Grid Node"]
+
+    def test_anonymous_pattern_elements(self, graph: Graph) -> None:
+        result = graph.query("MATCH (:Program)-[:TRUSTS]->(n) RETURN n.designation")
+        assert sorted(self.designations(result)) == ["Kevin Flynn", "Tron"]
+
+    def test_numeric_range_filter(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) WHERE n.cycles >= 36 AND n.cycles < 40 "
+            "RETURN n.designation ORDER BY n.designation"
+        )
+        assert self.designations(result) == ["Kevin Flynn", "Quorra", "Rinzler"]
+
+    def test_residual_arithmetic(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Program) WHERE n.cycles + 1 = 38 RETURN n.designation")
+        assert self.designations(result) == ["Quorra"]
+
+    def test_residual_function(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Program) WHERE abs(n.cycles) = 36 RETURN n.designation")
+        assert sorted(self.designations(result)) == ["Kevin Flynn", "Rinzler"]
+
+    def test_residual_parameter_list(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) WHERE n.designation IN $names RETURN n.designation "
+            "ORDER BY n.designation",
+            {"names": ["Quorra", "Tron"]},
+        )
+        assert self.designations(result) == ["Quorra", "Tron"]
+
+    def test_membership_and_string_predicates(self, graph: Graph) -> None:
+        membership = graph.query(
+            "MATCH (n:Program) WHERE n.designation IN ['Quorra', 'Tron'] "
+            "RETURN n.designation ORDER BY n.designation"
+        )
+        starts = graph.query(
+            "MATCH (n:Program) WHERE n.designation STARTS WITH 'Qu' RETURN n.designation"
+        )
+        ends = graph.query(
+            "MATCH (n:Program) WHERE n.designation ENDS WITH 'ra' RETURN n.designation"
+        )
+        contains = graph.query(
+            "MATCH (n:Program) WHERE n.designation CONTAINS 'orr' RETURN n.designation"
+        )
+        assert self.designations(membership) == ["Quorra", "Tron"]
+        assert self.designations(starts) == ["Quorra"]
+        assert self.designations(ends) == ["Quorra"]
+        assert self.designations(contains) == ["Quorra"]
+
+    def test_string_predicates_are_case_sensitive(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) WHERE n.designation CONTAINS 'LYNN' RETURN n.designation"
+        )
+        assert result.rows == ()
+
+    def test_boolean_filters(self, graph: Graph) -> None:
+        conjunction = graph.query(
+            "MATCH (n:Program) WHERE n.cycles >= 36 AND n.cycles < 37 "
+            "RETURN n.designation ORDER BY n.designation"
+        )
+        disjunction = graph.query(
+            "MATCH (n:Program) WHERE n.cycles >= 39 OR n.designation = 'Clu' "
+            "RETURN n.designation ORDER BY n.designation"
+        )
+        negation = graph.query(
+            "MATCH (n:Program) WHERE NOT n.cycles = 36 RETURN n.designation ORDER BY n.designation"
+        )
+        assert self.designations(conjunction) == ["Kevin Flynn", "Rinzler"]
+        assert self.designations(disjunction) == ["Clu", "Tron"]
+        assert self.designations(negation) == ["Quorra", "Tron"]
+
+    def test_null_semantics(self, graph: Graph) -> None:
+        projected = graph.query("MATCH (n:Program {designation: 'Clu'}) RETURN n.cycles")
+        nulls = graph.query(
+            "MATCH (n:Program) WHERE n.cycles IS NULL RETURN n.designation ORDER BY n.designation"
+        )
+        not_nulls = graph.query(
+            "MATCH (n:Program) WHERE n.cycles IS NOT NULL RETURN count(*) AS total"
+        )
+        missing_equals = graph.query("MATCH (n:Program) WHERE n.missing = 1 RETURN n.designation")
+        missing_not_equals = graph.query(
+            "MATCH (n:Program) WHERE n.missing <> 1 RETURN n.designation"
+        )
+        assert self.values(projected) == [(None,)]
+        assert self.designations(nulls) == ["Clu", "Sam Flynn"]
+        assert self.values(not_nulls) == [(4,)]
+        assert missing_equals.rows == ()
+        assert missing_not_equals.rows == ()
+
+    def test_relationship_directions(self, graph: Graph) -> None:
+        outgoing = graph.query(
+            "MATCH (a {designation: 'Quorra'})-[r:ALLIES_WITH]->(b) RETURN b.designation "
+            "ORDER BY b.designation"
+        )
+        incoming = graph.query(
+            "MATCH (a {designation: 'Clu'})<-[r:ALLIES_WITH]-(b) RETURN b.designation "
+            "ORDER BY b.designation"
+        )
+        both = graph.query(
+            "MATCH (a {designation: 'Quorra'})-[r:ALLIES_WITH]-(b) RETURN b.designation "
+            "ORDER BY b.designation"
+        )
+        assert self.designations(outgoing) == ["Clu"]
+        assert self.designations(incoming) == ["Quorra", "Tron"]
+        assert self.designations(both) == ["Clu", "Kevin Flynn", "Kevin Flynn"]
+
+    def test_type_alternatives(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'})-[r:ALLIES_WITH|TRUSTS]->(b) "
+            "RETURN type(r) AS kind, b.designation AS name ORDER BY name"
+        )
+        assert self.values(result) == [
+            ("ALLIES_WITH", "Quorra"),
+            ("ALLIES_WITH", "Quorra"),
+            ("TRUSTS", "Tron"),
+        ]
+
+    def test_relationship_property_filter(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'})-[r:ALLIES_WITH {since_cycle: 2021}]->(b) "
+            "RETURN b.designation"
+        )
+        assert self.designations(result) == ["Quorra"]
+
+    def test_parallel_relationships_are_distinct_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'})-[r:ALLIES_WITH]->(b) RETURN count(*) AS total"
+        )
+        assert self.values(result) == [(2,)]
+
+    def test_diamond_produces_one_row_per_route(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Kevin Flynn'})-[]->(b)"
+            "-[]->(c:Program {designation: 'Clu'}) "
+            "RETURN b.designation ORDER BY b.designation"
+        )
+        assert self.designations(result) == ["Quorra", "Quorra", "Tron"]
+
+    def test_cycle_is_matched(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Kevin Flynn'})-[]->(b)"
+            "-[:ALLIES_WITH]->(c)-[:TRUSTS]->(a) RETURN b.designation "
+            "ORDER BY b.designation"
+        )
+        assert self.designations(result) == ["Quorra", "Quorra", "Tron"]
+
+    def test_self_loop(self, graph: Graph) -> None:
+        directed = graph.query(
+            "MATCH (a)-[r:OBSERVES]->(a) RETURN a.designation ORDER BY a.designation"
+        )
+        undirected = graph.query(
+            "MATCH (a)-[r:OBSERVES]-(b) RETURN a.designation AS a, b.designation AS b "
+            "ORDER BY a.designation"
+        )
+        assert self.designations(directed) == ["Clu", "Rinzler"]
+        assert self.values(undirected) == [("Clu", "Clu"), ("Rinzler", "Rinzler")]
+
+    def test_repeated_node_variable(self, graph: Graph) -> None:
+        result = graph.query("MATCH (a)-[r]->(a) RETURN a.designation ORDER BY a.designation")
+        assert self.designations(result) == ["Clu", "Rinzler"]
+
+    def test_repeated_relationship_variable(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a)-[r:OBSERVES]->(b)-[r]->(c) "
+            "RETURN a.designation AS a, b.designation AS b, c.designation AS c "
+            "ORDER BY a.designation"
+        )
+        assert self.values(result) == [("Clu", "Clu", "Clu"), ("Rinzler", "Rinzler", "Rinzler")]
+
+    def test_path_projection(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH p = (a:Program {designation: 'Kevin Flynn'})-[:TRUSTS]->(b) RETURN p"
+        )
+        path = result.rows[0]["p"]
+        assert isinstance(path, Path)
+        assert [node["designation"] for node in path.nodes] == ["Kevin Flynn", "Tron"]
+        assert path.length == 1
+
+    def test_incoming_path_order(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH p = (q:Program {designation: 'Quorra'})<-[:ALLIES_WITH]-"
+            "(k:Program {designation: 'Kevin Flynn'}) RETURN p"
+        )
+        path = result.rows[0]["p"]
+        assert isinstance(path, Path)
+        assert [node["designation"] for node in path.nodes] == ["Quorra", "Kevin Flynn"]
+
+    def test_single_node_path(self, graph: Graph) -> None:
+        result = graph.query("MATCH p = (n:Program {designation: 'Tron'}) RETURN p")
+        path = result.rows[0]["p"]
+        assert isinstance(path, Path)
+        assert path.length == 0
+        assert path.start["designation"] == "Tron"
+
+    def test_entity_projection(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Kevin Flynn'})-[r:TRUSTS]->(b) RETURN a, r, b"
+        )
+        row = result.rows[0]
+        node = row["a"]
+        relationship = row["r"]
+        target = row["b"]
+        assert isinstance(node, Node)
+        assert isinstance(relationship, Relationship)
+        assert isinstance(target, Node)
+        assert node.id > 0
+        assert relationship.rel_type == "TRUSTS"
+        assert target["designation"] == "Tron"
+
+    def test_scalar_functions(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (q:Program:ISO {designation: 'Quorra'}) RETURN "
+            "id(q) AS id, labels(q) AS labels, properties(q).designation AS designation, "
+            "keys(q) AS keys, size(q.tags) AS size, coalesce(q.missing, 'fallback') AS fallback, "
+            "toInteger('36') AS i, toFloat('36.5') AS f, toString(37) AS s, "
+            "lower(q.designation) AS lower, upper(q.designation) AS upper, "
+            "trim('  Quorra  ') AS trimmed, abs(-36) AS absolute, "
+            "concat('Quorra', ' Flynn') AS joined"
+        )
+        row = result.rows[0]
+        identifier = row["id"]
+        assert isinstance(identifier, int)
+        assert identifier > 0
+        assert row["labels"] == ["ISO", "Program"]
+        assert row["designation"] == "Quorra"
+        assert row["keys"] == ["active", "cycles", "designation", "tags"]
+        assert row["size"] == 2
+        assert row["fallback"] == "fallback"
+        assert row["i"] == 36
+        assert row["f"] == 36.5
+        assert row["s"] == "37"
+        assert row["lower"] == "quorra"
+        assert row["upper"] == "QUORRA"
+        assert row["trimmed"] == "Quorra"
+        assert row["absolute"] == 36
+        assert row["joined"] == "Quorra Flynn"
+
+    def test_relationship_metadata_functions(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Kevin Flynn'})-[r:TRUSTS]->(b) "
+            "RETURN type(r) AS kind, startNode(r).designation AS start, "
+            "endNode(r).designation AS end"
+        )
+        assert self.values(result) == [("TRUSTS", "Kevin Flynn", "Tron")]
+
+    def test_arithmetic_and_division(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Kevin Flynn'}) RETURN 6 / 2 AS quotient, "
+            "2 + 3.5 AS total, 7 % 4 AS remainder"
+        )
+        assert self.values(result) == [(3.0, 5.5, 3)]
+
+    def test_division_by_zero_and_overflow_are_execution_errors(self, graph: Graph) -> None:
+        with pytest.raises(QueryExecutionError):
+            graph.query("MATCH (n:Program {designation: 'Kevin Flynn'}) RETURN 1 / 0")
+        with pytest.raises(QueryExecutionError):
+            graph.query(
+                "MATCH (n:Program {designation: 'Kevin Flynn'}) RETURN 9223372036854775807 + 1"
+            )
+
+
+class TestAggregationAndOrdering(_QueryGraph):
+    """Verify grouping, aggregates, ordering, and pagination."""
+
+    def test_count_rows_and_values(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Program) RETURN count(*) AS rows, count(n.cycles) AS cycles")
+        assert self.values(result) == [(6, 4)]
+
+    def test_numeric_aggregates(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) RETURN sum(n.cycles) AS total, avg(n.cycles) AS average, "
+            "min(n.cycles) AS low, max(n.cycles) AS high"
+        )
+        assert self.values(result) == [(149.0, 37.25, 36, 40.0)]
+
+    def test_collect_and_distinct_aggregates(self, graph: Graph) -> None:
+        collected = graph.query("MATCH (n:Program) RETURN collect(n.designation) AS names")
+        distinct = graph.query(
+            "MATCH (n:Program) RETURN count(DISTINCT n.cycles) AS cycles, "
+            "collect(DISTINCT n.cycles) AS values"
+        )
+        names = collected.rows[0]["names"]
+        assert isinstance(names, list)
+        string_names = typing.cast(list[str], names)
+        assert sorted(string_names) == [
+            "Clu",
+            "Kevin Flynn",
+            "Quorra",
+            "Rinzler",
+            "Sam Flynn",
+            "Tron",
+        ]
+        assert distinct.rows[0]["cycles"] == 3
+        values = distinct.rows[0]["values"]
+        assert isinstance(values, list)
+        numeric_values = typing.cast(list[int | float], values)
+        assert sorted(numeric_values) == [36, 37, 40]
+
+    def test_grouped_aggregation(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n) RETURN labels(n) AS labels, count(*) AS total ORDER BY labels"
+        )
+        assert self.values(result) == [
+            (["Company"], 1),
+            (["Grid Node"], 1),
+            (["ISO", "Program"], 1),
+            (["Program"], 5),
+            (["System"], 1),
+        ]
+
+    def test_aggregate_inside_scalar_function(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Program) RETURN abs(sum(n.cycles)) AS total")
+        assert self.values(result) == [(149.0,)]
+
+    def test_empty_aggregate_input(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Missing) RETURN count(*) AS rows, collect(n.designation) AS names, "
+            "sum(n.cycles) AS total, avg(n.cycles) AS average, "
+            "min(n.cycles) AS low, max(n.cycles) AS high"
+        )
+        assert self.values(result) == [(0, [], 0, None, None, None)]
+
+    def test_empty_grouped_input(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Missing) RETURN labels(n) AS labels, count(*) AS total")
+        assert result.rows == ()
+
+    def test_order_ascending_and_descending(self, graph: Graph) -> None:
+        ascending = graph.query("MATCH (n:Program) RETURN n.designation ORDER BY n.designation ASC")
+        descending = graph.query(
+            "MATCH (n:Program) RETURN n.designation ORDER BY n.designation DESC"
+        )
+        assert [row["n.designation"] for row in ascending] == [
+            "Clu",
+            "Kevin Flynn",
+            "Quorra",
+            "Rinzler",
+            "Sam Flynn",
+            "Tron",
+        ]
+        assert [row["n.designation"] for row in descending] == [
+            "Tron",
+            "Sam Flynn",
+            "Rinzler",
+            "Quorra",
+            "Kevin Flynn",
+            "Clu",
+        ]
+
+    def test_null_ordering(self, graph: Graph) -> None:
+        ascending = graph.query(
+            "MATCH (n:Program) RETURN n.designation ORDER BY n.cycles ASC, n.designation ASC"
+        )
+        descending = graph.query(
+            "MATCH (n:Program) RETURN n.designation ORDER BY n.cycles DESC, n.designation ASC"
+        )
+        assert [row["n.designation"] for row in ascending] == [
+            "Kevin Flynn",
+            "Rinzler",
+            "Quorra",
+            "Tron",
+            "Clu",
+            "Sam Flynn",
+        ]
+        assert [row["n.designation"] for row in descending] == [
+            "Clu",
+            "Sam Flynn",
+            "Tron",
+            "Quorra",
+            "Kevin Flynn",
+            "Rinzler",
+        ]
+
+    def test_order_by_alias_and_unprojected_expression(self, graph: Graph) -> None:
+        alias = graph.query("MATCH (n:Program) RETURN n.designation AS name ORDER BY name LIMIT 2")
+        unprojected = graph.query(
+            "MATCH (n:Program) WHERE n.cycles IS NOT NULL "
+            "RETURN n.designation AS name ORDER BY n.cycles DESC LIMIT 2"
+        )
+        assert [row["name"] for row in alias] == ["Clu", "Kevin Flynn"]
+        assert [row["name"] for row in unprojected] == ["Tron", "Quorra"]
+
+    def test_order_by_aggregate_alias(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n) RETURN labels(n) AS labels, count(*) AS total "
+            "ORDER BY total DESC, labels ASC"
+        )
+        assert result.rows[0]["labels"] == ["Program"]
+        assert result.rows[0]["total"] == 5
+
+    def test_pagination(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) RETURN n.designation ORDER BY n.designation SKIP 2 LIMIT 2"
+        )
+        assert [row["n.designation"] for row in result] == ["Quorra", "Rinzler"]
+
+    def test_parameterized_pagination(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) RETURN n.designation ORDER BY n.designation SKIP $skip LIMIT $limit",
+            {"skip": 1, "limit": 2},
+        )
+        assert [row["n.designation"] for row in result] == ["Kevin Flynn", "Quorra"]
+
+    @pytest.mark.parametrize("value", [-1, 1.5, "one", True])
+    def test_invalid_parameterized_pagination(
+        self,
+        graph: Graph,
+        value: QueryValue,
+    ) -> None:
+        with pytest.raises(QuerySemanticError):
+            graph.query(
+                "MATCH (n) RETURN n LIMIT $limit",
+                {"limit": value},
+            )
+
+    def test_distinct(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) RETURN DISTINCT labels(n) AS labels ORDER BY labels"
+        )
+        assert self.values(result) == [(["ISO", "Program"],), (["Program"],)]
+        duplicates = graph.query("MATCH (n:Program) RETURN labels(n) AS labels")
+        assert len(duplicates) == 6
+
+    def test_order_by_unorderable_value(self, graph: Graph) -> None:
+        with pytest.raises(QueryExecutionError):
+            graph.query("MATCH (n:Program) RETURN n ORDER BY n")
+
+
+class TestResultsAndSnapshots(_QueryGraph):
+    """Verify the result model and snapshot consistency."""
+
+    def test_row_mapping_behavior(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Tron'}) RETURN n.designation AS name, n.cycles"
+        )
+        row = result.rows[0]
+        assert result.columns == ("name", "n.cycles")
+        assert len(result) == 1
+        assert len(row) == 2
+        assert list(row) == ["name", "n.cycles"]
+        assert row["name"] == "Tron"
+        assert row["n.cycles"] == 40
+        assert dict(row) == {"name": "Tron", "n.cycles": 40}
+        assert set(row.keys()) == {"name", "n.cycles"}
+        assert list(row.values()) == ["Tron", 40]
+        with pytest.raises(KeyError):
+            row["missing"]
+
+    def test_row_is_immutable_and_validates_arity(self) -> None:
+        row = Row(columns=("a",), row_values=(1,))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            row.columns = ("b",)  # type: ignore[misc]
+        with pytest.raises(ValueError, match="one value per column"):
+            Row(columns=("a", "b"), row_values=(1,))
+
+    def test_empty_result(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Missing) RETURN n")
+        assert isinstance(result, QueryResult)
+        assert result.columns == ("n",)
+        assert result.rows == ()
+        assert len(result) == 0
+        assert list(result) == []
+
+    def test_result_is_unchanged_by_a_later_write(self, graph: Graph) -> None:
+        result = graph.query("MATCH (n:Program {designation: 'Kevin Flynn'}) RETURN n")
+        node = result.rows[0]["n"]
+        assert isinstance(node, Node)
+        graph.set_properties(node, cycles=99)
+        snapshot = result.rows[0]["n"]
+        assert isinstance(snapshot, Node)
+        assert snapshot["cycles"] == 36
+        assert (
+            graph.query("MATCH (n:Program {designation: 'Kevin Flynn'}) RETURN n.cycles").rows[0][
+                "n.cycles"
+            ]
+            == 99
+        )
+
+    def test_read_transaction_is_closed(self, graph: Graph) -> None:
+        graph.query("MATCH (n) RETURN n")
+        assert not graph._database.connection.in_transaction
+
+    def test_failed_query_rolls_back(self, graph: Graph) -> None:
+        with pytest.raises(QueryExecutionError):
+            graph.query("MATCH (n) RETURN 1 / 0")
+        assert not graph._database.connection.in_transaction
+        graph.add_node("Program", designation="Yori")
+        assert not graph._database.connection.in_transaction
+
+    def test_parameter_injection_is_data(self, graph: Graph) -> None:
+        graph.add_node("Program", designation="Quorra' OR 1=1 --")
+        result = graph.query(
+            "MATCH (n:Program) WHERE n.designation = $name RETURN n.designation",
+            {"name": "Quorra' OR 1=1 --"},
+        )
+        assert result.rows[0]["n.designation"] == "Quorra' OR 1=1 --"
+        assert len(graph.query("MATCH (n:Program) RETURN n")) == 7
+
+
+class TestTransactions(_QueryGraph):
+    """Verify transaction visibility and graph-level guards."""
+
+    def test_transaction_query_sees_uncommitted_writes(self, graph: Graph) -> None:
+        with graph.transaction() as transaction:
+            transaction.add_node("ISO", designation="Quorra")
+            result = transaction.query("MATCH (n:ISO) RETURN n.designation")
+            assert result.rows[0]["n.designation"] == "Quorra"
+
+    def test_graph_query_is_blocked_during_transaction(self, graph: Graph) -> None:
+        with graph.transaction() as transaction:
+            with pytest.raises(TransactionError):
+                graph.query("MATCH (n) RETURN n")
+            prepared = graph.prepare("MATCH (n) RETURN n")
+            with pytest.raises(TransactionError):
+                prepared.execute()
+            transaction.add_node("Program", designation="Yori")
+        assert graph.query("MATCH (n {designation: 'Yori'}) RETURN n").rows
+
+    def test_transaction_query_requires_active_transaction(self, graph: Graph) -> None:
+        transaction = graph.transaction()
+        with pytest.raises(TransactionError):
+            transaction.query("MATCH (n) RETURN n")
+
+    def test_transaction_rollback_hides_writes(self, graph: Graph) -> None:
+        try:
+            with graph.transaction() as transaction:
+                transaction.add_node("Program", designation="Yori")
+                raise RuntimeError("rollback")
+        except RuntimeError:
+            pass
+        assert graph.query("MATCH (n {designation: 'Yori'}) RETURN n").rows == ()
