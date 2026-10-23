@@ -4,9 +4,11 @@
 """Domain model for the embedded property graph."""
 
 import dataclasses
+import typing
 from collections.abc import Iterator, Mapping
 from enum import Enum
 from types import MappingProxyType
+from typing import ClassVar
 
 type Scalar = bool | int | float | str
 """A scalar value accepted by the property store."""
@@ -50,10 +52,20 @@ class UnsupportedSqliteError(PygrafitoError):
 class _PropertyMapping(Mapping[str, Value]):
     """Read-only mapping behavior shared by element snapshots."""
 
-    __slots__ = ()
+    __slots__: ClassVar[tuple[str, ...]] = ()
 
-    properties: Mapping[str, Value]
+    @property
+    def properties(self) -> Mapping[str, Value]:
+        """Return the immutable property mapping.
 
+        Returns
+        -------
+        Mapping[str, Value]
+            Properties exposed by the concrete snapshot.
+        """
+        raise NotImplementedError
+
+    @typing.override
     def __getitem__(self, key: str) -> Value:
         """Return one property value.
 
@@ -69,6 +81,7 @@ class _PropertyMapping(Mapping[str, Value]):
         """
         return self.properties[key]
 
+    @typing.override
     def __iter__(self) -> Iterator[str]:
         """Iterate over property keys.
 
@@ -79,6 +92,7 @@ class _PropertyMapping(Mapping[str, Value]):
         """
         return iter(self.properties)
 
+    @typing.override
     def __len__(self) -> int:
         """Return the number of properties.
 

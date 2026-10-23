@@ -4,6 +4,7 @@
 """Tests for relationship-unique path enumeration."""
 
 import itertools
+import typing
 from collections.abc import Iterable, Iterator
 
 import pytest
@@ -206,6 +207,7 @@ class _CountingSnapshot(AdjacencySnapshot):
         super().__init__(nodes, relationships)
         self.edge_calls = 0
 
+    @typing.override
     def edges(
         self,
         node_id: int,

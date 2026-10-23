@@ -31,12 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lazy, depth-bounded enumeration of relationship-unique trails with optional
   result limits.
 - Snapshot-consistent traversal results unaffected by later writes.
-- Python 3.14 packaging with strict type hints, numpydoc docstrings, Ruff, mypy
-  strict, pytest, and a coverage gate.
+- Python 3.14 packaging with strict type hints, numpydoc docstrings, Ruff,
+  Pyrefly strict, pytest, and a coverage gate.
 - README documentation for persistence, CRUD, transactions, deletion, and
   traversal.
 
 ### Changed
 
 - Raised the minimum Python version from 3.8 to 3.14.
-- Configured Hatch `check` and `test` as the project quality gates.
+- Configured Hatch `check` and `test` as the project quality gates, using Ruff
+  and Pyrefly.

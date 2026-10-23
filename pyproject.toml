@@ -38,16 +38,6 @@ extra-dependencies = [
 [[tool.hatch.envs.hatch-test.matrix]]
 python = ["3.14"]
 
-[tool.hatch.envs.hatch-check-types]
-dependencies = [
-  "mypy>=1.11",
-  "pytest>=9.0",
-]
-config-path = "pyproject.toml"
-
-[tool.hatch.envs.hatch-check-types.scripts]
-check = "mypy{env:HATCH_CHECK_TYPES_ARGS:} {args:src/pygrafito tests}"
-
 [tool.ruff]
 target-version = "py314"
 line-length = 100
@@ -91,11 +81,12 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
-[tool.mypy]
-python_version = "3.14"
-strict = true
-files = ["src/pygrafito", "tests"]
-show_error_codes = true
+[tool.pyrefly]
+preset = "strict"
+project-includes = ["src/pygrafito", "tests"]
+search-path = ["src"]
+python-version = "3.14"
+disable-search-path-heuristics = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
