@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for traversal validation and snapshot consistency."""
@@ -46,9 +46,9 @@ class _GraphTestCase:
         dict[str, Node]
             Nodes keyed by name.
         """
-        nodes = {name: graph.add_node(name) for name in ("start", "middle", "end")}
-        graph.add_relationship(nodes["start"], "NEXT", nodes["middle"])
-        graph.add_relationship(nodes["middle"], "NEXT", nodes["end"])
+        nodes = {name: graph.add_node(name) for name in ("Grid", "Arena", "Portal")}
+        graph.add_relationship(nodes["Grid"], "GRID_LINK", nodes["Arena"])
+        graph.add_relationship(nodes["Arena"], "GRID_LINK", nodes["Portal"])
         return nodes
 
 
@@ -68,24 +68,24 @@ class TestDepthValidation(_GraphTestCase):
     def test_paths_negative_min_depth(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
-            graph.paths(nodes["start"], nodes["end"], min_depth=-1, max_depth=2)
+            graph.paths(nodes["Grid"], nodes["Portal"], min_depth=-1, max_depth=2)
 
     def test_paths_negative_max_depth(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
-            graph.paths(nodes["start"], nodes["end"], max_depth=-1)
+            graph.paths(nodes["Grid"], nodes["Portal"], max_depth=-1)
 
     def test_paths_inverted_depth_range(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
-            graph.paths(nodes["start"], nodes["end"], min_depth=3, max_depth=2)
+            graph.paths(nodes["Grid"], nodes["Portal"], min_depth=3, max_depth=2)
 
     def test_paths_invalid_direction(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
             graph.paths(
-                nodes["start"],
-                nodes["end"],
+                nodes["Grid"],
+                nodes["Portal"],
                 max_depth=2,
                 direction=typing.cast(Direction, "both"),
             )
@@ -93,14 +93,14 @@ class TestDepthValidation(_GraphTestCase):
     def test_paths_invalid_type_filter(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
-            graph.paths(nodes["start"], nodes["end"], max_depth=2, types=[""])
+            graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2, types=[""])
 
     def test_paths_non_integer_depth(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
             graph.paths(
-                nodes["start"],
-                nodes["end"],
+                nodes["Grid"],
+                nodes["Portal"],
                 max_depth=typing.cast(int, "2"),
             )
 
@@ -108,8 +108,8 @@ class TestDepthValidation(_GraphTestCase):
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
             graph.paths(
-                nodes["start"],
-                nodes["end"],
+                nodes["Grid"],
+                nodes["Portal"],
                 max_depth=2,
                 types=[typing.cast(str, 1)],
             )
@@ -147,22 +147,22 @@ class TestTraversalSnapshot(_GraphTestCase):
     """Verify that writes after traversal starts do not alter results."""
 
     def test_traverse_ignores_new_relationship(self, graph: Graph) -> None:
-        start = graph.add_node("start")
-        middle = graph.add_node("middle")
-        graph.add_relationship(start, "NEXT", middle)
+        start = graph.add_node("Grid")
+        middle = graph.add_node("Arena")
+        graph.add_relationship(start, "GRID_LINK", middle)
         iterator = graph.traverse(start, max_depth=5)
         first = next(iterator)
         assert first.node == middle
-        later = graph.add_node("later")
-        graph.add_relationship(middle, "NEXT", later)
+        later = graph.add_node("Outlands")
+        graph.add_relationship(middle, "GRID_LINK", later)
         remaining = list(iterator)
         assert later.id not in {step.node.id for step in remaining}
         assert remaining == []
 
     def test_traverse_ignores_deleted_node(self, graph: Graph) -> None:
-        start = graph.add_node("start")
-        target = graph.add_node("target")
-        graph.add_relationship(start, "NEXT", target)
+        start = graph.add_node("Grid")
+        target = graph.add_node("Portal")
+        graph.add_relationship(start, "GRID_LINK", target)
         iterator = graph.traverse(start, max_depth=2)
         graph.delete(target, detach=True)
         steps = list(iterator)
@@ -172,34 +172,34 @@ class TestTraversalSnapshot(_GraphTestCase):
         self,
         graph: Graph,
     ) -> None:
-        start = graph.add_node("start")
-        target = graph.add_node("target", name="before")
-        graph.add_relationship(start, "NEXT", target)
+        start = graph.add_node("Grid")
+        target = graph.add_node("Portal", designation="Tron")
+        graph.add_relationship(start, "GRID_LINK", target)
         iterator = graph.traverse(start, max_depth=2)
-        graph.set_properties(target, name="after")
-        graph.add_labels(target, "Changed")
+        graph.set_properties(target, designation="Rinzler")
+        graph.add_labels(target, "ISO")
         step = next(iterator)
-        assert step.node["name"] == "before"
-        assert step.node.labels == frozenset({"target"})
+        assert step.node["designation"] == "Tron"
+        assert step.node.labels == frozenset({"Portal"})
 
     def test_paths_ignore_new_route(self, graph: Graph) -> None:
-        start = graph.add_node("start")
-        end = graph.add_node("end")
-        graph.add_relationship(start, "NEXT", end)
+        start = graph.add_node("Grid")
+        end = graph.add_node("Portal")
+        graph.add_relationship(start, "GRID_LINK", end)
         iterator = graph.paths(start, end, max_depth=3)
-        middle = graph.add_node("middle")
-        graph.add_relationship(start, "NEXT", middle)
-        graph.add_relationship(middle, "NEXT", end)
+        middle = graph.add_node("Arena")
+        graph.add_relationship(start, "GRID_LINK", middle)
+        graph.add_relationship(middle, "GRID_LINK", end)
         paths = list(iterator)
         assert len(paths) == 1
         assert paths[0].nodes == (start, end)
 
     def test_paths_ignore_deleted_relationship(self, graph: Graph) -> None:
-        start = graph.add_node("start")
-        middle = graph.add_node("middle")
-        end = graph.add_node("end")
-        graph.add_relationship(start, "NEXT", middle)
-        relationship = graph.add_relationship(middle, "NEXT", end)
+        start = graph.add_node("Grid")
+        middle = graph.add_node("Arena")
+        end = graph.add_node("Portal")
+        graph.add_relationship(start, "GRID_LINK", middle)
+        relationship = graph.add_relationship(middle, "GRID_LINK", end)
         iterator = graph.paths(start, end, max_depth=3)
         graph.delete(relationship)
         paths = list(iterator)
@@ -213,9 +213,9 @@ class TestTraversalSnapshot(_GraphTestCase):
         start = graph.add_node()
         middle = graph.add_node()
         later = graph.add_node()
-        graph.add_relationship(start, "NEXT", middle)
+        graph.add_relationship(start, "GRID_LINK", middle)
         first_steps = list(graph.traverse(start, max_depth=5))
-        graph.add_relationship(middle, "NEXT", later)
+        graph.add_relationship(middle, "GRID_LINK", later)
         second_steps = list(graph.traverse(start, max_depth=5))
         assert later.id not in {step.node.id for step in first_steps}
         assert later.id in {step.node.id for step in second_steps}

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for distinct reachable-node traversal."""
@@ -46,11 +46,11 @@ class _GraphTestCase:
         dict[str, Node]
             Nodes keyed by name.
         """
-        nodes = {name: graph.add_node(name) for name in ("start", "left", "right", "end")}
-        graph.add_relationship(nodes["start"], "ROUTE", nodes["left"])
-        graph.add_relationship(nodes["start"], "ROUTE", nodes["right"])
-        graph.add_relationship(nodes["left"], "ROUTE", nodes["end"])
-        graph.add_relationship(nodes["right"], "ROUTE", nodes["end"])
+        nodes = {name: graph.add_node(name) for name in ("Grid", "Safehouse", "Outlands", "Portal")}
+        graph.add_relationship(nodes["Grid"], "GRID_LINK", nodes["Safehouse"])
+        graph.add_relationship(nodes["Grid"], "GRID_LINK", nodes["Outlands"])
+        graph.add_relationship(nodes["Safehouse"], "GRID_LINK", nodes["Portal"])
+        graph.add_relationship(nodes["Outlands"], "GRID_LINK", nodes["Portal"])
         return nodes
 
 
@@ -62,46 +62,46 @@ class TestDiamond(_GraphTestCase):
         graph: Graph,
     ) -> None:
         nodes = self.build_diamond(graph)
-        steps = list(graph.traverse(nodes["start"], max_depth=2))
+        steps = list(graph.traverse(nodes["Grid"], max_depth=2))
         by_id = {step.node.id: step.depth for step in steps}
         assert by_id == {
-            nodes["left"].id: 1,
-            nodes["right"].id: 1,
-            nodes["end"].id: 2,
+            nodes["Safehouse"].id: 1,
+            nodes["Outlands"].id: 1,
+            nodes["Portal"].id: 2,
         }
-        assert [step.node.id for step in steps].count(nodes["end"].id) == 1
+        assert [step.node.id for step in steps].count(nodes["Portal"].id) == 1
 
     def test_depth_bound_excludes_far_nodes(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        steps = list(graph.traverse(nodes["start"], max_depth=1))
+        steps = list(graph.traverse(nodes["Grid"], max_depth=1))
         assert {step.node.id for step in steps} == {
-            nodes["left"].id,
-            nodes["right"].id,
+            nodes["Safehouse"].id,
+            nodes["Outlands"].id,
         }
 
     def test_zero_depth_yields_nothing(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        assert list(graph.traverse(nodes["start"], max_depth=0)) == []
+        assert list(graph.traverse(nodes["Grid"], max_depth=0)) == []
 
 
 class TestCycle(_GraphTestCase):
     """Verify that cycles do not duplicate nodes."""
 
     def test_cycle_yields_each_node_once(self, graph: Graph) -> None:
-        first = graph.add_node("A")
-        second = graph.add_node("B")
-        third = graph.add_node("C")
-        graph.add_relationship(first, "NEXT", second)
-        graph.add_relationship(second, "NEXT", third)
-        graph.add_relationship(third, "NEXT", first)
-        graph.add_relationship(third, "NEXT", second)
+        first = graph.add_node("Tron")
+        second = graph.add_node("Clu")
+        third = graph.add_node("Rinzler")
+        graph.add_relationship(first, "GRID_LINK", second)
+        graph.add_relationship(second, "GRID_LINK", third)
+        graph.add_relationship(third, "GRID_LINK", first)
+        graph.add_relationship(third, "GRID_LINK", second)
         steps = list(graph.traverse(first, max_depth=10))
         assert {step.node.id for step in steps} == {second.id, third.id}
         assert len(steps) == 2
 
     def test_self_loop_does_not_yield_start(self, graph: Graph) -> None:
         node = graph.add_node()
-        graph.add_relationship(node, "SELF", node)
+        graph.add_relationship(node, "RECURSES", node)
         assert list(graph.traverse(node, max_depth=5)) == []
 
     def test_parallel_relationships_yield_target_once(
@@ -110,8 +110,8 @@ class TestCycle(_GraphTestCase):
     ) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "KNOWS", second)
-        graph.add_relationship(first, "KNOWS", second)
+        graph.add_relationship(first, "ALLIES_WITH", second)
+        graph.add_relationship(first, "ALLIES_WITH", second)
         steps = list(graph.traverse(first, max_depth=3))
         assert [step.node.id for step in steps] == [second.id]
 
@@ -124,9 +124,9 @@ class TestDepthChain(_GraphTestCase):
         second = graph.add_node()
         third = graph.add_node()
         fourth = graph.add_node()
-        graph.add_relationship(first, "NEXT", second)
-        graph.add_relationship(second, "NEXT", third)
-        graph.add_relationship(third, "NEXT", fourth)
+        graph.add_relationship(first, "GRID_LINK", second)
+        graph.add_relationship(second, "GRID_LINK", third)
+        graph.add_relationship(third, "GRID_LINK", fourth)
         steps = list(graph.traverse(first, max_depth=2))
         assert {step.node.id for step in steps} == {second.id, third.id}
         assert {step.depth for step in steps} == {1, 2}
@@ -138,7 +138,7 @@ class TestDirection(_GraphTestCase):
     def test_directions(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "KNOWS", second)
+        graph.add_relationship(first, "ALLIES_WITH", second)
         outgoing = list(graph.traverse(second, max_depth=2))
         incoming = list(graph.traverse(second, max_depth=2, direction=Direction.INCOMING))
         both = list(graph.traverse(second, max_depth=2, direction=Direction.BOTH))
@@ -163,17 +163,17 @@ class TestTypeFilter(_GraphTestCase):
         start = graph.add_node()
         knows = graph.add_node()
         likes = graph.add_node()
-        graph.add_relationship(start, "KNOWS", knows)
-        graph.add_relationship(start, "LIKES", likes)
-        filtered = list(graph.traverse(start, max_depth=1, types=["KNOWS"]))
+        graph.add_relationship(start, "ALLIES_WITH", knows)
+        graph.add_relationship(start, "TRUSTS", likes)
+        filtered = list(graph.traverse(start, max_depth=1, types=["ALLIES_WITH"]))
         assert [step.node.id for step in filtered] == [knows.id]
 
     def test_empty_type_set_means_all_types(self, graph: Graph) -> None:
         start = graph.add_node()
         knows = graph.add_node()
         likes = graph.add_node()
-        graph.add_relationship(start, "KNOWS", knows)
-        graph.add_relationship(start, "LIKES", likes)
+        graph.add_relationship(start, "ALLIES_WITH", knows)
+        graph.add_relationship(start, "TRUSTS", likes)
         steps = list(graph.traverse(start, max_depth=1, types=[]))
         assert {step.node.id for step in steps} == {knows.id, likes.id}
 
@@ -189,7 +189,7 @@ class TestValidation(_GraphTestCase):
     def test_start_is_excluded(self, graph: Graph) -> None:
         start = graph.add_node()
         target = graph.add_node()
-        graph.add_relationship(start, "NEXT", target)
+        graph.add_relationship(start, "GRID_LINK", target)
         steps = list(graph.traverse(start, max_depth=1))
         assert start.id not in {step.node.id for step in steps}
 
@@ -212,6 +212,6 @@ class TestValidation(_GraphTestCase):
     def test_integer_start_accepted(self, graph: Graph) -> None:
         start = graph.add_node()
         target = graph.add_node()
-        graph.add_relationship(start, "NEXT", target)
+        graph.add_relationship(start, "GRID_LINK", target)
         steps = list(graph.traverse(start.id, max_depth=1))
         assert [step.node.id for step in steps] == [target.id]

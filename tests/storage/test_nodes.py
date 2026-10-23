@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for node persistence, labels, properties, and lookups."""
@@ -41,10 +41,10 @@ class TestCreateAndGet(_NodeTestCase):
     """Verify node creation and reading."""
 
     def test_multiple_labels(self, repository: NodeRepository) -> None:
-        node = repository.create(("Person", "Employee"), {"name": "Ada"})
+        node = repository.create(("Program", "ISO"), {"designation": "Kevin Flynn"})
         assert node.id > 0
-        assert node.labels == frozenset({"Person", "Employee"})
-        assert node["name"] == "Ada"
+        assert node.labels == frozenset({"Program", "ISO"})
+        assert node["designation"] == "Kevin Flynn"
 
     def test_defaults_are_empty(self, repository: NodeRepository) -> None:
         node = repository.create()
@@ -53,8 +53,8 @@ class TestCreateAndGet(_NodeTestCase):
         assert repository.get(node.id) == node
 
     def test_duplicate_labels_are_collapsed(self, repository: NodeRepository) -> None:
-        node = repository.create(("Person", "Person"))
-        assert node.labels == frozenset({"Person"})
+        node = repository.create(("Program", "Program"))
+        assert node.labels == frozenset({"Program"})
 
     def test_ids_are_distinct(self, repository: NodeRepository) -> None:
         first = repository.create()
@@ -75,24 +75,24 @@ class TestLabels(_NodeTestCase):
     """Verify label updates."""
 
     def test_add_and_remove_labels(self, repository: NodeRepository) -> None:
-        node = repository.create(("Person", "Employee"))
-        node = repository.add_labels(node.id, ("Manager",))
-        assert node.labels == frozenset({"Person", "Employee", "Manager"})
-        node = repository.remove_labels(node.id, ("Employee",))
-        assert node.labels == frozenset({"Person", "Manager"})
+        node = repository.create(("Program", "ISO"))
+        node = repository.add_labels(node.id, ("SystemMonitor",))
+        assert node.labels == frozenset({"Program", "ISO", "SystemMonitor"})
+        node = repository.remove_labels(node.id, ("ISO",))
+        assert node.labels == frozenset({"Program", "SystemMonitor"})
         node = repository.remove_labels(node.id, ("Missing",))
-        assert node.labels == frozenset({"Person", "Manager"})
+        assert node.labels == frozenset({"Program", "SystemMonitor"})
 
     def test_add_labels_is_idempotent(self, repository: NodeRepository) -> None:
-        node = repository.create(("Person",))
-        node = repository.add_labels(node.id, ("Person",))
-        assert node.labels == frozenset({"Person"})
+        node = repository.create(("Program",))
+        node = repository.add_labels(node.id, ("Program",))
+        assert node.labels == frozenset({"Program"})
 
     def test_missing_node_raises(self, repository: NodeRepository) -> None:
         with pytest.raises(NotFoundError):
-            repository.add_labels(999, ("Person",))
+            repository.add_labels(999, ("Program",))
         with pytest.raises(NotFoundError):
-            repository.remove_labels(999, ("Person",))
+            repository.remove_labels(999, ("Program",))
 
     @pytest.mark.parametrize("label", ["", None, 3])
     def test_invalid_label_rejected(
@@ -108,13 +108,13 @@ class TestProperties(_NodeTestCase):
     """Verify property updates and snapshots."""
 
     def test_set_and_remove_properties(self, repository: NodeRepository) -> None:
-        node = repository.create(properties={"name": "Ada", "age": 36})
-        node = repository.set_properties(node.id, {"age": 37, "active": True})
-        assert dict(node) == {"name": "Ada", "age": 37, "active": True}
+        node = repository.create(properties={"designation": "Kevin Flynn", "cycles": 36})
+        node = repository.set_properties(node.id, {"cycles": 37, "active": True})
+        assert dict(node) == {"designation": "Kevin Flynn", "cycles": 37, "active": True}
         node = repository.set_properties(node.id, {"active": None})
-        assert dict(node) == {"name": "Ada", "age": 37}
-        node = repository.remove_properties(node.id, ("age", "missing"))
-        assert dict(node) == {"name": "Ada"}
+        assert dict(node) == {"designation": "Kevin Flynn", "cycles": 37}
+        node = repository.remove_properties(node.id, ("cycles", "missing"))
+        assert dict(node) == {"designation": "Kevin Flynn"}
 
     def test_arbitrary_property_keys(self, repository: NodeRepository) -> None:
         properties = {"a.b": 1, "a b": 2, "$.x": 3, 'a"b': 4}
@@ -122,26 +122,26 @@ class TestProperties(_NodeTestCase):
         assert dict(repository.get(node.id)) == properties
 
     def test_earlier_snapshot_is_unchanged(self, repository: NodeRepository) -> None:
-        node = repository.create(properties={"name": "Ada"})
-        repository.set_properties(node.id, {"name": "Grace"})
-        assert node["name"] == "Ada"
-        assert repository.get(node.id)["name"] == "Grace"
+        node = repository.create(properties={"designation": "Kevin Flynn"})
+        repository.set_properties(node.id, {"designation": "Quorra"})
+        assert node["designation"] == "Kevin Flynn"
+        assert repository.get(node.id)["designation"] == "Quorra"
 
     def test_snapshot_labels_are_unchanged(self, repository: NodeRepository) -> None:
-        node = repository.create(("Person",))
-        repository.add_labels(node.id, ("Employee",))
-        assert node.labels == frozenset({"Person"})
+        node = repository.create(("Program",))
+        repository.add_labels(node.id, ("ISO",))
+        assert node.labels == frozenset({"Program"})
 
     def test_missing_node_raises(self, repository: NodeRepository) -> None:
         with pytest.raises(NotFoundError):
-            repository.set_properties(999, {"name": "Ada"})
+            repository.set_properties(999, {"designation": "Kevin Flynn"})
         with pytest.raises(NotFoundError):
-            repository.remove_properties(999, ("name",))
+            repository.remove_properties(999, ("designation",))
 
     def test_null_removes_property(self, repository: NodeRepository) -> None:
-        node = repository.create(properties={"name": "Ada"})
-        node = repository.set_properties(node.id, {"name": None})
-        assert "name" not in node
+        node = repository.create(properties={"designation": "Kevin Flynn"})
+        node = repository.set_properties(node.id, {"designation": None})
+        assert "designation" not in node
         assert dict(repository.get(node.id)) == {}
 
     def test_invalid_value_rejected(self, repository: NodeRepository) -> None:
@@ -165,16 +165,16 @@ class TestFind(_NodeTestCase):
     """Verify label and property lookups."""
 
     def test_find_by_label_and_property(self, repository: NodeRepository) -> None:
-        ada = repository.create(("Person",), {"age": 36})
-        repository.create(("Person",), {"age": 30})
-        repository.create(("Robot",), {"age": 36})
-        found = list(repository.find(("Person",), {"age": 36}))
+        ada = repository.create(("Program",), {"cycles": 36})
+        repository.create(("Program",), {"cycles": 30})
+        repository.create(("SystemMonitor",), {"cycles": 36})
+        found = list(repository.find(("Program",), {"cycles": 36}))
         assert [node.id for node in found] == [ada.id]
 
     def test_multiple_labels_must_all_match(self, repository: NodeRepository) -> None:
-        both = repository.create(("Person", "Employee"))
-        repository.create(("Person",))
-        found = list(repository.find(("Person", "Employee")))
+        both = repository.create(("Program", "ISO"))
+        repository.create(("Program",))
+        found = list(repository.find(("Program", "ISO")))
         assert [node.id for node in found] == [both.id]
 
     def test_no_filters_return_all_nodes(self, repository: NodeRepository) -> None:

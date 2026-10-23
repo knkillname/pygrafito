@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for direct, refused, and detaching deletion."""
@@ -50,9 +50,9 @@ class TestRelationshipDeletion(_DeletionTestCase):
         repositories: Repositories,
     ) -> None:
         node_repository, relationship_repository = repositories
-        first = node_repository.create(("Person",))
-        second = node_repository.create(("Person",))
-        relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        first = node_repository.create(("Program",))
+        second = node_repository.create(("Program",))
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         relationship_repository.delete(relationship.id)
         assert not relationship_repository.exists(relationship.id)
         assert node_repository.get(first.id) == first
@@ -65,8 +65,8 @@ class TestRelationshipDeletion(_DeletionTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        first_relationship = relationship_repository.create(first.id, "KNOWS", second.id)
-        second_relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        first_relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
+        second_relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         relationship_repository.delete(first_relationship.id)
         remaining = list(relationship_repository.all())
         assert [item.id for item in remaining] == [second_relationship.id]
@@ -79,7 +79,7 @@ class TestNodeRefusal(_DeletionTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         with pytest.raises(ConnectedNodeError):
             node_repository.delete(first.id)
         assert node_repository.exists(first.id)
@@ -89,7 +89,7 @@ class TestNodeRefusal(_DeletionTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         with pytest.raises(ConnectedNodeError):
             node_repository.delete(second.id)
         assert node_repository.exists(second.id)
@@ -98,7 +98,7 @@ class TestNodeRefusal(_DeletionTestCase):
     def test_self_loop_refused(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
         node = node_repository.create()
-        relationship = relationship_repository.create(node.id, "KNOWS", node.id)
+        relationship = relationship_repository.create(node.id, "ALLIES_WITH", node.id)
         with pytest.raises(ConnectedNodeError):
             node_repository.delete(node.id)
         assert node_repository.exists(node.id)
@@ -115,7 +115,7 @@ class TestDetachDeletion(_DeletionTestCase):
 
     def test_isolated_node_deleted(self, repositories: Repositories) -> None:
         node_repository, _ = repositories
-        node = node_repository.create(("Person",), {"name": "Ada"})
+        node = node_repository.create(("Program",), {"designation": "Kevin Flynn"})
         node_repository.delete(node.id)
         assert not node_repository.exists(node.id)
 
@@ -130,16 +130,16 @@ class TestDetachDeletion(_DeletionTestCase):
         survivor = node_repository.create()
         outgoing_relationship = relationship_repository.create(
             center.id,
-            "KNOWS",
+            "ALLIES_WITH",
             outgoing.id,
         )
         incoming_relationship = relationship_repository.create(
             incoming.id,
-            "KNOWS",
+            "ALLIES_WITH",
             center.id,
         )
-        self_loop = relationship_repository.create(center.id, "KNOWS", center.id)
-        unrelated = relationship_repository.create(outgoing.id, "KNOWS", survivor.id)
+        self_loop = relationship_repository.create(center.id, "ALLIES_WITH", center.id)
+        unrelated = relationship_repository.create(outgoing.id, "ALLIES_WITH", survivor.id)
         node_repository.delete(center.id, detach=True)
         assert not node_repository.exists(center.id)
         assert not relationship_repository.exists(outgoing_relationship.id)
@@ -158,6 +158,6 @@ class TestDetachDeletion(_DeletionTestCase):
 
     def test_labels_removed_with_node(self, repositories: Repositories) -> None:
         node_repository, _ = repositories
-        node = node_repository.create(("Person", "Employee"))
+        node = node_repository.create(("Program", "ISO"))
         node_repository.delete(node.id)
-        assert list(node_repository.find(("Person",))) == []
+        assert list(node_repository.find(("Program",))) == []

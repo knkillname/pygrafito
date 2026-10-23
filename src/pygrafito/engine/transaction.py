@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Explicit write transactions."""
@@ -64,6 +64,9 @@ class Transaction:
             raise TransactionError(message)
         if self._active:
             message = "transaction is already active"
+            raise TransactionError(message)
+        if self._connection.in_transaction:
+            message = "a graph transaction is already active; use the active transaction"
             raise TransactionError(message)
         try:
             self._connection.execute("BEGIN IMMEDIATE")

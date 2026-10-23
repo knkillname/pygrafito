@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Cross-cutting tests for persistence, transactions, deletion, and traversal."""
@@ -31,7 +31,7 @@ class TestGraphLifecycle:
             Always, to trigger rollback.
         """
         with graph.transaction() as active:
-            active.add_node("Person", name="Charlie")
+            active.add_node("Program", designation="Castor")
             message = "boom"
             raise RuntimeError(message)
 
@@ -39,27 +39,29 @@ class TestGraphLifecycle:
         path = tmp_path / "graph.db"
         with Graph.open(path) as graph:
             with graph.transaction() as active:
-                ada = active.add_node("Person", name="Ada", age=36)
-                grace = active.add_node("Person", name="Grace", age=37)
-                bob = active.add_node("Person", name="Bob", age=41)
-                active.add_relationship(ada, "KNOWS", grace, since=2019)
-                active.add_relationship(grace, "KNOWS", bob, since=2021)
-                direct = active.add_relationship(ada, "KNOWS", bob, since=2020)
+                ada = active.add_node("Program", designation="Kevin Flynn", cycles=36)
+                grace = active.add_node("Program", designation="Quorra", cycles=37)
+                bob = active.add_node("Program", designation="Sam Flynn", cycles=41)
+                active.add_relationship(ada, "ALLIES_WITH", grace, since_cycle=2019)
+                active.add_relationship(grace, "ALLIES_WITH", bob, since_cycle=2021)
+                direct = active.add_relationship(ada, "ALLIES_WITH", bob, since_cycle=2020)
 
             with pytest.raises(RuntimeError):
                 self._fail_after_write(graph)
-            assert list(graph.find_nodes(name="Charlie")) == []
+            assert list(graph.find_nodes(designation="Castor")) == []
 
-            assert [node["name"] for node in graph.find_nodes("Person", age=36)] == ["Ada"]
-            assert list(graph.find_nodes("Person", age="36")) == []
+            assert [node["designation"] for node in graph.find_nodes("Program", cycles=36)] == [
+                "Kevin Flynn"
+            ]
+            assert list(graph.find_nodes("Program", cycles="36")) == []
 
             steps = {
-                step.node["name"]: step.depth
-                for step in graph.traverse(ada, max_depth=2, types=["KNOWS"])
+                step.node["designation"]: step.depth
+                for step in graph.traverse(ada, max_depth=2, types=["ALLIES_WITH"])
             }
-            assert steps == {"Grace": 1, "Bob": 1}
+            assert steps == {"Quorra": 1, "Sam Flynn": 1}
 
-            shortest = graph.shortest_path(ada, bob, types=["KNOWS"])
+            shortest = graph.shortest_path(ada, bob, types=["ALLIES_WITH"])
             assert shortest is not None
             assert shortest.length == 1
             assert shortest.relationships[0].id == direct.id
@@ -70,20 +72,22 @@ class TestGraphLifecycle:
             graph.delete(grace, detach=True)
             with pytest.raises(NotFoundError):
                 graph.node(grace.id)
-            assert list(graph.find_nodes(name="Grace")) == []
-            assert [item.id for item in graph.find_relationships("KNOWS")] == [direct.id]
+            assert list(graph.find_nodes(designation="Quorra")) == []
+            assert [item.id for item in graph.find_relationships("ALLIES_WITH")] == [direct.id]
             assert graph.shortest_path(ada, bob) is not None
 
         reopened = Graph.open(path)
         try:
             loaded_ada = reopened.node(ada.id)
             loaded_bob = reopened.node(bob.id)
-            assert loaded_ada["name"] == "Ada"
-            assert loaded_ada.labels == frozenset({"Person"})
-            assert loaded_bob["age"] == 41
-            assert [node["name"] for node in reopened.find_nodes("Person", age=36)] == ["Ada"]
-            assert list(reopened.find_nodes(name="Grace")) == []
-            assert [item.id for item in reopened.find_relationships("KNOWS")] == [direct.id]
+            assert loaded_ada["designation"] == "Kevin Flynn"
+            assert loaded_ada.labels == frozenset({"Program"})
+            assert loaded_bob["cycles"] == 41
+            assert [node["designation"] for node in reopened.find_nodes("Program", cycles=36)] == [
+                "Kevin Flynn"
+            ]
+            assert list(reopened.find_nodes(designation="Quorra")) == []
+            assert [item.id for item in reopened.find_relationships("ALLIES_WITH")] == [direct.id]
 
             reopened_shortest = reopened.shortest_path(loaded_ada, loaded_bob)
             assert reopened_shortest is not None
@@ -93,9 +97,10 @@ class TestGraphLifecycle:
             assert [item.length for item in reopened_paths] == [1]
 
             reopened_steps = {
-                step.node["name"]: step.depth for step in reopened.traverse(loaded_ada, max_depth=2)
+                step.node["designation"]: step.depth
+                for step in reopened.traverse(loaded_ada, max_depth=2)
             }
-            assert reopened_steps == {"Bob": 1}
+            assert reopened_steps == {"Sam Flynn": 1}
         finally:
             reopened.close()
 
@@ -105,26 +110,26 @@ class TestGraphLifecycle:
     ) -> None:
         path = tmp_path / "rollback.db"
         with Graph.open(path) as graph:
-            survivor = graph.add_node("Person", name="Ada")
-            graph.add_relationship(survivor, "SELF", survivor)
+            survivor = graph.add_node("Program", designation="Kevin Flynn")
+            graph.add_relationship(survivor, "RECURSES", survivor)
             with pytest.raises(RuntimeError):
                 self._fail_after_write(graph)
-            assert list(graph.find_nodes("Person")) == [survivor]
-            assert list(graph.find_nodes(name="Charlie")) == []
+            assert list(graph.find_nodes("Program")) == [survivor]
+            assert list(graph.find_nodes(designation="Castor")) == []
             steps = list(graph.traverse(survivor, max_depth=2))
             assert steps == []
 
     def test_detach_preserves_unrelated_routes(self, tmp_path: Path) -> None:
         path = tmp_path / "detach.db"
         with Graph.open(path) as graph:
-            start = graph.add_node("Person", name="start")
-            left = graph.add_node("Person", name="left")
-            right = graph.add_node("Person", name="right")
-            end = graph.add_node("Person", name="end")
-            graph.add_relationship(start, "ROUTE", left)
-            graph.add_relationship(start, "ROUTE", right)
-            graph.add_relationship(left, "ROUTE", end)
-            graph.add_relationship(right, "ROUTE", end)
+            start = graph.add_node("Program", designation="Grid")
+            left = graph.add_node("Program", designation="Safehouse")
+            right = graph.add_node("Program", designation="Outlands")
+            end = graph.add_node("Program", designation="Portal")
+            graph.add_relationship(start, "GRID_LINK", left)
+            graph.add_relationship(start, "GRID_LINK", right)
+            graph.add_relationship(left, "GRID_LINK", end)
+            graph.add_relationship(right, "GRID_LINK", end)
             assert sorted(path.length for path in graph.paths(start, end, max_depth=2)) == [
                 2,
                 2,
@@ -133,8 +138,8 @@ class TestGraphLifecycle:
             remaining = list(graph.paths(start, end, max_depth=2))
             assert len(remaining) == 1
             assert remaining[0].nodes == (start, right, end)
-            assert [node["name"] for node in graph.find_nodes("Person")] == [
-                "start",
-                "right",
-                "end",
+            assert [node["designation"] for node in graph.find_nodes("Program")] == [
+                "Grid",
+                "Outlands",
+                "Portal",
             ]

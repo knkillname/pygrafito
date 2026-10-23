@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for relationship-unique path enumeration."""
@@ -49,12 +49,13 @@ class _GraphTestCase:
             Nodes keyed by name.
         """
         nodes = {
-            name: graph.add_node("Node", name=name) for name in ("start", "left", "right", "end")
+            name: graph.add_node("Program", designation=name)
+            for name in ("Grid", "Safehouse", "Outlands", "Portal")
         }
-        graph.add_relationship(nodes["start"], "ROUTE", nodes["left"])
-        graph.add_relationship(nodes["start"], "ROUTE", nodes["right"])
-        graph.add_relationship(nodes["left"], "ROUTE", nodes["end"])
-        graph.add_relationship(nodes["right"], "ROUTE", nodes["end"])
+        graph.add_relationship(nodes["Grid"], "GRID_LINK", nodes["Safehouse"])
+        graph.add_relationship(nodes["Grid"], "GRID_LINK", nodes["Outlands"])
+        graph.add_relationship(nodes["Safehouse"], "GRID_LINK", nodes["Portal"])
+        graph.add_relationship(nodes["Outlands"], "GRID_LINK", nodes["Portal"])
         return nodes
 
 
@@ -63,23 +64,23 @@ class TestTwoRoutes(_GraphTestCase):
 
     def test_two_route_diamond(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        paths = list(graph.paths(nodes["start"], nodes["end"], max_depth=2))
+        paths = list(graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2))
         assert len(paths) == 2
-        assert {paths[0].nodes[1]["name"], paths[1].nodes[1]["name"]} == {
-            "left",
-            "right",
+        assert {paths[0].nodes[1]["designation"], paths[1].nodes[1]["designation"]} == {
+            "Safehouse",
+            "Outlands",
         }
         assert all(path.length == 2 for path in paths)
-        assert all(path.start == nodes["start"] for path in paths)
-        assert all(path.end == nodes["end"] for path in paths)
+        assert all(path.start == nodes["Grid"] for path in paths)
+        assert all(path.end == nodes["Portal"] for path in paths)
 
     def test_depth_range_excludes_shortcut(self, graph: Graph) -> None:
-        start = graph.add_node("start")
-        middle = graph.add_node("middle")
-        end = graph.add_node("end")
-        graph.add_relationship(start, "NEXT", end)
-        graph.add_relationship(start, "NEXT", middle)
-        graph.add_relationship(middle, "NEXT", end)
+        start = graph.add_node("Grid")
+        middle = graph.add_node("Arena")
+        end = graph.add_node("Portal")
+        graph.add_relationship(start, "GRID_LINK", end)
+        graph.add_relationship(start, "GRID_LINK", middle)
+        graph.add_relationship(middle, "GRID_LINK", end)
         paths = list(graph.paths(start, end, min_depth=2, max_depth=2))
         assert len(paths) == 1
         assert paths[0].nodes == (start, middle, end)
@@ -88,9 +89,9 @@ class TestTwoRoutes(_GraphTestCase):
         start = graph.add_node()
         middle = graph.add_node()
         end = graph.add_node()
-        graph.add_relationship(start, "NEXT", end)
-        graph.add_relationship(start, "NEXT", middle)
-        graph.add_relationship(middle, "NEXT", end)
+        graph.add_relationship(start, "GRID_LINK", end)
+        graph.add_relationship(start, "GRID_LINK", middle)
+        graph.add_relationship(middle, "GRID_LINK", end)
         paths = list(graph.paths(start, end, min_depth=1, max_depth=2))
         assert sorted(path.length for path in paths) == [1, 2]
 
@@ -99,12 +100,12 @@ class TestTrailSemantics(_GraphTestCase):
     """Verify node repetition and relationship uniqueness."""
 
     def test_node_may_repeat(self, graph: Graph) -> None:
-        first = graph.add_node("A")
-        second = graph.add_node("B")
-        third = graph.add_node("C")
-        graph.add_relationship(first, "NEXT", second)
-        graph.add_relationship(second, "NEXT", third)
-        graph.add_relationship(third, "NEXT", first)
+        first = graph.add_node("Tron")
+        second = graph.add_node("Clu")
+        third = graph.add_node("Rinzler")
+        graph.add_relationship(first, "GRID_LINK", second)
+        graph.add_relationship(second, "GRID_LINK", third)
+        graph.add_relationship(third, "GRID_LINK", first)
         paths = list(
             graph.paths(first, first, min_depth=3, max_depth=3),
         )
@@ -114,25 +115,25 @@ class TestTrailSemantics(_GraphTestCase):
 
     def test_relationship_may_not_repeat(self, graph: Graph) -> None:
         node = graph.add_node()
-        graph.add_relationship(node, "SELF", node)
+        graph.add_relationship(node, "RECURSES", node)
         assert list(graph.paths(node, node, min_depth=2, max_depth=3)) == []
 
     def test_two_relationships_can_form_a_cycle(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "NEXT", second)
-        graph.add_relationship(second, "NEXT", first)
+        graph.add_relationship(first, "GRID_LINK", second)
+        graph.add_relationship(second, "GRID_LINK", first)
         paths = list(graph.paths(first, first, min_depth=2, max_depth=2))
         assert len(paths) == 1
         assert paths[0].nodes == (first, second, first)
         assert [relationship.rel_type for relationship in paths[0].relationships] == [
-            "NEXT",
-            "NEXT",
+            "GRID_LINK",
+            "GRID_LINK",
         ]
 
     def test_self_loop_path(self, graph: Graph) -> None:
         node = graph.add_node()
-        graph.add_relationship(node, "SELF", node)
+        graph.add_relationship(node, "RECURSES", node)
         paths = list(graph.paths(node, node, min_depth=1, max_depth=1))
         assert len(paths) == 1
         assert paths[0].length == 1
@@ -154,8 +155,8 @@ class TestParallelRelationships(_GraphTestCase):
     ) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        first_relationship = graph.add_relationship(first, "KNOWS", second)
-        second_relationship = graph.add_relationship(first, "KNOWS", second)
+        first_relationship = graph.add_relationship(first, "ALLIES_WITH", second)
+        second_relationship = graph.add_relationship(first, "ALLIES_WITH", second)
         paths = list(graph.paths(first, second, max_depth=1))
         assert len(paths) == 2
         assert {path.relationships[0].id for path in paths} == {
@@ -170,30 +171,30 @@ class TestLimits(_GraphTestCase):
 
     def test_limit_caps_results(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        paths = list(graph.paths(nodes["start"], nodes["end"], max_depth=2, limit=1))
+        paths = list(graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2, limit=1))
         assert len(paths) == 1
 
     def test_zero_limit_yields_nothing(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        assert list(graph.paths(nodes["start"], nodes["end"], max_depth=2, limit=0)) == []
+        assert list(graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2, limit=0)) == []
 
     def test_negative_limit_rejected(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
         with pytest.raises(ValidationError):
-            graph.paths(nodes["start"], nodes["end"], max_depth=2, limit=-1)
+            graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2, limit=-1)
 
     def test_is_lazy_and_stops_early(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        iterator = graph.paths(nodes["start"], nodes["end"], max_depth=2)
+        iterator = graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2)
         first = next(iterator)
         assert first.length == 2
-        remaining = list(graph.paths(nodes["start"], nodes["end"], max_depth=2))
+        remaining = list(graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2))
         assert len(remaining) == 2
 
     def test_max_depth_is_required(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
         with pytest.raises(TypeError):
-            graph.paths(nodes["start"], nodes["end"])  # type: ignore[call-arg]
+            graph.paths(nodes["Grid"], nodes["Portal"])  # type: ignore[call-arg]
 
 
 class _CountingSnapshot(AdjacencySnapshot):
@@ -222,15 +223,15 @@ class TestEarlyStop(_GraphTestCase):
     """Verify that stopping iteration prevents further path computation."""
 
     def test_consuming_one_path_does_not_compute_the_next(self) -> None:
-        start = Node(id=1, labels=frozenset({"start"}))
+        start = Node(id=1, labels=frozenset({"Grid"}))
         left = Node(id=2)
         right = Node(id=3)
         end = Node(id=4)
         relationships = (
-            Relationship(id=1, rel_type="ROUTE", start_id=1, end_id=2),
-            Relationship(id=2, rel_type="ROUTE", start_id=1, end_id=3),
-            Relationship(id=3, rel_type="ROUTE", start_id=2, end_id=4),
-            Relationship(id=4, rel_type="ROUTE", start_id=3, end_id=4),
+            Relationship(id=1, rel_type="GRID_LINK", start_id=1, end_id=2),
+            Relationship(id=2, rel_type="GRID_LINK", start_id=1, end_id=3),
+            Relationship(id=3, rel_type="GRID_LINK", start_id=2, end_id=4),
+            Relationship(id=4, rel_type="GRID_LINK", start_id=3, end_id=4),
         )
         snapshot = _CountingSnapshot((start, left, right, end), relationships)
         full_snapshot = _CountingSnapshot((start, left, right, end), relationships)

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for explicit transaction commit, rollback, and reuse."""
@@ -80,43 +80,43 @@ class TestCommit(_TransactionTestCase):
     def test_writes_are_visible_after_commit(self, storage: Storage) -> None:
         database, node_repository, relationship_repository = storage
         with self.make_transaction(storage) as active:
-            first = active.add_node("Person", name="Ada")
-            second = active.add_node("Person", name="Grace")
-            relationship = active.add_relationship(first, "KNOWS", second, since=2020)
+            first = active.add_node("Program", designation="Kevin Flynn")
+            second = active.add_node("Program", designation="Quorra")
+            relationship = active.add_relationship(first, "ALLIES_WITH", second, since_cycle=2020)
             assert database.connection.in_transaction
-        assert node_repository.get(first.id)["name"] == "Ada"
-        assert relationship_repository.get(relationship.id)["since"] == 2020
+        assert node_repository.get(first.id)["designation"] == "Kevin Flynn"
+        assert relationship_repository.get(relationship.id)["since_cycle"] == 2020
 
     def test_reads_inside_transaction_see_writes(self, storage: Storage) -> None:
         with self.make_transaction(storage) as active:
-            node = active.add_node(name="Ada")
+            node = active.add_node(designation="Kevin Flynn")
             assert active.node(node.id) == node
-            relationship = active.add_relationship(node, "KNOWS", node)
+            relationship = active.add_relationship(node, "ALLIES_WITH", node)
             assert active.relationship(relationship.id) == relationship
 
     def test_property_and_label_updates(self, storage: Storage) -> None:
         _, node_repository, _ = storage
         with self.make_transaction(storage) as active:
-            node = active.add_node("Person", name="Ada")
-            node = active.add_labels(node, "Employee")
-            updated_node = active.set_properties(node, name="Grace", age=36)
+            node = active.add_node("Program", designation="Kevin Flynn")
+            node = active.add_labels(node, "ISO")
+            updated_node = active.set_properties(node, designation="Quorra", cycles=36)
             assert isinstance(updated_node, Node)
-            without_age = active.remove_properties(updated_node, "age")
+            without_age = active.remove_properties(updated_node, "cycles")
             assert isinstance(without_age, Node)
-            node = active.remove_labels(without_age, "Person")
+            node = active.remove_labels(without_age, "Program")
         stored = node_repository.get(node.id)
-        assert stored.labels == frozenset({"Employee"})
-        assert dict(stored) == {"name": "Grace"}
+        assert stored.labels == frozenset({"ISO"})
+        assert dict(stored) == {"designation": "Quorra"}
 
     def test_relationship_property_updates(self, storage: Storage) -> None:
         with self.make_transaction(storage) as active:
             first = active.add_node()
             second = active.add_node()
-            relationship = active.add_relationship(first, "KNOWS", second)
-            updated_relationship = active.set_properties(relationship, since=2020)
+            relationship = active.add_relationship(first, "ALLIES_WITH", second)
+            updated_relationship = active.set_properties(relationship, since_cycle=2020)
             assert isinstance(updated_relationship, Relationship)
-            assert updated_relationship["since"] == 2020
-            without_since = active.remove_properties(updated_relationship, "since")
+            assert updated_relationship["since_cycle"] == 2020
+            without_since = active.remove_properties(updated_relationship, "since_cycle")
             assert isinstance(without_since, Relationship)
             assert dict(without_since) == {}
 
@@ -125,7 +125,7 @@ class TestCommit(_TransactionTestCase):
         with self.make_transaction(storage) as active:
             first = active.add_node()
             second = active.add_node()
-            relationship = active.add_relationship(first, "KNOWS", second)
+            relationship = active.add_relationship(first, "ALLIES_WITH", second)
             active.delete(relationship)
             active.delete(second)
             active.delete(first, detach=True)
@@ -134,12 +134,12 @@ class TestCommit(_TransactionTestCase):
 
     def test_find_inside_transaction(self, storage: Storage) -> None:
         with self.make_transaction(storage) as active:
-            active.add_node("Person", name="Ada")
-            active.add_node("Robot", name="R2")
-            found_nodes = list(active.find_nodes("Person"))
-            found_relationships = list(active.find_relationships("KNOWS"))
+            active.add_node("Program", designation="Kevin Flynn")
+            active.add_node("SystemMonitor", designation="R2")
+            found_nodes = list(active.find_nodes("Program"))
+            found_relationships = list(active.find_relationships("ALLIES_WITH"))
         assert len(found_nodes) == 1
-        assert found_nodes[0]["name"] == "Ada"
+        assert found_nodes[0]["designation"] == "Kevin Flynn"
         assert found_relationships == []
 
 
@@ -163,7 +163,7 @@ class TestRollback(_TransactionTestCase):
         with active:
             first = active.add_node()
             second = active.add_node()
-            active.add_relationship(first, "KNOWS", second)
+            active.add_relationship(first, "ALLIES_WITH", second)
             message = "boom"
             raise RuntimeError(message)
 
@@ -182,7 +182,7 @@ class TestRollback(_TransactionTestCase):
             Because the second node has a mixed list.
         """
         with active:
-            active.add_node(name="Ada")
+            active.add_node(designation="Kevin Flynn")
             active.add_node(bad=typing.cast(Value, [1, "a"]))
 
     def test_exception_rolls_back_every_write(self, storage: Storage) -> None:
@@ -216,6 +216,18 @@ class TestReuse(_TransactionTestCase):
         with active, pytest.raises(TransactionError):
             active.__enter__()
 
+    def test_nested_transaction_rejected_before_sql(self, storage: Storage) -> None:
+        database, node_repository, _ = storage
+        with self.make_transaction(storage) as active:
+            first = active.add_node("Program", designation="Tron")
+            nested = self.make_transaction(storage)
+            with pytest.raises(TransactionError, match="already active"):
+                nested.__enter__()
+            assert database.connection.in_transaction
+            second = active.add_node("Program", designation="Clu")
+        assert node_repository.get(first.id)["designation"] == "Tron"
+        assert node_repository.get(second.id)["designation"] == "Clu"
+
     def test_finished_transaction_cannot_be_reused(self, storage: Storage) -> None:
         active = self.make_transaction(storage)
         with active:
@@ -238,17 +250,17 @@ class TestReuse(_TransactionTestCase):
     def test_invalid_node_argument_rejected(self, storage: Storage) -> None:
         with self.make_transaction(storage) as active:
             with pytest.raises(ValidationError):
-                active.add_relationship(typing.cast(Node, True), "KNOWS", 1)
+                active.add_relationship(typing.cast(Node, True), "ALLIES_WITH", 1)
             with pytest.raises(ValidationError):
-                active.add_labels(typing.cast(Node, "1"), "Person")
+                active.add_labels(typing.cast(Node, "1"), "Program")
 
     def test_invalid_element_rejected(self, storage: Storage) -> None:
         missing = typing.cast(Node, "not a node")
         with self.make_transaction(storage) as active:
             with pytest.raises(ValidationError):
-                active.set_properties(missing, name="Ada")
+                active.set_properties(missing, designation="Kevin Flynn")
             with pytest.raises(ValidationError):
-                active.remove_properties(missing, "name")
+                active.remove_properties(missing, "designation")
             with pytest.raises(ValidationError):
                 active.delete(missing)
 

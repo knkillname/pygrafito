@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for shortest-path evaluation."""
@@ -46,11 +46,11 @@ class _GraphTestCase:
         dict[str, Node]
             Nodes keyed by name.
         """
-        nodes = {name: graph.add_node(name) for name in ("start", "left", "right", "end")}
-        graph.add_relationship(nodes["start"], "ROUTE", nodes["left"])
-        graph.add_relationship(nodes["start"], "ROUTE", nodes["right"])
-        graph.add_relationship(nodes["left"], "ROUTE", nodes["end"])
-        graph.add_relationship(nodes["right"], "ROUTE", nodes["end"])
+        nodes = {name: graph.add_node(name) for name in ("Grid", "Safehouse", "Outlands", "Portal")}
+        graph.add_relationship(nodes["Grid"], "GRID_LINK", nodes["Safehouse"])
+        graph.add_relationship(nodes["Grid"], "GRID_LINK", nodes["Outlands"])
+        graph.add_relationship(nodes["Safehouse"], "GRID_LINK", nodes["Portal"])
+        graph.add_relationship(nodes["Outlands"], "GRID_LINK", nodes["Portal"])
         return nodes
 
 
@@ -59,21 +59,21 @@ class TestShortestRoute(_GraphTestCase):
 
     def test_diamond_route_has_two_relationships(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        path = graph.shortest_path(nodes["start"], nodes["end"])
+        path = graph.shortest_path(nodes["Grid"], nodes["Portal"])
         assert path is not None
         assert path.length == 2
-        assert path.start == nodes["start"]
-        assert path.end == nodes["end"]
-        assert path.nodes[0].id == nodes["start"].id
-        assert path.nodes[-1].id == nodes["end"].id
+        assert path.start == nodes["Grid"]
+        assert path.end == nodes["Portal"]
+        assert path.nodes[0].id == nodes["Grid"].id
+        assert path.nodes[-1].id == nodes["Portal"].id
 
     def test_direct_route_beats_longer_route(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
         third = graph.add_node()
-        graph.add_relationship(first, "NEXT", second)
-        graph.add_relationship(second, "NEXT", third)
-        graph.add_relationship(first, "SHORTCUT", third)
+        graph.add_relationship(first, "GRID_LINK", second)
+        graph.add_relationship(second, "GRID_LINK", third)
+        graph.add_relationship(first, "PORTAL_LINK", third)
         path = graph.shortest_path(first, third)
         assert path is not None
         assert path.length == 1
@@ -82,8 +82,8 @@ class TestShortestRoute(_GraphTestCase):
     def test_parallel_relationships_produce_one_hop(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "KNOWS", second)
-        graph.add_relationship(first, "KNOWS", second)
+        graph.add_relationship(first, "ALLIES_WITH", second)
+        graph.add_relationship(first, "ALLIES_WITH", second)
         path = graph.shortest_path(first, second)
         assert path is not None
         assert path.length == 1
@@ -91,7 +91,7 @@ class TestShortestRoute(_GraphTestCase):
 
     def test_self_loop_does_not_shorten_same_node(self, graph: Graph) -> None:
         node = graph.add_node()
-        graph.add_relationship(node, "SELF", node)
+        graph.add_relationship(node, "RECURSES", node)
         path = graph.shortest_path(node, node)
         assert path is not None
         assert path.length == 0
@@ -109,29 +109,29 @@ class TestNoPath(_GraphTestCase):
     def test_reverse_direction_is_not_followed(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "NEXT", second)
+        graph.add_relationship(first, "GRID_LINK", second)
         assert graph.shortest_path(second, first) is None
 
     def test_max_depth_too_small_returns_none(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        assert graph.shortest_path(nodes["start"], nodes["end"], max_depth=1) is None
+        assert graph.shortest_path(nodes["Grid"], nodes["Portal"], max_depth=1) is None
 
     def test_max_depth_allows_exact_path(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        path = graph.shortest_path(nodes["start"], nodes["end"], max_depth=2)
+        path = graph.shortest_path(nodes["Grid"], nodes["Portal"], max_depth=2)
         assert path is not None
         assert path.length == 2
 
     def test_zero_max_depth_returns_none(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
-        assert graph.shortest_path(nodes["start"], nodes["end"], max_depth=0) is None
+        assert graph.shortest_path(nodes["Grid"], nodes["Portal"], max_depth=0) is None
 
 
 class TestSameNode(_GraphTestCase):
     """Verify zero-length paths."""
 
     def test_same_node_zero_length(self, graph: Graph) -> None:
-        node = graph.add_node("Person")
+        node = graph.add_node("Program")
         path = graph.shortest_path(node, node)
         assert path is not None
         assert path.length == 0
@@ -151,8 +151,8 @@ class TestIncomingAndBoth(_GraphTestCase):
         first = graph.add_node()
         second = graph.add_node()
         third = graph.add_node()
-        first_to_second = graph.add_relationship(first, "NEXT", second)
-        second_to_third = graph.add_relationship(second, "NEXT", third)
+        first_to_second = graph.add_relationship(first, "GRID_LINK", second)
+        second_to_third = graph.add_relationship(second, "GRID_LINK", third)
         path = graph.shortest_path(
             third,
             first,
@@ -167,7 +167,7 @@ class TestIncomingAndBoth(_GraphTestCase):
     def test_both_direction(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "NEXT", second)
+        graph.add_relationship(first, "GRID_LINK", second)
         path = graph.shortest_path(second, first, direction=Direction.BOTH)
         assert path is not None
         assert path.nodes == (second, first)
@@ -175,7 +175,7 @@ class TestIncomingAndBoth(_GraphTestCase):
     def test_incoming_from_wrong_end_returns_none(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "NEXT", second)
+        graph.add_relationship(first, "GRID_LINK", second)
         assert graph.shortest_path(first, second, direction=Direction.INCOMING) is None
 
 
@@ -186,17 +186,17 @@ class TestTypeFilter(_GraphTestCase):
         start = graph.add_node()
         middle = graph.add_node()
         end = graph.add_node()
-        graph.add_relationship(start, "LIKES", end)
-        graph.add_relationship(start, "KNOWS", middle)
-        graph.add_relationship(middle, "KNOWS", end)
-        path = graph.shortest_path(start, end, types=["KNOWS"])
+        graph.add_relationship(start, "TRUSTS", end)
+        graph.add_relationship(start, "ALLIES_WITH", middle)
+        graph.add_relationship(middle, "ALLIES_WITH", end)
+        path = graph.shortest_path(start, end, types=["ALLIES_WITH"])
         assert path is not None
         assert path.nodes == (start, middle, end)
 
     def test_empty_type_set_means_all_types(self, graph: Graph) -> None:
         start = graph.add_node()
         end = graph.add_node()
-        graph.add_relationship(start, "LIKES", end)
+        graph.add_relationship(start, "TRUSTS", end)
         path = graph.shortest_path(start, end, types=[])
         assert path is not None
         assert path.length == 1
@@ -237,7 +237,7 @@ class TestValidation(_GraphTestCase):
     def test_integer_endpoints_accepted(self, graph: Graph) -> None:
         first = graph.add_node()
         second = graph.add_node()
-        graph.add_relationship(first, "NEXT", second)
+        graph.add_relationship(first, "GRID_LINK", second)
         path = graph.shortest_path(first.id, second.id)
         assert path is not None
         assert path.length == 1

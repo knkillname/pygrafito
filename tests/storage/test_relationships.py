@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for relationship persistence, properties, and lookups."""
@@ -48,21 +48,26 @@ class TestCreateAndGet(_RelationshipTestCase):
 
     def test_create_and_get(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
-        start = node_repository.create(("Person",))
-        end = node_repository.create(("Person",))
-        created = relationship_repository.create(start.id, "KNOWS", end.id, {"since": 2020})
+        start = node_repository.create(("Program",))
+        end = node_repository.create(("Program",))
+        created = relationship_repository.create(
+            start.id,
+            "ALLIES_WITH",
+            end.id,
+            {"since_cycle": 2020},
+        )
         loaded = relationship_repository.get(created.id)
         assert loaded == created
-        assert loaded.rel_type == "KNOWS"
+        assert loaded.rel_type == "ALLIES_WITH"
         assert loaded.start_id == start.id
         assert loaded.end_id == end.id
-        assert loaded["since"] == 2020
+        assert loaded["since_cycle"] == 2020
 
     def test_stored_direction_is_preserved(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship = relationship_repository.create(first.id, "FOLLOWS", second.id)
+        relationship = relationship_repository.create(first.id, "TRACKS", second.id)
         loaded = relationship_repository.get(relationship.id)
         assert loaded.start_id == first.id
         assert loaded.end_id == second.id
@@ -70,7 +75,7 @@ class TestCreateAndGet(_RelationshipTestCase):
     def test_self_loop_is_stored(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
         node = node_repository.create()
-        relationship = relationship_repository.create(node.id, "KNOWS", node.id)
+        relationship = relationship_repository.create(node.id, "ALLIES_WITH", node.id)
         loaded = relationship_repository.get(relationship.id)
         assert loaded.start_id == node.id
         assert loaded.end_id == node.id
@@ -79,9 +84,9 @@ class TestCreateAndGet(_RelationshipTestCase):
         node_repository, relationship_repository = repositories
         node = node_repository.create()
         with pytest.raises(NotFoundError):
-            relationship_repository.create(node.id, "KNOWS", node.id + 1)
+            relationship_repository.create(node.id, "ALLIES_WITH", node.id + 1)
         with pytest.raises(NotFoundError):
-            relationship_repository.create(node.id + 1, "KNOWS", node.id)
+            relationship_repository.create(node.id + 1, "ALLIES_WITH", node.id)
         assert list(relationship_repository.all()) == []
 
     def test_invalid_type_rejected(self, repositories: Repositories) -> None:
@@ -100,7 +105,7 @@ class TestCreateAndGet(_RelationshipTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         assert relationship_repository.exists(relationship.id)
         assert not relationship_repository.exists(relationship.id + 1)
 
@@ -108,8 +113,8 @@ class TestCreateAndGet(_RelationshipTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        first_relationship = relationship_repository.create(first.id, "KNOWS", second.id)
-        second_relationship = relationship_repository.create(second.id, "KNOWS", first.id)
+        first_relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
+        second_relationship = relationship_repository.create(second.id, "ALLIES_WITH", first.id)
         assert first_relationship.id != second_relationship.id
 
 
@@ -120,18 +125,18 @@ class TestProperties(_RelationshipTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         relationship = relationship_repository.set_properties(
             relationship.id,
-            {"since": 2020, "weight": 2.5},
+            {"since_cycle": 2020, "weight": 2.5},
         )
-        assert dict(relationship) == {"since": 2020, "weight": 2.5}
+        assert dict(relationship) == {"since_cycle": 2020, "weight": 2.5}
         relationship = relationship_repository.set_properties(
             relationship.id,
             {"weight": None},
         )
-        assert dict(relationship) == {"since": 2020}
-        relationship = relationship_repository.remove_properties(relationship.id, ("since",))
+        assert dict(relationship) == {"since_cycle": 2020}
+        relationship = relationship_repository.remove_properties(relationship.id, ("since_cycle",))
         assert dict(relationship) == {}
 
     def test_earlier_snapshot_is_unchanged(self, repositories: Repositories) -> None:
@@ -140,25 +145,25 @@ class TestProperties(_RelationshipTestCase):
         second = node_repository.create()
         relationship = relationship_repository.create(
             first.id,
-            "KNOWS",
+            "ALLIES_WITH",
             second.id,
-            {"since": 2020},
+            {"since_cycle": 2020},
         )
-        relationship_repository.set_properties(relationship.id, {"since": 2021})
-        assert relationship["since"] == 2020
+        relationship_repository.set_properties(relationship.id, {"since_cycle": 2021})
+        assert relationship["since_cycle"] == 2020
 
     def test_missing_relationship_raises(self, repositories: Repositories) -> None:
         _, relationship_repository = repositories
         with pytest.raises(NotFoundError):
-            relationship_repository.set_properties(999, {"since": 2020})
+            relationship_repository.set_properties(999, {"since_cycle": 2020})
         with pytest.raises(NotFoundError):
-            relationship_repository.remove_properties(999, ("since",))
+            relationship_repository.remove_properties(999, ("since_cycle",))
 
     def test_invalid_value_rejected(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         with pytest.raises(ValidationError):
             relationship_repository.set_properties(relationship.id, {"bad": [1, "a"]})
 
@@ -170,9 +175,9 @@ class TestFind(_RelationshipTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        knows = relationship_repository.create(first.id, "KNOWS", second.id)
-        relationship_repository.create(first.id, "LIKES", second.id)
-        found = list(relationship_repository.find("KNOWS"))
+        knows = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
+        relationship_repository.create(first.id, "TRUSTS", second.id)
+        found = list(relationship_repository.find("ALLIES_WITH"))
         assert [item.id for item in found] == [knows.id]
 
     def test_find_by_type_and_property(self, repositories: Repositories) -> None:
@@ -181,20 +186,20 @@ class TestFind(_RelationshipTestCase):
         second = node_repository.create()
         matching = relationship_repository.create(
             first.id,
-            "KNOWS",
+            "ALLIES_WITH",
             second.id,
-            {"since": 2020},
+            {"since_cycle": 2020},
         )
-        relationship_repository.create(first.id, "KNOWS", second.id, {"since": 2019})
-        found = list(relationship_repository.find("KNOWS", {"since": 2020}))
+        relationship_repository.create(first.id, "ALLIES_WITH", second.id, {"since_cycle": 2019})
+        found = list(relationship_repository.find("ALLIES_WITH", {"since_cycle": 2020}))
         assert [item.id for item in found] == [matching.id]
 
     def test_all_relationships(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        first_relationship = relationship_repository.create(first.id, "KNOWS", second.id)
-        second_relationship = relationship_repository.create(second.id, "LIKES", first.id)
+        first_relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
+        second_relationship = relationship_repository.create(second.id, "TRUSTS", first.id)
         assert [item.id for item in relationship_repository.all()] == [
             first_relationship.id,
             second_relationship.id,
@@ -218,7 +223,7 @@ class TestFind(_RelationshipTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship_repository.create(first.id, "KNOWS", second.id, {"value": stored})
+        relationship_repository.create(first.id, "ALLIES_WITH", second.id, {"value": stored})
         assert list(relationship_repository.find(properties={"value": queried})) == []
 
     def test_invalid_type_filter_rejected(self, repositories: Repositories) -> None:
@@ -234,7 +239,7 @@ class TestDelete(_RelationshipTestCase):
         node_repository, relationship_repository = repositories
         first = node_repository.create()
         second = node_repository.create()
-        relationship = relationship_repository.create(first.id, "KNOWS", second.id)
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         relationship_repository.delete(relationship.id)
         assert not relationship_repository.exists(relationship.id)
         assert list(relationship_repository.all()) == []
@@ -247,7 +252,7 @@ class TestDelete(_RelationshipTestCase):
     def test_incident_deletion_counts_self_loop_once(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
         node = node_repository.create()
-        relationship_repository.create(node.id, "KNOWS", node.id)
+        relationship_repository.create(node.id, "ALLIES_WITH", node.id)
         assert relationship_repository.delete_incident(node.id) == 1
         assert list(relationship_repository.all()) == []
 
@@ -256,6 +261,6 @@ class TestDelete(_RelationshipTestCase):
         first = node_repository.create()
         second = node_repository.create()
         assert not relationship_repository.is_connected(first.id)
-        relationship_repository.create(first.id, "KNOWS", second.id)
+        relationship_repository.create(first.id, "ALLIES_WITH", second.id)
         assert relationship_repository.is_connected(first.id)
         assert relationship_repository.is_connected(second.id)

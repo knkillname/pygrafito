@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-22
+
+### Added
+
+- `GraphClosedError`, raised consistently when a closed graph handle is used.
+
+### Changed
+
+- Using a closed graph handle now raises `GraphClosedError` instead of leaking
+  SQLite exceptions or a transaction error.
+- Convenience writes inside an active explicit transaction now raise
+  `TransactionError` before executing SQL instead of failing at `BEGIN`; the
+  active transaction remains usable when the caller handles the error.
+- Graph-building test fixtures now use TRON names, enforced by
+  `tests/test_naming_convention.py`, and README examples are executed by
+  `tests/test_readme.py`.
+- Added CI jobs for `hatch check`, `hatch test`, wheel build and install smoke
+  testing, and verification that `py.typed` and `LICENSE.txt` are packaged.
+- Updated the copyright holder, package author, and project URLs to Mario
+  Abarca and the `knkillname/pygrafito` repository.
+- Documented that test fixtures use TRON franchise names and avoid other graph
+  database products or trademarks.
+
 ## [0.1] - 2026-10-22
 
 ### Added

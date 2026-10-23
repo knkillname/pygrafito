@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Public graph facade."""
@@ -121,6 +121,7 @@ class Graph:
         Transaction
             Transaction that is not active until entered.
         """
+        self._database.ensure_open()
         return Transaction(
             self._database.connection,
             self._nodes,
@@ -146,6 +147,7 @@ class Graph:
         Node
             Snapshot of the created node.
         """
+        self._database.ensure_open()
         with self.transaction() as active:
             return active.add_node(*labels, **properties)
 
@@ -174,6 +176,7 @@ class Graph:
         Relationship
             Snapshot of the created relationship.
         """
+        self._database.ensure_open()
         with self.transaction() as active:
             return active.add_relationship(start, rel_type, end, **properties)
 
@@ -196,6 +199,7 @@ class Graph:
         Node | Relationship
             Snapshot of the updated element.
         """
+        self._database.ensure_open()
         with self.transaction() as active:
             return active.set_properties(element, **properties)
 
@@ -218,6 +222,7 @@ class Graph:
         Node | Relationship
             Snapshot of the updated element.
         """
+        self._database.ensure_open()
         with self.transaction() as active:
             return active.remove_properties(element, *keys)
 
@@ -240,6 +245,7 @@ class Graph:
         Node
             Snapshot of the updated node.
         """
+        self._database.ensure_open()
         with self.transaction() as active:
             return active.add_labels(node, *labels)
 
@@ -262,6 +268,7 @@ class Graph:
         Node
             Snapshot of the updated node.
         """
+        self._database.ensure_open()
         with self.transaction() as active:
             return active.remove_labels(node, *labels)
 
@@ -281,6 +288,7 @@ class Graph:
             Whether to remove incident relationships before deleting a node,
             by default ``False``.
         """
+        self._database.ensure_open()
         with self.transaction() as active:
             active.delete(element, detach=detach)
 
@@ -297,6 +305,7 @@ class Graph:
         Node
             Snapshot of the node.
         """
+        self._database.ensure_open()
         return self._nodes.get(node_id)
 
     def relationship(self, relationship_id: int) -> Relationship:
@@ -312,6 +321,7 @@ class Graph:
         Relationship
             Snapshot of the relationship.
         """
+        self._database.ensure_open()
         return self._relationships.get(relationship_id)
 
     def find_nodes(
@@ -333,6 +343,7 @@ class Graph:
         Iterator[Node]
             Matching node snapshots ordered by id.
         """
+        self._database.ensure_open()
         return self._nodes.find(labels, properties)
 
     def find_relationships(
@@ -354,6 +365,7 @@ class Graph:
         Iterator[Relationship]
             Matching relationship snapshots ordered by id.
         """
+        self._database.ensure_open()
         return self._relationships.find(rel_type, properties)
 
     def traverse(
@@ -386,6 +398,7 @@ class Graph:
         Iterator[TraversalStep]
             Each reached node once with its shortest depth.
         """
+        self._database.ensure_open()
         snapshot = self._snapshot()
         evaluator = ReachabilityEvaluator(
             snapshot,
@@ -427,6 +440,7 @@ class Graph:
         Path | None
             A shortest path, or ``None`` when none exists.
         """
+        self._database.ensure_open()
         snapshot = self._snapshot()
         evaluator = ShortestPathEvaluator(
             snapshot,
@@ -476,6 +490,7 @@ class Graph:
         Iterator[Path]
             Trails within the depth range.
         """
+        self._database.ensure_open()
         snapshot = self._snapshot()
         evaluator = TrailEnumerator(
             snapshot,

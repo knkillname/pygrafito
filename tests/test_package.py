@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Smoke tests for the package skeleton."""
@@ -42,6 +42,7 @@ class TestPackage:
             "ConnectedNodeError",
             "Direction",
             "Graph",
+            "GraphClosedError",
             "Node",
             "NotFoundError",
             "Path",

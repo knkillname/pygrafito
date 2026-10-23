@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for the domain model snapshots and error hierarchy."""
@@ -11,6 +11,7 @@ import pytest
 from pygrafito.model import (
     ConnectedNodeError,
     Direction,
+    GraphClosedError,
     Node,
     NotFoundError,
     Path,
@@ -153,6 +154,7 @@ class TestErrorHierarchy:
             ValidationError,
             NotFoundError,
             ConnectedNodeError,
+            GraphClosedError,
             TransactionError,
             UnsupportedSqliteError,
         ],

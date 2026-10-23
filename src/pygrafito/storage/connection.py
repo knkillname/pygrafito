@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """SQLite connection management for the graph store."""
@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 from sqlite3 import Connection
 
-from pygrafito.model import NotFoundError
+from pygrafito.model import GraphClosedError, NotFoundError
 from pygrafito.storage.schema import Schema
 
 
@@ -82,6 +82,18 @@ class Database:
             self._connection.rollback()
         self._connection.close()
         self._closed = True
+
+    def ensure_open(self) -> None:
+        """Reject use of a closed database.
+
+        Raises
+        ------
+        GraphClosedError
+            If the database has already been closed.
+        """
+        if self._closed:
+            message = "graph handle is closed"
+            raise GraphClosedError(message)
 
     def _configure(self) -> None:
         """Apply the pragmas required by the storage layer."""

@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Domain model for the embedded property graph."""
@@ -27,6 +27,10 @@ class Direction(Enum):
 
 class PygrafitoError(Exception):
     """Base class for every error raised by pygrafito."""
+
+
+class GraphClosedError(PygrafitoError):
+    """Raised when an operation uses a graph handle that is already closed."""
 
 
 class ValidationError(PygrafitoError):
@@ -261,6 +265,7 @@ class TraversalStep:
 __all__ = [
     "ConnectedNodeError",
     "Direction",
+    "GraphClosedError",
     "Node",
     "NotFoundError",
     "Path",

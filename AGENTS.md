@@ -15,6 +15,8 @@
 - `hatch version <version>` — set the project version. Never edit `src/pygrafito/__about__.py` directly.
 - `openspec status --change <name> --json`; `openspec validate <name> --strict`.
 - `openspec validate --specs --strict`.
+- CI runs `hatch check` and `hatch test`; the package job runs `uv build`, installs the wheel in a
+  clean environment, and verifies `py.typed` and `LICENSE.txt` are packaged.
 - Coverage gate: at least 80%; `fail_under` is enabled in `pyproject.toml`.
 
 Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do not invent a parallel workflow.
@@ -42,6 +44,15 @@ Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do n
 ## Testing
 
 - Use `:memory:` SQLite for unit tests and `tmp_path` for reopen/persistence tests.
+- Test graphs must be themed on the TRON franchise: name nodes, labels, properties, and
+  relationships after TRON characters, programs, and places (for example, Kevin Flynn, Sam Flynn,
+  Quorra, Tron, Clu, Rinzler, the Grid, ENCOM, and ISO). Prefer these names over generic
+  placeholders such as Alice and Bob. `tests/test_naming_convention.py` enforces this for
+  graph-building test files; pure model, codec, package, and schema tests may keep generic values.
+- Never name or reference other graph database products or their trademarks in tests, specs,
+  docs, or code.
+- Every fenced `python` block in `README.md` is executed by `tests/test_readme.py`; keep examples
+  runnable.
 - Traversal fixtures must cover diamond, directed cycle, parallel relationships, and self-loop.
 - Add tests in the same task group as the code they cover; do not defer them.
 - Before archive: `hatch check --fix` and `hatch test` pass, coverage at least 80%.

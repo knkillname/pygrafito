@@ -11,7 +11,7 @@ requires-python = ">=3.14"
 license = "MIT"
 keywords = ["graph", "property-graph", "sqlite", "embedded"]
 authors = [
-  { name = "U.N. Owen", email = "void@some.where" },
+  { name = "Mario Abarca", email = "knkillname@gmail.com" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -23,9 +23,9 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Documentation = "https://github.com/U.N. Owen/pygrafito#readme"
-Issues = "https://github.com/U.N. Owen/pygrafito/issues"
-Source = "https://github.com/U.N. Owen/pygrafito"
+Documentation = "https://github.com/knkillname/pygrafito#readme"
+Issues = "https://github.com/knkillname/pygrafito/issues"
+Source = "https://github.com/knkillname/pygrafito"
 
 [tool.hatch.version]
 path = "src/pygrafito/__about__.py"

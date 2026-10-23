@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Tests for the public graph facade."""
@@ -10,11 +10,12 @@ from sqlite3 import ProgrammingError
 
 import pytest
 
-from pygrafito import Graph, Transaction
+from pygrafito import Graph, GraphClosedError, Transaction
 from pygrafito.model import (
     ConnectedNodeError,
     Node,
     NotFoundError,
+    TransactionError,
     ValidationError,
     Value,
 )
@@ -42,39 +43,74 @@ class TestOpenAndClose:
     def test_reopen_file_database(self, tmp_path: Path) -> None:
         path = tmp_path / "graph.db"
         graph = Graph.open(path)
-        node = graph.add_node("Person", name="Ada", age=36)
+        node = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
         graph.close()
         reopened = Graph.open(path)
         try:
             loaded = reopened.node(node.id)
             assert loaded == node
-            assert loaded["name"] == "Ada"
-            assert loaded.labels == frozenset({"Person"})
+            assert loaded["designation"] == "Kevin Flynn"
+            assert loaded.labels == frozenset({"Program"})
         finally:
             reopened.close()
 
     def test_second_graph_handle_sees_committed_data(self, tmp_path: Path) -> None:
         path = tmp_path / "graph.db"
         with Graph.open(path) as first:
-            node = first.add_node(name="Ada")
+            node = first.add_node(designation="Kevin Flynn")
         with Graph.open(path) as second:
-            assert second.node(node.id)["name"] == "Ada"
+            assert second.node(node.id)["designation"] == "Kevin Flynn"
 
     def test_in_memory_graph(self) -> None:
         with Graph.open(":memory:") as graph:
-            node = graph.add_node("Person")
+            node = graph.add_node("Program")
             assert graph.node(node.id) == node
 
     def test_context_manager_closes(self) -> None:
         with Graph.open(":memory:") as graph:
             node = graph.add_node()
-        with pytest.raises(ProgrammingError):
+        with pytest.raises(GraphClosedError):
             graph.node(node.id)
 
     def test_close_is_idempotent(self) -> None:
         graph = Graph.open(":memory:")
         graph.close()
         graph.close()
+
+    def test_read_after_close_rejected(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Clu")
+            relationship = graph.add_relationship(first, "ALLIES_WITH", second)
+        with pytest.raises(GraphClosedError):
+            graph.node(first.id)
+        with pytest.raises(GraphClosedError):
+            graph.relationship(relationship.id)
+        with pytest.raises(GraphClosedError):
+            graph.find_nodes()
+        with pytest.raises(GraphClosedError):
+            graph.find_relationships()
+
+    def test_write_after_close_rejected(self) -> None:
+        graph = Graph.open(":memory:")
+        node = graph.add_node("Program", designation="Tron")
+        graph.close()
+        with pytest.raises(GraphClosedError):
+            graph.add_node("Program", designation="Clu")
+        with pytest.raises(GraphClosedError):
+            graph.delete(node)
+        with pytest.raises(GraphClosedError):
+            graph.transaction()
+
+    def test_traversal_after_close_rejected(self) -> None:
+        with Graph.open(":memory:") as graph:
+            node = graph.add_node("Program", designation="Tron")
+        with pytest.raises(GraphClosedError):
+            graph.traverse(node, max_depth=1)
+        with pytest.raises(GraphClosedError):
+            graph.shortest_path(node, node)
+        with pytest.raises(GraphClosedError):
+            graph.paths(node, node, max_depth=1)
 
     def test_open_without_create_rejects_missing_file(self, tmp_path: Path) -> None:
         with pytest.raises(NotFoundError):
@@ -95,11 +131,11 @@ class TestConvenienceWrites:
 
     def test_node_and_relationship_round_trip(self) -> None:
         with Graph.open(":memory:") as graph:
-            first = graph.add_node("Person", name="Ada")
-            second = graph.add_node("Person", name="Grace")
-            relationship = graph.add_relationship(first, "KNOWS", second, since=2020)
-            assert graph.relationship(relationship.id)["since"] == 2020
-            assert dict(graph.node(first.id)) == {"name": "Ada"}
+            first = graph.add_node("Program", designation="Kevin Flynn")
+            second = graph.add_node("Program", designation="Quorra")
+            relationship = graph.add_relationship(first, "ALLIES_WITH", second, since_cycle=2020)
+            assert graph.relationship(relationship.id)["since_cycle"] == 2020
+            assert dict(graph.node(first.id)) == {"designation": "Kevin Flynn"}
 
     def test_invalid_node_write_is_atomic(self) -> None:
         with Graph.open(":memory:") as graph:
@@ -111,21 +147,21 @@ class TestConvenienceWrites:
         with Graph.open(":memory:") as graph:
             node = graph.add_node()
             with pytest.raises(NotFoundError):
-                graph.add_relationship(node, "KNOWS", node.id + 1)
+                graph.add_relationship(node, "ALLIES_WITH", node.id + 1)
             assert list(graph.find_relationships()) == []
 
     def test_label_and_property_updates(self) -> None:
         with Graph.open(":memory:") as graph:
-            node = graph.add_node("Person", name="Ada")
-            node = graph.add_labels(node, "Employee")
-            node = graph.remove_labels(node, "Person")
-            updated = graph.set_properties(node, age=36)
+            node = graph.add_node("Program", designation="Kevin Flynn")
+            node = graph.add_labels(node, "ISO")
+            node = graph.remove_labels(node, "Program")
+            updated = graph.set_properties(node, cycles=36)
             assert isinstance(updated, Node)
-            assert updated.labels == frozenset({"Employee"})
-            assert dict(updated) == {"name": "Ada", "age": 36}
-            stripped = graph.remove_properties(updated, "age")
+            assert updated.labels == frozenset({"ISO"})
+            assert dict(updated) == {"designation": "Kevin Flynn", "cycles": 36}
+            stripped = graph.remove_properties(updated, "cycles")
             assert isinstance(stripped, Node)
-            assert dict(stripped) == {"name": "Ada"}
+            assert dict(stripped) == {"designation": "Kevin Flynn"}
 
     def test_arbitrary_property_keys(self) -> None:
         with Graph.open(":memory:") as graph:
@@ -137,16 +173,16 @@ class TestConvenienceWrites:
         with Graph.open(":memory:") as graph:
             first = graph.add_node()
             second = graph.add_node()
-            knows = graph.add_relationship(first, "KNOWS", second, since=2020)
-            graph.add_relationship(first, "LIKES", second, since=2020)
-            found = list(graph.find_relationships("KNOWS", since=2020))
+            knows = graph.add_relationship(first, "ALLIES_WITH", second, since_cycle=2020)
+            graph.add_relationship(first, "TRUSTS", second, since_cycle=2020)
+            found = list(graph.find_relationships("ALLIES_WITH", since_cycle=2020))
             assert [item.id for item in found] == [knows.id]
 
     def test_delete_relationship(self) -> None:
         with Graph.open(":memory:") as graph:
             first = graph.add_node()
             second = graph.add_node()
-            relationship = graph.add_relationship(first, "KNOWS", second)
+            relationship = graph.add_relationship(first, "ALLIES_WITH", second)
             graph.delete(relationship)
             with pytest.raises(NotFoundError):
                 graph.relationship(relationship.id)
@@ -155,7 +191,7 @@ class TestConvenienceWrites:
         with Graph.open(":memory:") as graph:
             first = graph.add_node()
             second = graph.add_node()
-            relationship = graph.add_relationship(first, "KNOWS", second)
+            relationship = graph.add_relationship(first, "ALLIES_WITH", second)
             with pytest.raises(ConnectedNodeError):
                 graph.delete(first)
             graph.delete(first, detach=True)
@@ -186,15 +222,25 @@ class TestConvenienceWrites:
             Always, to trigger rollback.
         """
         with active:
-            active.add_node(name="Ada")
+            active.add_node(designation="Kevin Flynn")
             message = "boom"
             raise RuntimeError(message)
 
     def test_transaction_commits(self) -> None:
         with Graph.open(":memory:") as graph:
             with graph.transaction() as active:
-                first = active.add_node("Person")
-                second = active.add_node("Person")
-                relationship = active.add_relationship(first, "KNOWS", second)
+                first = active.add_node("Program")
+                second = active.add_node("Program")
+                relationship = active.add_relationship(first, "ALLIES_WITH", second)
             assert graph.node(first.id) == first
             assert graph.relationship(relationship.id) == relationship
+
+    def test_convenience_write_inside_transaction_rejected(self) -> None:
+        with Graph.open(":memory:") as graph:
+            with graph.transaction() as active:
+                first = active.add_node("Program", designation="Tron")
+                with pytest.raises(TransactionError, match="already active"):
+                    graph.add_node("Program", designation="Clu")
+                second = active.add_node("Program", designation="Rinzler")
+            assert graph.node(first.id)["designation"] == "Tron"
+            assert graph.node(second.id)["designation"] == "Rinzler"

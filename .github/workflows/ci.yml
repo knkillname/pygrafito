@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Hatch
+        run: uv tool install hatch
+
+      - name: Add Hatch to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.local/share/hatch
+          key: hatch-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+
+      - name: Check
+        run: hatch check
+
+      - name: Test
+        run: hatch test
+
+  package:
+    needs: quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Build distributions
+        run: uv build
+
+      - name: Install wheel
+        run: |
+          uv venv .wheel-smoke
+          uv pip install --python .wheel-smoke/bin/python dist/*.whl
+
+      - name: Smoke test installed wheel
+        run: |
+          .wheel-smoke/bin/python - <<'PY'
+          from pygrafito import Graph
+
+          with Graph.open(":memory:") as graph:
+              node = graph.add_node("Program", designation="Tron")
+              assert graph.node(node.id)["designation"] == "Tron"
+          PY
+
+      - name: Verify wheel contents
+        run: |
+          python - <<'PY'
+          import glob
+          import zipfile
+
+          wheel = glob.glob("dist/*.whl")[0]
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          assert any(name.endswith("py.typed") for name in names), names
+          assert any(name.endswith("LICENSE.txt") for name in names), names
+          PY

@@ -6,7 +6,8 @@
 `pygrafito` is an embedded property graph for Python, persisted in a single
 SQLite database. It has no runtime dependencies outside the standard library:
 nodes carry labels and strict typed properties, relationships are directed and
-typed, and writes run in explicit ACID transactions.
+typed, and writes run in explicit ACID transactions. Every Python example in
+this README is executed by the test suite.
 
 ## Table of Contents
 
@@ -39,17 +40,17 @@ from pygrafito import Graph
 with tempfile.TemporaryDirectory() as directory:
     path = pathlib.Path(directory) / "graph.db"
     with Graph.open(path) as graph:
-        ada = graph.add_node("Person", name="Ada", age=36)
-        grace = graph.add_node("Person", name="Grace", age=37)
-        knows = graph.add_relationship(ada, "KNOWS", grace, since=2020)
+        ada = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+        grace = graph.add_node("Program", designation="Quorra", cycles=37)
+        knows = graph.add_relationship(ada, "ALLIES_WITH", grace, since_cycle=2020)
 
-        graph.set_properties(ada, age=37)
-        print(graph.node(ada.id)["age"])          # 37
-        print(graph.relationship(knows.id)["since"])  # 2020
+        graph.set_properties(ada, cycles=37)
+        print(graph.node(ada.id)["cycles"])          # 37
+        print(graph.relationship(knows.id)["since_cycle"])  # 2020
 
     with Graph.open(path) as graph:
-        people = graph.find_nodes("Person")
-        print(sorted(node["name"] for node in people))  # ['Ada', 'Grace']
+        people = graph.find_nodes("Program")
+        print(sorted(node["designation"] for node in people))  # ['Kevin Flynn', 'Quorra']
 ```
 
 Open `":memory:"` instead of a filesystem path when the graph should live only
@@ -66,17 +67,17 @@ matters.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    ada = graph.add_node("Person", "Employee", name="Ada", age=36)
-    print(sorted(ada.labels))  # ['Employee', 'Person']
-    print(ada["name"])         # Ada
+    ada = graph.add_node("Program", "ISO", designation="Kevin Flynn", cycles=36)
+    print(sorted(ada.labels))  # ['ISO', 'Program']
+    print(ada["designation"])         # Kevin Flynn
 
-    ada = graph.add_labels(ada, "Manager")
-    ada = graph.remove_labels(ada, "Employee")
-    ada = graph.set_properties(ada, age=37)
-    print(dict(ada))           # {'age': 37, 'name': 'Ada'}
+    ada = graph.add_labels(ada, "SystemMonitor")
+    ada = graph.remove_labels(ada, "ISO")
+    ada = graph.set_properties(ada, cycles=37)
+    print(dict(ada))           # {'cycles': 37, 'designation': 'Kevin Flynn'}
 
-    found = graph.find_nodes("Person", age=37)
-    print([node["name"] for node in found])  # ['Ada']
+    found = graph.find_nodes("Program", cycles=37)
+    print([node["designation"] for node in found])  # ['Kevin Flynn']
 ```
 
 Property values are booleans, signed 64-bit integers, finite floats, strings,
@@ -101,13 +102,13 @@ nodes. Reading a relationship preserves its stored start and end nodes.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    first = graph.add_node("Person", name="Ada")
-    second = graph.add_node("Person", name="Grace")
-    relationship = graph.add_relationship(first, "KNOWS", second, since=2020)
+    first = graph.add_node("Program", designation="Kevin Flynn")
+    second = graph.add_node("Program", designation="Quorra")
+    relationship = graph.add_relationship(first, "ALLIES_WITH", second, since_cycle=2020)
     print(relationship.start_id, relationship.rel_type, relationship.end_id)
-    print(relationship["since"])  # 2020
+    print(relationship["since_cycle"])  # 2020
 
-    found = graph.find_relationships("KNOWS", since=2020)
+    found = graph.find_relationships("ALLIES_WITH", since_cycle=2020)
     print([item.id for item in found])  # [relationship.id]
 ```
 
@@ -122,12 +123,12 @@ from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
     with graph.transaction() as tx:
-        ada = tx.add_node("Person", name="Ada")
-        grace = tx.add_node("Person", name="Grace")
-        tx.add_relationship(ada, "KNOWS", grace)
-        tx.set_properties(ada, age=36)
+        ada = tx.add_node("Program", designation="Kevin Flynn")
+        grace = tx.add_node("Program", designation="Quorra")
+        tx.add_relationship(ada, "ALLIES_WITH", grace)
+        tx.set_properties(ada, cycles=36)
 
-    print(graph.node(ada.id)["age"])  # 36
+    print(graph.node(ada.id)["cycles"])  # 36
 ```
 
 Writes use `BEGIN IMMEDIATE`, and one `Graph` owns exactly one connection. A
@@ -144,9 +145,9 @@ relationships first.
 from pygrafito import ConnectedNodeError, Graph
 
 with Graph.open(":memory:") as graph:
-    first = graph.add_node("Person")
-    second = graph.add_node("Person")
-    graph.add_relationship(first, "KNOWS", second)
+    first = graph.add_node("Program")
+    second = graph.add_node("Program")
+    graph.add_relationship(first, "ALLIES_WITH", second)
 
     try:
         graph.delete(first)
@@ -168,15 +169,15 @@ with its shortest depth. The start node is not yielded.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    ada = graph.add_node("Person", name="Ada")
-    grace = graph.add_node("Person", name="Grace")
-    bob = graph.add_node("Person", name="Bob")
-    graph.add_relationship(ada, "KNOWS", grace)
-    graph.add_relationship(grace, "KNOWS", bob)
+    ada = graph.add_node("Program", designation="Kevin Flynn")
+    grace = graph.add_node("Program", designation="Quorra")
+    bob = graph.add_node("Program", designation="Sam Flynn")
+    graph.add_relationship(ada, "ALLIES_WITH", grace)
+    graph.add_relationship(grace, "ALLIES_WITH", bob)
 
     steps = graph.traverse(ada, max_depth=2)
-    print([(step.node["name"], step.depth) for step in steps])
-    # [('Grace', 1), ('Bob', 2)]
+    print([(step.node["designation"], step.depth) for step in steps])
+    # [('Quorra', 1), ('Sam Flynn', 2)]
 ```
 
 `shortest_path` returns one path with the fewest relationships, or `None` when
@@ -187,15 +188,15 @@ no path exists within the given direction, type filter, and optional
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    ada = graph.add_node("Person", name="Ada")
-    grace = graph.add_node("Person", name="Grace")
-    bob = graph.add_node("Person", name="Bob")
-    graph.add_relationship(ada, "KNOWS", grace)
-    graph.add_relationship(grace, "KNOWS", bob)
+    ada = graph.add_node("Program", designation="Kevin Flynn")
+    grace = graph.add_node("Program", designation="Quorra")
+    bob = graph.add_node("Program", designation="Sam Flynn")
+    graph.add_relationship(ada, "ALLIES_WITH", grace)
+    graph.add_relationship(grace, "ALLIES_WITH", bob)
 
     path = graph.shortest_path(ada, bob)
     print(path.length)  # 2
-    print([node["name"] for node in path.nodes])  # ['Ada', 'Grace', 'Bob']
+    print([node["designation"] for node in path.nodes])  # ['Kevin Flynn', 'Quorra', 'Sam Flynn']
 ```
 
 `paths` enumerates relationship-unique trails between two nodes. Nodes may
@@ -206,14 +207,14 @@ minimum and maximum depth are supported, and `max_depth` is required.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    start = graph.add_node("start")
-    left = graph.add_node("left")
-    right = graph.add_node("right")
-    end = graph.add_node("end")
-    graph.add_relationship(start, "ROUTE", left)
-    graph.add_relationship(start, "ROUTE", right)
-    graph.add_relationship(left, "ROUTE", end)
-    graph.add_relationship(right, "ROUTE", end)
+    start = graph.add_node("Grid")
+    left = graph.add_node("Safehouse")
+    right = graph.add_node("Outlands")
+    end = graph.add_node("Portal")
+    graph.add_relationship(start, "GRID_LINK", left)
+    graph.add_relationship(start, "GRID_LINK", right)
+    graph.add_relationship(left, "GRID_LINK", end)
+    graph.add_relationship(right, "GRID_LINK", end)
 
     paths = graph.paths(start, end, min_depth=2, max_depth=2)
     print(len(list(paths)))  # 2
@@ -227,18 +228,18 @@ all types.
 from pygrafito import Direction, Graph
 
 with Graph.open(":memory:") as graph:
-    ada = graph.add_node("Person", name="Ada")
-    grace = graph.add_node("Person", name="Grace")
-    graph.add_relationship(ada, "KNOWS", grace)
-    graph.add_relationship(grace, "LIKES", ada)
+    ada = graph.add_node("Program", designation="Kevin Flynn")
+    grace = graph.add_node("Program", designation="Quorra")
+    graph.add_relationship(ada, "ALLIES_WITH", grace)
+    graph.add_relationship(grace, "TRUSTS", ada)
 
     incoming = graph.traverse(
         grace,
         max_depth=1,
         direction=Direction.INCOMING,
-        types=["KNOWS"],
+        types=["ALLIES_WITH"],
     )
-    print([step.node["name"] for step in incoming])  # ['Ada']
+    print([step.node["designation"] for step in incoming])  # ['Kevin Flynn']
 ```
 
 Path enumeration is exponential in the worst case because a graph can contain
@@ -262,10 +263,10 @@ from pygrafito import Graph
 with tempfile.TemporaryDirectory() as directory:
     path = pathlib.Path(directory) / "graph.db"
     with Graph.open(path) as graph:
-        node = graph.add_node("Person", name="Ada")
+        node = graph.add_node("Program", designation="Kevin Flynn")
 
     with Graph.open(path) as graph:
-        print(graph.node(node.id)["name"])  # Ada
+        print(graph.node(node.id)["designation"])  # Kevin Flynn
 ```
 
 ## License

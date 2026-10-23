@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: 2026-present U.N. Owen <void@some.where>
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
 """Public package surface for the embedded property graph."""
@@ -8,6 +8,7 @@ from pygrafito.engine.transaction import Transaction
 from pygrafito.model import (
     ConnectedNodeError,
     Direction,
+    GraphClosedError,
     Node,
     NotFoundError,
     Path,
@@ -23,6 +24,7 @@ __all__ = [
     "ConnectedNodeError",
     "Direction",
     "Graph",
+    "GraphClosedError",
     "Node",
     "NotFoundError",
     "Path",
