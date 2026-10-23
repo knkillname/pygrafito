@@ -1,0 +1,118 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pygrafito"
+dynamic = ["version"]
+description = "An embedded property graph backed by the Python standard library"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+keywords = ["graph", "property-graph", "sqlite", "embedded"]
+authors = [
+  { name = "U.N. Owen", email = "void@some.where" },
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: Implementation :: CPython",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/U.N. Owen/pygrafito#readme"
+Issues = "https://github.com/U.N. Owen/pygrafito/issues"
+Source = "https://github.com/U.N. Owen/pygrafito"
+
+[tool.hatch.version]
+path = "src/pygrafito/__about__.py"
+
+[tool.hatch.envs.hatch-test]
+extra-dependencies = [
+  "pytest-cov>=6.0",
+]
+
+[[tool.hatch.envs.hatch-test.matrix]]
+python = ["3.14"]
+
+[tool.hatch.envs.hatch-check-types]
+dependencies = [
+  "mypy>=1.11",
+  "pytest>=9.0",
+]
+config-path = "pyproject.toml"
+
+[tool.hatch.envs.hatch-check-types.scripts]
+check = "mypy{env:HATCH_CHECK_TYPES_ARGS:} {args:src/pygrafito tests}"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "ANN",
+  "ARG",
+  "B",
+  "C4",
+  "D",
+  "DTZ",
+  "E",
+  "F",
+  "I",
+  "N",
+  "PTH",
+  "PL",
+  "PT",
+  "RUF",
+  "SIM",
+  "TID",
+  "UP",
+  "W",
+]
+ignore = [
+  "D203",
+  "D213",
+  "PLR0913",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+  "ANN",
+  "ARG",
+  "D",
+  "PLR2004",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src/pygrafito", "tests"]
+show_error_codes = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=pygrafito --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["pygrafito"]
+branch = true
+omit = [
+  "src/pygrafito/__about__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 80
+exclude_lines = [
+  "no cov",
+  "if __name__ == .__main__.:",
+  "if TYPE_CHECKING:",
+]
