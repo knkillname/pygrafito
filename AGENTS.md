@@ -2,22 +2,22 @@
 
 ## Start here
 
-`pygrafito` is an embedded property-graph library backed by stdlib `sqlite3`. Its design and implementation plan live in `openspec/changes/add-embedded-property-graph/`; read the proposal, specs, design, and tasks before writing code. The change is the source of truth until archived.
+`pygrafito` is an embedded property-graph library backed by stdlib `sqlite3`. Durable specs live in `openspec/specs/`; the archived design and implementation plan for the initial release live in `openspec/changes/archive/2026-10-22-add-embedded-property-graph/`.
 
-- Target Python 3.14, runtime standard library only. If `pyproject.toml` still declares an older version, setup task 1.1 has not run.
-- Durable specs live in `openspec/specs/`. Until the change is archived, the change deltas are authoritative.
+- Target Python 3.14, runtime standard library only.
+- Durable specs live in `openspec/specs/` and are authoritative.
 - Implement through `/opsx-apply`; planning and exploration must not write code.
-- If runtime modules or tooling are missing, the change has not been applied yet.
 
 ## Commands
 
 - `hatch check --fix` — Ruff lint/format plus mypy. Hatch 1.18 built-in; do not use `hatch run check`.
 - `hatch test` — pytest in the Hatch test environment. Pytest arguments are forwarded: `hatch test tests/test_codec.py::test_name`.
-- `openspec status --change add-embedded-property-graph --json`
-- `openspec validate add-embedded-property-graph --strict`
-- Coverage gate: at least 80%; `fail_under` is enabled in task 6.2.
+- `hatch version <version>` — set the project version. Never edit `src/pygrafito/__about__.py` directly.
+- `openspec status --change <name> --json`; `openspec validate <name> --strict`.
+- `openspec validate --specs --strict`.
+- Coverage gate: at least 80%; `fail_under` is enabled in `pyproject.toml`.
 
-If Ruff, mypy, or pytest configuration is missing, setup tasks 1.1-1.2 have not run; add it there rather than inventing a parallel workflow.
+Keep Ruff, mypy, pytest, and coverage configuration in `pyproject.toml`; do not invent a parallel workflow.
 
 ## Code style (non-default)
 
@@ -45,6 +45,15 @@ If Ruff, mypy, or pytest configuration is missing, setup tasks 1.1-1.2 have not 
 - Traversal fixtures must cover diamond, directed cycle, parallel relationships, and self-loop.
 - Add tests in the same task group as the code they cover; do not defer them.
 - Before archive: `hatch check --fix` and `hatch test` pass, coverage at least 80%.
+
+## Versioning and changelog
+
+- `CHANGELOG.md` is required. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+- Every change affecting behavior, the public API, dependencies, packaging, or the development workflow MUST add an entry under `## [Unreleased]` in the same task group as the code.
+- Use the Keep a Changelog categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, and `Security`. Omit empty categories.
+- Releases move the `[Unreleased]` entries into a new `## [X.Y.Z] - YYYY-MM-DD` section, then run `hatch version <version>`.
+- `hatch version` is the only supported way to change the version; `pyproject.toml` reads it dynamically from `src/pygrafito/__about__.py`.
+- Keep an empty `## [Unreleased]` section at the top after every release.
 
 ## Documentation
 
