@@ -808,3 +808,233 @@ class TestTransactions(_QueryGraph):
         except RuntimeError:
             pass
         assert graph.query("MATCH (n {designation: 'Yori'}) RETURN n").rows == ()
+
+
+class TestUnwindExecution(_QueryGraph):
+    """Verify UNWIND row expansion and its interaction with later stages."""
+
+    def test_expand_literal_in_order(self, graph: Graph) -> None:
+        result = graph.query("UNWIND [1, 2, 3] AS value RETURN value")
+        assert self.values(result) == [(1,), (2,), (3,)]
+
+    def test_expand_parameter_list(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $names AS name RETURN name",
+            {"names": ["Kevin Flynn", "Quorra"]},
+        )
+        assert self.values(result) == [("Kevin Flynn",), ("Quorra",)]
+
+    def test_expand_mapping_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row RETURN row.designation AS name",
+            {"rows": [{"designation": "Tron"}, {"designation": "Clu"}]},
+        )
+        assert self.values(result) == [("Tron",), ("Clu",)]
+
+    def test_empty_list_and_null_produce_no_rows(self, graph: Graph) -> None:
+        assert graph.query("UNWIND [] AS value RETURN value").rows == ()
+        assert graph.query("UNWIND $value AS value RETURN value", {"value": None}).rows == ()
+
+    def test_runtime_non_list_is_rejected(self, graph: Graph) -> None:
+        with pytest.raises(QueryExecutionError):
+            graph.query("UNWIND $value AS value RETURN value", {"value": "Tron"})
+        with pytest.raises(QueryExecutionError):
+            graph.query("UNWIND $value AS value RETURN value", {"value": {"a": 1}})
+
+    def test_static_non_list_is_rejected(self, graph: Graph) -> None:
+        with pytest.raises(QuerySemanticError):
+            graph.query("UNWIND 36 AS value RETURN value")
+
+    def test_unwind_feeds_a_match(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row MATCH (n:Program {designation: row.designation}) "
+            "RETURN n.cycles ORDER BY n.cycles",
+            {"rows": [{"designation": "Quorra"}, {"designation": "Tron"}]},
+        )
+        assert self.values(result) == [(37,), (40,)]
+
+    def test_match_feeds_an_unwind(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) WITH collect(n.designation) AS names "
+            "UNWIND names AS name RETURN count(*) AS total"
+        )
+        assert self.values(result) == [(6,)]
+
+    def test_null_row_skips_later_stages(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $value AS value MATCH (n:Program {designation: value}) RETURN n",
+            {"value": None},
+        )
+        assert result.rows == ()
+
+    def test_create_from_a_row_expression(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "CREATE (n:Program {designation: row.designation, cycles: row.cycles}) "
+            "RETURN n.cycles AS cycles",
+            {"rows": [{"designation": "Marvin", "cycles": 1}]},
+        )
+        assert self.values(result) == [(1,)]
+
+    def test_null_pattern_value_matches_nothing(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row MATCH (n:Program {designation: row.designation}) RETURN n",
+            {"rows": [{"designation": None}]},
+        )
+        assert result.rows == ()
+
+    def test_null_create_property_is_omitted(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "CREATE (n:Program {designation: row.designation, cycles: row.cycles}) "
+            "RETURN n.designation AS name",
+            {"rows": [{"designation": "Marvin", "cycles": None}]},
+        )
+        assert self.values(result) == [("Marvin",)]
+        marvin = next(iter(graph.find_nodes("Program", designation="Marvin")))
+        assert "cycles" not in marvin
+
+    def test_large_expansion_is_linear(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $values AS value RETURN count(*) AS total",
+            {"values": list(range(10000))},
+        )
+        assert self.values(result) == [(10000,)]
+
+
+class TestMergeExecution(_QueryGraph):
+    """Verify MERGE matching, creation, and conditional updates."""
+
+    def test_merge_creates_a_missing_node(self, graph: Graph) -> None:
+        result = graph.query(
+            "MERGE (n:Program {designation: 'Marvin'}) RETURN n.designation AS name"
+        )
+        assert self.values(result) == [("Marvin",)]
+        assert result.summary.created_nodes == 1
+
+    def test_merge_matches_an_existing_node(self, graph: Graph) -> None:
+        result = graph.query("MERGE (n:Program {designation: 'Tron'}) RETURN n.cycles AS cycles")
+        assert self.values(result) == [(40,)]
+        assert result.summary.created_nodes == 0
+
+    def test_on_create_applies_only_to_created_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (n:Program {designation: row.designation}) "
+            "ON CREATE SET n.cycles = row.cycles "
+            "RETURN n.designation AS name, n.cycles AS cycles",
+            {
+                "rows": [
+                    {"designation": "Tron", "cycles": 99},
+                    {"designation": "Marvin", "cycles": 1},
+                ]
+            },
+        )
+        assert self.values(result) == [("Tron", 40), ("Marvin", 1)]
+        assert result.summary.created_nodes == 1
+        assert result.summary.properties_set == 1
+
+    def test_on_match_applies_only_to_matched_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (n:Program {designation: row.designation}) "
+            "ON MATCH SET n.cycles = row.cycles "
+            "RETURN n.designation AS name, n.cycles AS cycles",
+            {
+                "rows": [
+                    {"designation": "Tron", "cycles": 41},
+                    {"designation": "Marvin", "cycles": 1},
+                ]
+            },
+        )
+        assert self.values(result) == [("Tron", 41), ("Marvin", None)]
+        assert result.summary.created_nodes == 1
+
+    def test_conditional_update_is_visible_to_return(self, graph: Graph) -> None:
+        result = graph.query(
+            "MERGE (n:Program {designation: 'Clu'}) ON MATCH SET n.cycles = 99 RETURN n.cycles"
+        )
+        assert self.values(result) == [(99,)]
+
+    def test_duplicate_rows_create_once(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) "
+            "RETURN n.designation AS name",
+            {"rows": [{"designation": "Marvin"}, {"designation": "Marvin"}]},
+        )
+        assert self.values(result) == [("Marvin",), ("Marvin",)]
+        assert result.summary.created_nodes == 1
+
+    def test_several_matches_produce_several_rows(self, graph: Graph) -> None:
+        graph.add_node("Program", designation="Marvin")
+        graph.add_node("Program", designation="Marvin")
+        result = graph.query(
+            "MERGE (n:Program {designation: 'Marvin'}) RETURN n.designation AS name"
+        )
+        assert self.values(result) == [("Marvin",), ("Marvin",)]
+        assert result.summary.created_nodes == 0
+
+    def test_merge_relationship_between_bound_nodes(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Kevin Flynn'}), "
+            "(b:Program {designation: 'Sam Flynn'}) "
+            "MERGE (a)-[r:TRUSTS]->(b) RETURN type(r) AS kind"
+        )
+        assert self.values(result) == [("TRUSTS",)]
+        assert result.summary.created_relationships == 1
+
+    def test_merge_relationship_properties_from_a_row(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "MATCH (a:Program {designation: 'Kevin Flynn'}), "
+            "(b:Program {designation: 'Quorra'}) "
+            "MERGE (a)-[r:MONITORS {since_cycle: row.since}]->(b) "
+            "RETURN r.since_cycle AS since",
+            {"rows": [{"since": 2020}]},
+        )
+        assert self.values(result) == [(2020,)]
+        assert result.summary.created_relationships == 1
+
+    def test_whole_pattern_does_not_partially_reuse(self, graph: Graph) -> None:
+        before = len(
+            [node for node in graph.find_nodes("Program") if node["designation"] == "Tron"]
+        )
+        graph.query(
+            "MERGE (a:Program {designation: 'Tron'})"
+            "-[:MONITORS]->(b:Program {designation: 'Quorra'})"
+        )
+        after = len([node for node in graph.find_nodes("Program") if node["designation"] == "Tron"])
+        assert after == before + 1
+
+    def test_repeated_variable_creates_a_self_loop(self, graph: Graph) -> None:
+        result = graph.query(
+            "MERGE (a:Program {designation: 'Marvin'})"
+            "-[:MONITORS]->(a) RETURN a.designation AS name"
+        )
+        assert self.values(result) == [("Marvin",)]
+        node = next(node for node in graph.find_nodes("Program") if node["designation"] == "Marvin")
+        relationships = graph.find_relationships("MONITORS")
+        assert any(item.start_id == node.id and item.end_id == node.id for item in relationships)
+
+    def test_null_merge_property_is_rejected(self, graph: Graph) -> None:
+        with pytest.raises(QueryExecutionError):
+            graph.query(
+                "UNWIND $rows AS row MERGE (n:Program {designation: row.designation})",
+                {"rows": [{"designation": None}]},
+            )
+
+    def test_merge_failure_rolls_back_creations(self, graph: Graph) -> None:
+        before = graph.query("MATCH (n:Program) RETURN count(*) AS total").rows[0]["total"]
+        with pytest.raises(QueryExecutionError):
+            graph.query(
+                "UNWIND $rows AS row "
+                "MERGE (n:Program {designation: row.designation, cycles: row.cycles})",
+                {
+                    "rows": [
+                        {"designation": "Marvin", "cycles": 1},
+                        {"designation": "Rinzler", "cycles": None},
+                    ]
+                },
+            )
+        after = graph.query("MATCH (n:Program) RETURN count(*) AS total").rows[0]["total"]
+        assert after == before

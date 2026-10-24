@@ -149,6 +149,7 @@ class TestLexer:
             "DELETE",
             "DETACH",
             "CASE",
+            "ON",
         ]
         for name in unsupported:
             token = Lexer.tokenize(name)[0]
@@ -156,7 +157,7 @@ class TestLexer:
             assert token.value == name
 
     def test_write_keywords_are_case_insensitive(self) -> None:
-        names = ["CREATE", "SET", "REMOVE", "DELETE", "DETACH", "MERGE"]
+        names = ["CREATE", "SET", "REMOVE", "DELETE", "DETACH", "MERGE", "ON"]
         for name in names:
             token = Lexer.tokenize(name.lower())[0]
             assert token.kind is TokenKind.KEYWORD

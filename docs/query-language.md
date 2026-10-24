@@ -32,9 +32,12 @@ A statement is a non-empty ordered sequence of clauses:
 
 ```text
 { [OPTIONAL] MATCH <path pattern> [, <path pattern> ...] [WHERE <expression>]
+  | UNWIND <expression> AS <identifier>
   | WITH [DISTINCT] <projection> [WHERE <expression>]
     [ORDER BY <sort item> [, <sort item> ...]] [SKIP <expression>] [LIMIT <expression>] }
-[{CREATE | SET | REMOVE | DELETE | DETACH DELETE} ...]
+[{CREATE <path pattern>
+  | MERGE <path pattern> [ON CREATE SET <assignments>] [ON MATCH SET <assignments>]
+  | SET | REMOVE | DELETE | DETACH DELETE} ...]
 [RETURN [DISTINCT] <projection> [, <projection> ...]
  [ORDER BY <sort item> [, <sort item> ...]]
  [SKIP <expression>]
@@ -45,10 +48,51 @@ A statement is a non-empty ordered sequence of clauses:
 A `MATCH` clause carries one or more comma-separated path patterns and an
 optional `WHERE`; `OPTIONAL MATCH` uses the same shape with left-join semantics.
 A statement may contain several `MATCH` clauses: each clause is a stage joined
-against the rows produced by the previous one. `MATCH` is optional when the
-statement contains a write clause, and `RETURN` is optional in that case too. A
-read statement requires both. The last `MATCH` precedes every write clause, and
-`RETURN` is at most once and always last. Multiple statements are rejected.
+against the rows produced by the previous one. `UNWIND` is another read stage
+and a row source. `MATCH` and `UNWIND` are optional when the statement contains
+a write clause, and `RETURN` is optional in that case too. A read statement
+requires at least one row source and a `RETURN`. Every read stage precedes every
+write clause, and `RETURN` is at most once and always last. Multiple statements
+are rejected.
+
+## UNWIND
+
+`UNWIND` expands a list-valued expression into one row per element:
+
+```text
+UNWIND $rows AS row ...
+UNWIND [36, 37, 40] AS cycles ...
+```
+
+A null value or an empty list produces no rows. A value that is not a list is a
+query error. The bound variable is available to later stages and write clauses,
+and `UNWIND` may serve as the only row source of a read statement:
+
+```python
+graph.query(
+    "UNWIND $rows AS row MERGE (n:Program {designation: row.designation})",
+    {"rows": [{"designation": "Tron"}, {"designation": "Quorra"}]},
+)
+graph.query("UNWIND [1, 2, 3] AS value RETURN value")
+```
+
+A row can be a mapping, so `row.designation` reads a field from the current row.
+
+## Pattern property expressions
+
+A pattern property map may evaluate an expression against the current row and
+the statement parameters. This is how a row drives a match or a merge:
+
+```text
+MATCH (n:Program {designation: row.designation}) ...
+CREATE (n:Program {designation: row.designation}) ...
+MERGE (n:Program {designation: row.designation}) ...
+```
+
+A referenced variable must be in scope before the pattern starts, so a pattern
+cannot reference a variable it introduces itself. Aggregates are rejected. A
+null value matches nothing in `MATCH`, is omitted from the created properties in
+`CREATE`, and raises a query error in `MERGE`.
 
 
 ## Node patterns
@@ -122,8 +166,8 @@ MATCH p = (a)-[:ALLIES_WITH*1..2]->(b) RETURN p
 
 A relationship-list variable may be projected or passed to `size`; it cannot be
 used where a single relationship is required, so `type(r)` and `r.property` are
-semantic errors. The same applies to pattern property maps: they must be
-literals or parameters.
+semantic errors. Pattern property maps may contain expressions; see
+[Pattern property expressions](#pattern-property-expressions).
 
 ## Pattern variables and paths
 
@@ -222,9 +266,9 @@ self-loop is produced once for that node rather than twice.
 
 ## Write clauses
 
-A write clause operates on the rows produced by `MATCH`, or on a single empty
-row when the statement has no `MATCH`. Write clauses run in source order, and
-each one observes the mutations of the clauses before it.
+A write clause operates on the rows produced by `MATCH` or `UNWIND`, or on a
+single empty row when the statement has no row source. Write clauses run in
+source order, and each one observes the mutations of the clauses before it.
 
 ### CREATE
 
@@ -242,7 +286,41 @@ graph.query("CREATE (n:Program {designation: 'Quorra', cycles: 37})")
 ```
 
 `CREATE` never matches an existing element. Property values in a create pattern
-must be literals or parameters, and a null entry is ignored.
+may be expressions evaluated against the current row, and a null entry is
+ignored.
+
+### MERGE
+
+`MERGE` matches one fixed-length path pattern as a whole, and creates every
+unbound element when the pattern does not match:
+
+```python
+graph.query(
+    "UNWIND $rows AS row "
+    "MERGE (n:Program {designation: row.designation}) "
+    "ON CREATE SET n.cycles = row.cycles "
+    "ON MATCH SET n.cycles = n.cycles + 1",
+    {"rows": [{"designation": "Tron", "cycles": 40}]},
+)
+```
+
+The clause runs once per input row, in order, so a creation made by one row is
+visible to later rows in the same statement. A pattern that matches several
+existing rows produces several result rows and creates nothing. A pattern that
+does not match as a whole creates its unbound elements and reuses only variables
+bound by earlier clauses; it does not partially reuse an equivalent node for an
+unbound position. Repeating a variable in the pattern creates one element, so
+`MERGE (a:Program {designation: 'Rinzler'})-[:MONITORS]->(a)` creates a
+self-loop.
+
+`ON CREATE SET` applies only to rows the clause created, and `ON MATCH SET` only
+to rows it matched. Each may appear at most once, and `ON CREATE` must come
+first. Assignments follow `SET` rules.
+
+A merged pattern must contain one path, an explicit type and the `-->` direction
+for every relationship, no path variable, and no quantified relationship. It
+cannot rebind a relationship variable. A null property value in a merged pattern
+is a query error.
 
 ### SET and REMOVE
 
@@ -558,12 +636,17 @@ variables.
 
 ```text
 statement        = { clause } [";"]
-clause           = match-clause | with-clause | create-clause | set-clause
-                 | remove-clause | delete-clause | return-clause
+clause           = match-clause | unwind-clause | with-clause | create-clause
+                 | merge-clause | set-clause | remove-clause | delete-clause
+                 | return-clause
 match-clause     = [ "OPTIONAL" ] "MATCH" path-pattern { "," path-pattern } [where-clause]
+unwind-clause    = "UNWIND" expression "AS" identifier
 with-clause      = "WITH" [ "DISTINCT" ] return-item { "," return-item }
                    [where-clause] [order-clause] [skip-clause] [limit-clause]
 create-clause    = "CREATE" path-pattern
+merge-clause     = "MERGE" path-pattern [on-create] [on-match]
+on-create        = "ON" "CREATE" "SET" set-item { "," set-item }
+on-match         = "ON" "MATCH" "SET" set-item { "," set-item }
 set-clause       = "SET" set-item { "," set-item }
 set-item         = identifier "." key "=" expression
                  | identifier { ":" label }
@@ -600,11 +683,11 @@ alias may be backtick-quoted. A write clause may omit `MATCH` and `RETURN`, and
 The following are recognized and rejected with a query error before execution:
 
 - `WITH *`
-- `UNWIND` and subqueries (`CALL { ... }`, `EXISTS { ... }`)
+- subqueries (`CALL { ... }`, `EXISTS { ... }`)
 - `CASE` expressions and map literals
-- `MERGE` and conditional updates (`ON CREATE`, `ON MATCH`)
 - whole-map assignment (`SET n = {...}`) and merge assignment (`SET n += {...}`)
 - index access such as `n.list[0]`
+- `MERGE` over a quantified pattern, a path variable, or more than one pattern
 
 These boundaries are deliberate. Extending the dialect requires its own
 specification change rather than silently accepting partial behavior.

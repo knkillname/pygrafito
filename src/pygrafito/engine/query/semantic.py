@@ -18,6 +18,7 @@ from pygrafito.engine.query.ast import (
     ListLiteral,
     Literal,
     Match,
+    Merge,
     Operators,
     Parameter,
     PathPattern,
@@ -32,6 +33,7 @@ from pygrafito.engine.query.ast import (
     Star,
     Statement,
     Unary,
+    Unwind,
     Variable,
     With,
 )
@@ -164,8 +166,24 @@ class WithStage:
     has_aggregates: bool
 
 
-type ReadStage = MatchStage | OptionalMatchStage | WithStage
-type WriteClause = Create | Set | Remove | Delete
+@dataclasses.dataclass(frozen=True, slots=True)
+class UnwindStage:
+    """One ``UNWIND`` stage that expands a list into rows.
+
+    Parameters
+    ----------
+    expression : Expression
+        List-valued expression to evaluate per input row.
+    variable : str
+        Variable bound to each expanded element.
+    """
+
+    expression: Expression
+    variable: str
+
+
+type ReadStage = MatchStage | OptionalMatchStage | UnwindStage | WithStage
+type WriteClause = Create | Merge | Set | Remove | Delete
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -299,8 +317,13 @@ class SemanticAnalyzer:
                     )
             elif isinstance(clause, With):
                 stages.append(self._bind_with(clause))
+            elif isinstance(clause, Unwind):
+                stages.append(self._bind_unwind(clause))
             elif isinstance(clause, Create):
                 self._bind_create(clause.pattern)
+                write_clauses.append(clause)
+            elif isinstance(clause, Merge):
+                self._bind_merge(clause)
                 write_clauses.append(clause)
             elif isinstance(clause, Set):
                 self._validate_set(clause)
@@ -423,6 +446,95 @@ class SemanticAnalyzer:
             has_aggregates=has_aggregates,
         )
 
+    def _bind_unwind(self, clause: Unwind) -> UnwindStage:
+        """Analyse an ``UNWIND`` clause and bind its variable.
+
+        Parameters
+        ----------
+        clause : Unwind
+            Clause to analyse.
+
+        Returns
+        -------
+        UnwindStage
+            Analysed stage.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the variable is already bound, the expression is statically not
+            a list, or the expression contains an aggregate.
+        """
+        if clause.variable in self._kinds:
+            message = f"variable {clause.variable!r} is already bound"
+            raise QuerySemanticError(message)
+        if isinstance(clause.expression, Literal) and clause.expression.value is not None:
+            message = "UNWIND requires a list expression"
+            raise QuerySemanticError(message)
+        self._validate_expression(clause.expression, aggregates_allowed=False)
+        self._kinds[clause.variable] = VariableKind.SCALAR
+        return UnwindStage(expression=clause.expression, variable=clause.variable)
+
+    def _bind_merge(self, clause: Merge) -> None:
+        """Analyse a ``MERGE`` clause and bind its pattern variables.
+
+        Parameters
+        ----------
+        clause : Merge
+            Clause to analyse.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the pattern is not a creatable fixed-length path, references a
+            forward variable, or changes a bound element.
+        """
+        pattern = clause.pattern
+        if pattern.variable is not None:
+            message = "MERGE cannot bind a path variable"
+            raise QuerySemanticError(message)
+        for relationship in pattern.relationships:
+            if relationship.min_hops is not None or relationship.max_hops is not None:
+                message = "MERGE cannot use a variable-length relationship"
+                raise QuerySemanticError(message)
+            if len(relationship.types) != 1:
+                message = "a merged relationship must have exactly one type"
+                raise QuerySemanticError(message)
+            if relationship.direction is not Direction.OUTGOING:
+                message = "a merged relationship must use the '-->' direction"
+                raise QuerySemanticError(message)
+        for node in pattern.nodes:
+            self._validate_property_map(node.properties)
+        for relationship in pattern.relationships:
+            self._validate_property_map(relationship.properties)
+        for node in pattern.nodes:
+            if node.variable is None:
+                continue
+            existing = self._kinds.get(node.variable)
+            if existing is None:
+                self._register(node.variable, VariableKind.NODE)
+                continue
+            if existing is not VariableKind.NODE:
+                message = f"variable {node.variable!r} is not a node"
+                raise QuerySemanticError(message)
+            if node.labels or node.properties:
+                message = (
+                    f"MERGE cannot change bound variable {node.variable!r}; "
+                    "use SET for labels and properties"
+                )
+                raise QuerySemanticError(message)
+        for relationship in pattern.relationships:
+            if relationship.variable is None:
+                continue
+            if relationship.variable in self._kinds:
+                message = f"MERGE cannot rebind relationship variable {relationship.variable!r}"
+                raise QuerySemanticError(message)
+            self._register(relationship.variable, VariableKind.RELATIONSHIP)
+        if clause.on_create is not None:
+            self._validate_set(clause.on_create)
+        if clause.on_match is not None:
+            self._validate_set(clause.on_match)
+
     def _bind_create(self, pattern: PathPattern) -> None:
         """Register the variables created by a ``CREATE`` pattern.
 
@@ -445,6 +557,10 @@ class SemanticAnalyzer:
             message = "path variables are not supported in CREATE"
             raise QuerySemanticError(message)
         bound = frozenset(self._kinds)
+        for node in pattern.nodes:
+            self._validate_property_map(node.properties)
+        for relationship in pattern.relationships:
+            self._validate_property_map(relationship.properties)
         for index, _relationship in enumerate(pattern.relationships):
             endpoints = (pattern.nodes[index], pattern.nodes[index + 1])
             for node in endpoints:
@@ -452,7 +568,6 @@ class SemanticAnalyzer:
                     message = "both endpoints of a created relationship must be already bound"
                     raise QuerySemanticError(message)
         for node in pattern.nodes:
-            self._validate_property_map(node.properties)
             if node.variable is None:
                 continue
             if node.variable in bound:
@@ -469,7 +584,6 @@ class SemanticAnalyzer:
             if relationship.min_hops is not None or relationship.max_hops is not None:
                 message = "CREATE cannot use a variable-length relationship"
                 raise QuerySemanticError(message)
-            self._validate_property_map(relationship.properties)
             if len(relationship.types) != 1:
                 message = "a created relationship must have exactly one type"
                 raise QuerySemanticError(message)
@@ -601,21 +715,25 @@ class SemanticAnalyzer:
             if existing is not None:
                 message = f"path variable {pattern.variable!r} is already bound"
                 raise QuerySemanticError(message)
-            self._register(pattern.variable, VariableKind.PATH)
         for node in pattern.nodes:
-            if node.variable is not None:
-                self._register(node.variable, VariableKind.NODE)
             self._validate_property_map(node.properties)
         for relationship in pattern.relationships:
             quantified = relationship.min_hops is not None or relationship.max_hops is not None
             if quantified:
                 self._validate_quantifier(relationship)
+            self._validate_property_map(relationship.properties)
+        if pattern.variable is not None:
+            self._register(pattern.variable, VariableKind.PATH)
+        for node in pattern.nodes:
+            if node.variable is not None:
+                self._register(node.variable, VariableKind.NODE)
+        for relationship in pattern.relationships:
+            quantified = relationship.min_hops is not None or relationship.max_hops is not None
             if relationship.variable is not None:
                 self._register(
                     relationship.variable,
                     VariableKind.RELATIONSHIP_LIST if quantified else VariableKind.RELATIONSHIP,
                 )
-            self._validate_property_map(relationship.properties)
 
     @staticmethod
     def _validate_quantifier(relationship: RelationshipPattern) -> None:
@@ -671,7 +789,7 @@ class SemanticAnalyzer:
             raise QuerySemanticError(message)
 
     def _validate_property_map(self, entries: Iterable[PropertyEntry]) -> None:
-        """Require pattern property values to be constant expressions.
+        """Validate the expressions of one pattern property map.
 
         Parameters
         ----------
@@ -679,31 +797,7 @@ class SemanticAnalyzer:
             Property-map entries to validate.
         """
         for entry in entries:
-            self._require_constant(entry.value)
-            self._collect_parameters(entry.value)
-
-    def _require_constant(self, expression: Expression) -> None:
-        """Require a constant expression.
-
-        Parameters
-        ----------
-        expression : Expression
-            Expression to validate.
-
-        Raises
-        ------
-        QuerySemanticError
-            If the expression references a variable or is not a supported
-            constant form.
-        """
-        if isinstance(expression, (Literal, Parameter)):
-            return
-        if isinstance(expression, ListLiteral):
-            for item in expression.items:
-                self._require_constant(item)
-            return
-        message = "pattern property values must be literals or parameters"
-        raise QuerySemanticError(message)
+            self._validate_expression(entry.value, aggregates_allowed=False)
 
     def _collect_parameters(self, expression: Expression) -> None:
         """Record every parameter reference in an expression.

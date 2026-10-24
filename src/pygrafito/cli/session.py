@@ -469,7 +469,9 @@ class Session:
         error : BaseException
             Failure to report.
         """
-        self.warn(f"error: {error}")
+        lines = [f"error: {error}"]
+        lines.extend(f"  {note}" for note in getattr(error, "__notes__", ()))
+        self.warn("\n".join(lines))
 
     def report_footer(
         self,

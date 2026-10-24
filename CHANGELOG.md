@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `UNWIND` expands a list-valued expression into rows, acts as a statement's row source, and
+  feeds later stages and write clauses.
+- `MERGE` matches one fixed-length pattern as a whole or creates its unbound elements,
+  with `ON CREATE SET` and `ON MATCH SET` conditional updates. It runs once per input row, so
+  later rows see earlier creations.
+- Pattern property maps accept non-aggregate expressions evaluated against the current row, so a
+  row can drive a `MATCH`, `CREATE`, or `MERGE` property value.
+- `Graph.import_rows` and `Graph.import_file` import CSV, JSONL, and in-memory mappings with a
+  statement-driven mapping, independent or atomic batch transactions, and row-level failure
+  notes. `ImportSummary` reports the rows, batches, and aggregate mutation counts.
+- The `.import` shell command exposes the importer with `--format`, `--batch`, and `--atomic`.
+- `PreparedQuery.is_write` and `PreparedQuery.parameters` expose statement metadata before
+  execution.
+- The embedding contract for file-backed graphs: `Graph.journal_mode` reports the mode the
+  connection obtained, `Graph.open(..., busy_timeout=...)` bounds a lock wait,
+  `HandleAffinityError` rejects use from a thread that does not own the handle, and
+  `LockTimeoutError` reports an exhausted write-lock wait. Each public read observes one
+  committed state, including traversal capture and shortest-path evaluation. See
+  `docs/embedding.md`.
+- Node and relationship uniqueness constraints: `Graph.create_node_uniqueness_constraint`,
+  `Graph.create_relationship_uniqueness_constraint`, `Graph.constraints`, and
+  `Graph.drop_constraint`, plus the `Constraint` value type and `ElementKind`. Constraints
+  persist in the file, are enforced by SQLite on every write path, and compare values by type
+  and value. `ConstraintViolationError` reports the constraint, offending value, and surviving
+  holder. See `docs/constraints.md`.
+- The `.constraints` shell command lists declared constraints, and `.schema` also reports
+  constraints and the effective journal mode.
+- A strict, versioned JSONL snapshot format with a header, element counts, tagged node and
+  relationship records, canonical ordering, and rejection of unknown fields, duplicate keys,
+  truncated files, and count mismatches. See `docs/interop.md`.
+- `Graph.export_jsonl` writes one consistent snapshot in a single read transaction, streams
+  nodes and relationships, refuses an existing destination unless `overwrite=True`, and refuses
+  the open database path and its journal sidecars.
+- `Graph.restore_jsonl` loads a snapshot into an empty graph, remaps node and relationship ids,
+  verifies the header counts, and runs in one transaction. `replace=True` clears and restores
+  atomically, so a failure restores the original graph.
+- Read-only `graph_nodes`, `graph_node_labels`, `graph_relationships`, and `graph_meta` views,
+  published on a write-capable open with a view-version record. `Graph.view_version` reports the
+  published version, or zero when the views are absent; read-only opens leave older files
+  untouched. See `docs/interop.md`.
+- The `.export` and `.restore` shell commands expose snapshot export and restore, including
+  `--overwrite` and `--replace`, with the same transaction, read-only, and failure-isolation
+  rules as the other maintenance commands.
+
+### Changed
+
+- Pattern property maps in `MATCH` and `CREATE` may reference variables from earlier stages;
+  `CREATE` no longer requires literals or parameters. A pattern still cannot reference a
+  variable it introduces itself.
+- `ON` is a reserved word.
+- `Database` initializes the schema inside one `BEGIN IMMEDIATE` transaction and re-reads the
+  schema version after taking the write lock. An already-current schema skips the write
+  transaction, so opening a graph while another process writes does not need a write lock.
+- The journal-mode switch during open retries a bounded number of times, because SQLite's busy
+  handler does not cover `PRAGMA journal_mode`.
+- Opening an existing SQLite database that records no graph layout and contains unrelated tables
+  now raises `UnsupportedSqliteError` on the writable path too, matching the read-only path and
+  leaving the file unchanged.
+- `IndexKind` is an alias of `ElementKind`, so indexes and constraints share one element-kind
+  name. `IndexKind` remains exported.
+- `.schema` output now includes a `Constraints` section and a `Journal mode` section.
+
+### Fixed
+
+- Several processes opening the same fresh database file no longer fail with
+  `database is locked` while switching to write-ahead logging.
+- A writable open no longer adds the graph schema to an unrelated SQLite file.
+
 ## [0.6.0] - 2026-10-23
 
 ### Added

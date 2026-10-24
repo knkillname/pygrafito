@@ -11,6 +11,7 @@ import pytest
 
 from pygrafito.engine.transaction import Transaction
 from pygrafito.model import (
+    LockTimeoutError,
     Node,
     NotFoundError,
     Relationship,
@@ -276,6 +277,20 @@ class _FailingConnection:
         statement: str,
         parameters: Sequence[object] = (),
     ) -> _FailingConnection:
+        message = "disk I/O error"
+        raise OperationalError(message)
+
+
+class _LockedConnection:
+    """Connection stand-in whose write lock always times out."""
+
+    in_transaction = False
+
+    def execute(
+        self,
+        statement: str,
+        parameters: Sequence[object] = (),
+    ) -> _LockedConnection:
         message = "database is locked"
         raise OperationalError(message)
 
@@ -312,6 +327,16 @@ class TestSqliteFailures(_TransactionTestCase):
             relationship_repository,
         )
         with pytest.raises(TransactionError):
+            active.__enter__()
+
+    def test_begin_lock_timeout_has_its_own_error(self, storage: Storage) -> None:
+        _, node_repository, relationship_repository = storage
+        active = Transaction(
+            typing.cast(Connection, _LockedConnection()),
+            node_repository,
+            relationship_repository,
+        )
+        with pytest.raises(LockTimeoutError):
             active.__enter__()
 
     def test_commit_failure_is_wrapped(self, storage: Storage) -> None:

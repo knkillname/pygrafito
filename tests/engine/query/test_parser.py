@@ -14,6 +14,7 @@ from pygrafito.engine.query.ast import (
     ListLiteral,
     Literal,
     Match,
+    Merge,
     Operators,
     Parameter,
     Property,
@@ -22,6 +23,7 @@ from pygrafito.engine.query.ast import (
     Set,
     Star,
     Unary,
+    Unwind,
     Variable,
     With,
 )
@@ -372,6 +374,72 @@ class TestAcceptedSyntax:
         assert expression.target.name == "properties"
 
 
+class TestUnwindAndMerge:
+    """Verify the parsed shape of UNWIND, MERGE, and conditional updates."""
+
+    def test_unwind_clause(self) -> None:
+        statement = Parser.parse_statement("UNWIND [1, 2] AS value RETURN value")
+        clause = statement.clauses[0]
+        assert isinstance(clause, Unwind)
+        assert clause.variable == "value"
+        assert isinstance(clause.expression, ListLiteral)
+
+    def test_unwind_before_match(self) -> None:
+        statement = Parser.parse_statement(
+            "UNWIND $rows AS row MATCH (n {designation: row.designation}) RETURN n"
+        )
+        assert [type(clause) for clause in statement.clauses] == [Unwind, Match, Return]
+
+    def test_unwind_requires_as(self) -> None:
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement("UNWIND [1] value RETURN value")
+        assert "AS" in caught.value.message
+        assert caught.value.column is not None
+
+    def test_unwind_after_write_is_rejected(self) -> None:
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement("CREATE (n) UNWIND [1] AS value RETURN value")
+        assert "UNWIND" in caught.value.message
+
+    def test_merge_clause(self) -> None:
+        statement = Parser.parse_statement("MERGE (n:Program {designation: 'Tron'})")
+        clause = statement.clauses[0]
+        assert isinstance(clause, Merge)
+        assert clause.on_create is None
+        assert clause.on_match is None
+        assert clause.pattern.nodes[0].labels == ("Program",)
+
+    def test_merge_conditional_updates(self) -> None:
+        statement = Parser.parse_statement(
+            "MERGE (n:Program {designation: 'Tron'}) "
+            "ON CREATE SET n.cycles = 40 "
+            "ON MATCH SET n.cycles = n.cycles + 1"
+        )
+        clause = statement.clauses[0]
+        assert isinstance(clause, Merge)
+        assert isinstance(clause.on_create, Set)
+        assert isinstance(clause.on_match, Set)
+        assert clause.on_create.assignments[0].key == "cycles"
+
+    def test_merge_after_match(self) -> None:
+        statement = Parser.parse_statement("MATCH (a) MERGE (a)-[:TRUSTS]->(b:Program) RETURN b")
+        assert [type(clause) for clause in statement.clauses] == [Match, Merge, Return]
+
+    def test_merge_rejects_duplicate_on_create(self) -> None:
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement("MERGE (n) ON CREATE SET n.a = 1 ON CREATE SET n.b = 2")
+        assert "ON CREATE" in caught.value.message
+
+    def test_merge_rejects_reversed_conditional_order(self) -> None:
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement("MERGE (n) ON MATCH SET n.a = 1 ON CREATE SET n.b = 2")
+        assert "precede" in caught.value.message
+
+    def test_merge_rejects_multiple_patterns(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            Parser.parse_statement("MERGE (a:Program), (b:Program)")
+
+
 class TestParserErrors:
     """Verify syntax errors report line, column, and a pointed message."""
 
@@ -379,7 +447,7 @@ class TestParserErrors:
         ("text", "line", "column", "fragment"),
         [
             ("", 1, 1, "expected a MATCH clause"),
-            ("RETURN 1", 1, 1, "expected a MATCH clause"),
+            ("RETURN 1", 1, 1, "expected a MATCH or UNWIND clause"),
             ("MATCH (n)", 1, 10, "expected a RETURN clause"),
             ("MATCH (n RETURN n", 1, 10, "expected ')'"),
             ("MATCH n RETURN n", 1, 7, "expected '('"),
@@ -423,8 +491,6 @@ class TestParserErrors:
         ("text", "fragment"),
         [
             ("MATCH (a) WITH * RETURN a", "WITH *"),
-            ("MATCH (a) UNWIND [1] AS x RETURN a", "UNWIND"),
-            ("MATCH (a) MERGE (b) RETURN a", "MERGE"),
             ("MATCH (a) RETURN CASE WHEN true THEN 1 END", "CASE"),
             ("MATCH (a) RETURN {x: 1}", "map literals"),
             ("MATCH (a) RETURN a.list[0]", "index access"),

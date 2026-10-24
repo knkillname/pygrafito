@@ -24,7 +24,7 @@ from pygrafito.engine.query.ast import (
     Unary,
     Variable,
 )
-from pygrafito.engine.query.values import QueryValue, Values
+from pygrafito.engine.query.values import PatternValueResolver, QueryValue, Values
 from pygrafito.model import (
     Direction,
     Node,
@@ -765,12 +765,14 @@ class Compiler:
         self._label_counter = 0
         self._parameters: Mapping[str, QueryValue] = {}
         self._bound: Mapping[str, QueryValue] = {}
+        self._resolver: PatternValueResolver | None = None
         self._predicates_builder: PredicateCompiler | None = None
 
     def compile(
         self,
         parameters: Mapping[str, QueryValue],
         bound: Mapping[str, QueryValue] | None = None,
+        resolver: PatternValueResolver | None = None,
     ) -> CompiledMatch:
         """Compile the match clause against one parameter mapping.
 
@@ -780,6 +782,9 @@ class Compiler:
             Query parameter values.
         bound : Mapping[str, QueryValue] | None, optional
             Values already bound by an earlier stage, by default none.
+        resolver : PatternValueResolver | None, optional
+            Evaluator for pattern property expressions, by default none for a
+            constant-only compilation.
 
         Returns
         -------
@@ -788,6 +793,7 @@ class Compiler:
         """
         self._reset(parameters)
         self._bound = {} if bound is None else bound
+        self._resolver = resolver
         paths: list[PathSelection] = []
         for pattern in self._match.patterns:
             node_start = len(self._path_node_aliases)
@@ -1035,7 +1041,10 @@ class Compiler:
             raise QuerySemanticError(message)
         constants = ConstantEvaluator(self._parameters)
         for entry in entries:
-            value = constants.evaluate(entry.value)
+            if self._resolver is None:
+                value = constants.evaluate(entry.value)
+            else:
+                value = self._resolver.resolve(entry.value, self._bound)
             self._predicates.append(builder.equality(alias, entry.key, value))
 
     def _compile_where(self) -> Expression | None:

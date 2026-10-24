@@ -10,7 +10,12 @@ from pygrafito.engine.query.compiler import CompiledMatch, Compiler
 from pygrafito.engine.query.parser import Parser
 from pygrafito.engine.query.plan import Plan, PlanBuilder, PlanOperator
 from pygrafito.engine.query.semantic import SemanticAnalyzer
-from pygrafito.engine.query.values import QueryValue
+from pygrafito.engine.query.values import (
+    ExpressionEvaluator,
+    PatternValueResolver,
+    QueryValue,
+    ScalarFunctions,
+)
 from pygrafito.model import QuerySemanticError
 from pygrafito.storage.codec import PropertyCodec
 from pygrafito.storage.connection import Database
@@ -443,3 +448,53 @@ class TestPlanPipeline:
         plan = self.plan("MATCH (n:Program) SET n.cycles = 1")
         assert plan.operators == (PlanOperator.MATCH, PlanOperator.SET)
         assert not plan.includes(PlanOperator.PROJECT)
+
+
+class _SnapshotStub:
+    """Provide an unused snapshot source for scalar function construction."""
+
+    def node(self, node_id: int) -> object:
+        raise NotImplementedError
+
+    def relationship(self, relationship_id: int) -> object:
+        raise NotImplementedError
+
+
+class TestDynamicPatternValues:
+    """Verify pattern property expressions compile from the current row."""
+
+    def compile(
+        self,
+        text: str,
+        binding: dict[str, QueryValue],
+        parameters: dict[str, QueryValue] | None = None,
+    ) -> CompiledMatch:
+        statement = Parser.parse_statement(text)
+        match = next(clause for clause in statement.clauses if isinstance(clause, Match))
+        evaluator = ExpressionEvaluator(ScalarFunctions(_SnapshotStub()))  # type: ignore[arg-type]
+        resolver = PatternValueResolver(evaluator, parameters or {})
+        return Compiler(match).compile(parameters or {}, binding, resolver)
+
+    def test_row_value_becomes_a_sql_argument(self) -> None:
+        compiled = self.compile(
+            "MATCH (n:Program {designation: row.name}) RETURN n",
+            {"row": {"name": "Quorra"}},
+        )
+        assert compiled.arguments == ("Program", "Quorra")
+        assert "json_type(n0.props, '$.\"designation\"') = 'text'" in compiled.sql
+
+    def test_numeric_row_value_uses_the_type_guard(self) -> None:
+        compiled = self.compile(
+            "MATCH (n:Program {cycles: row.cycles}) RETURN n",
+            {"row": {"cycles": 37}},
+        )
+        assert compiled.arguments == ("Program", 37)
+        assert "json_type(n0.props, '$.\"cycles\"') IN ('integer', 'real')" in compiled.sql
+
+    def test_null_row_value_matches_nothing(self) -> None:
+        compiled = self.compile(
+            "MATCH (n:Program {cycles: row.cycles}) RETURN n",
+            {"row": {"cycles": None}},
+        )
+        assert "0" in compiled.sql
+        assert compiled.arguments == ("Program",)

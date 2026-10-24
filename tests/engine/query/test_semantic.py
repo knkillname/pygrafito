@@ -23,6 +23,7 @@ from pygrafito.engine.query.semantic import (
     MatchStage,
     OptionalMatchStage,
     SemanticAnalyzer,
+    UnwindStage,
     VariableKind,
 )
 from pygrafito.model import QuerySemanticError, QuerySyntaxError
@@ -450,8 +451,6 @@ class TestUnsupportedConstructs:
         "text",
         [
             "MATCH (a) WITH * RETURN a",
-            "MATCH (a) UNWIND [1] AS x RETURN a",
-            "MATCH (a) MERGE (b) RETURN a",
             "MATCH (a) RETURN CASE WHEN true THEN 1 END",
             "MATCH (a) RETURN {x: 1}",
             "MATCH (a) RETURN a.list[0]",
@@ -488,10 +487,14 @@ class TestExpressionChecks:
         analysis = self.analyze("MATCH (n {designation: $name, tags: [$first, 'ISO']}) RETURN n")
         assert analysis.parameters == {"name", "first"}
 
-    def test_variable_in_pattern_property_map_is_rejected(self) -> None:
+    def test_forward_variable_in_pattern_property_map_is_rejected(self) -> None:
         with pytest.raises(QuerySemanticError) as caught:
             self.analyze("MATCH (n {cycles: n.other}) RETURN n")
-        assert "literals or parameters" in caught.value.message
+        assert "not bound" in caught.value.message
+
+    def test_variable_from_an_earlier_stage_is_accepted(self) -> None:
+        analysis = self.analyze("MATCH (m) MATCH (n {cycles: m.cycles}) RETURN n")
+        assert analysis.parameters == frozenset()
 
     def test_unaliasable_column_uses_parameter_text(self) -> None:
         analysis = self.analyze("MATCH (n) RETURN $value")
@@ -608,11 +611,124 @@ class TestWriteAnalysis:
         assert analysis.columns == ("total",)
         assert analysis.has_aggregates
 
-    def test_create_property_map_requires_constant_values(self) -> None:
-        with pytest.raises(QuerySemanticError) as caught:
-            self.analyze("MATCH (m) CREATE (n:Program {designation: m.designation})")
-        assert "literals or parameters" in caught.value.message
+    def test_create_property_map_accepts_row_expressions(self) -> None:
+        analysis = self.analyze("MATCH (m) CREATE (n:Program {designation: m.designation})")
+        assert analysis.is_write
+
+    def test_create_property_map_rejects_a_forward_variable(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("CREATE (n:Program {designation: n.designation})")
 
     def test_create_property_map_accepts_parameters(self) -> None:
         analysis = self.analyze("CREATE (n:Program {designation: $name})")
         assert analysis.parameters == {"name"}
+
+
+class TestUnwindAndMergeAnalysis:
+    """Verify UNWIND stages and MERGE write analysis."""
+
+    def analyze(self, text: str) -> Analysis:
+        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    def test_unwind_stage_and_scalar_kind(self) -> None:
+        analysis = self.analyze("UNWIND $rows AS row RETURN row.designation")
+        assert isinstance(analysis.stages[0], UnwindStage)
+        assert analysis.variable_kinds["row"] is VariableKind.SCALAR
+        assert analysis.parameters == {"rows"}
+        assert not analysis.is_write
+
+    def test_unwind_only_read_statement_is_valid(self) -> None:
+        analysis = self.analyze("UNWIND [1, 2] AS value RETURN value")
+        assert analysis.columns == ("value",)
+
+    def test_unwind_null_is_accepted(self) -> None:
+        analysis = self.analyze("UNWIND null AS value RETURN value")
+        assert isinstance(analysis.stages[0], UnwindStage)
+
+    def test_unwind_rejects_redefinition(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (n) UNWIND [1] AS n RETURN n")
+        assert "already bound" in caught.value.message
+
+    def test_unwind_rejects_a_non_list_literal(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("UNWIND 36 AS value RETURN value")
+        assert "list" in caught.value.message
+
+    def test_merge_is_a_write_and_binds_its_node(self) -> None:
+        analysis = self.analyze("MERGE (n:Program) RETURN n")
+        assert analysis.is_write
+        assert analysis.variable_kinds["n"] is VariableKind.NODE
+        assert analysis.columns == ("n",)
+
+    def test_merge_without_return_has_no_columns(self) -> None:
+        analysis = self.analyze("MERGE (n:Program {designation: 'Tron'})")
+        assert analysis.is_write
+        assert analysis.columns == ()
+
+    def test_merge_rejects_a_path_variable(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MERGE path = (a:Program)-[:TRUSTS]->(b:Program)")
+        assert "path variable" in caught.value.message
+
+    def test_merge_rejects_a_quantified_relationship(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MERGE (a)-[:ALLIES_WITH*1..2]->(b)")
+        assert "variable-length" in caught.value.message
+
+    def test_merge_rejects_a_missing_type(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MERGE (a:Program)-[]->(b:Program)")
+        assert "exactly one type" in caught.value.message
+
+    def test_merge_rejects_an_undirected_relationship(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MERGE (a:Program)-[:TRUSTS]-(b:Program)")
+        assert "direction" in caught.value.message
+
+    def test_merge_rejects_a_bound_relationship(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH ()-[r:TRUSTS]->() MERGE (a)-[r:TRUSTS]->(b)")
+        assert "rebind" in caught.value.message
+
+    def test_merge_accepts_a_bound_anchor(self) -> None:
+        analysis = self.analyze("MATCH (a:Program) MERGE (a)-[:TRUSTS]->(b:Program) RETURN b")
+        assert analysis.variable_kinds["b"] is VariableKind.NODE
+
+    def test_merge_rejects_changing_a_bound_node(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a) MERGE (a:ISO) RETURN a")
+        assert "use SET" in caught.value.message
+
+    def test_merge_rejects_a_forward_property_value(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MERGE (a:Program {designation: b.designation})-[:TRUSTS]->(b:Program)")
+
+    def test_merge_rejects_an_aggregate_property_value(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MERGE (n:Program {designation: count(*)})")
+
+    def test_merge_accepts_a_row_property_value(self) -> None:
+        analysis = self.analyze(
+            "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) RETURN n"
+        )
+        assert analysis.parameters == {"rows"}
+
+    def test_merge_conditional_updates_are_analysed(self) -> None:
+        analysis = self.analyze(
+            "MERGE (n:Program {designation: 'Tron'}) "
+            "ON CREATE SET n.cycles = 40 ON MATCH SET n.cycles = n.cycles + 1 RETURN n"
+        )
+        assert analysis.is_write
+
+    def test_merge_conditional_unbound_target_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MERGE (n:Program) ON CREATE SET m.cycles = 1")
+
+    def test_merge_conditional_label_on_relationship_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MERGE (a:Program)-[r:TRUSTS]->(b:Program) ON CREATE SET r:ISO")
+
+    def test_merge_conditional_null_removal_is_accepted(self) -> None:
+        analysis = self.analyze("MERGE (n:Program) ON MATCH SET n.cycles = null RETURN n")
+        assert analysis.is_write

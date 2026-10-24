@@ -21,6 +21,9 @@ this README is executed by the test suite.
 - [Traversal](#traversal)
 - [Query language](#query-language)
 - [Indexes](#indexes)
+- [Uniqueness constraints](#uniqueness-constraints)
+- [Import](#import)
+- [Data interop](#data-interop)
 - [Performance](#performance)
 - [Persistence](#persistence)
 - [License](#license)
@@ -436,6 +439,36 @@ with Graph.open(":memory:") as graph:
     print([tuple(row.values()) for row in result])  # [('Quorra', 1), ('Tron', 2)]
 ```
 
+`UNWIND` expands a list into rows and feeds later stages, so one statement can
+merge a batch of rows:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    rows = [
+        {"designation": "Tron", "cycles": 40},
+        {"designation": "Quorra", "cycles": 37},
+        {"designation": "Tron", "cycles": 41},
+    ]
+    result = graph.query(
+        "UNWIND $rows AS row "
+        "MERGE (n:Program {designation: row.designation}) "
+        "ON CREATE SET n.cycles = row.cycles "
+        "ON MATCH SET n.cycles = n.cycles + 1 "
+        "RETURN n.designation AS name, n.cycles AS cycles ORDER BY name",
+        {"rows": rows},
+    )
+    print([tuple(row.values()) for row in result])
+    # [('Quorra', 37), ('Tron', 40), ('Tron', 41)]
+    print(result.summary.created_nodes)  # 2
+```
+
+`MERGE` matches its whole pattern and creates the unbound elements when no match
+exists. It runs once per input row, so a creation made by one row is visible to
+later rows in the same statement. A merged pattern uses one explicit type per
+relationship and the outgoing direction.
+
 Use `Graph.prepare` when the same statement runs more than once. Prepared
 columns are available before the first execution, and parameters may change on
 each call.
@@ -514,6 +547,121 @@ with Graph.open(":memory:") as graph:
     graph.drop_index(index)
 ```
 
+## Uniqueness constraints
+
+A uniqueness constraint keeps one property value distinct inside one label or one relationship
+type. The database enforces it on every write, including writes made outside the library, and a
+violation raises `ConstraintViolationError` with the offending value and the existing holder.
+See [`docs/constraints.md`](docs/constraints.md) for type sensitivity, exemptions, and
+transaction behavior.
+
+```python
+from pygrafito import ConstraintViolationError, Graph
+
+with Graph.open(":memory:") as graph:
+    graph.create_node_uniqueness_constraint("Program", "designation")
+    tron = graph.add_node("Program", designation="Tron")
+
+    try:
+        graph.add_node("Program", designation="Tron")
+    except ConstraintViolationError as error:
+        print(error.value, error.existing)  # Tron 1
+
+    quorra = graph.add_node("Program", designation="Quorra")
+    print(sorted(node["designation"] for node in graph.find_nodes("Program")))
+    # ['Quorra', 'Tron']
+    graph.drop_constraint(graph.constraints()[0])
+    print(graph.constraints())  # ()
+```
+
+## Import
+
+`Graph.import_file` and `Graph.import_rows` bind each batch of rows to `$rows`
+and run one write statement. The statement is the mapping: there is no separate
+column configuration. JSONL preserves value types; CSV values are strings, and
+the statement converts them with `toInteger`, `toFloat`, or `toString`. Batches
+commit independently by default; pass `atomic=True` to wrap the whole import in
+one transaction.
+
+```python
+import pathlib
+import tempfile
+
+from pygrafito import Graph
+
+with tempfile.TemporaryDirectory() as directory:
+    path = pathlib.Path(directory) / "programs.jsonl"
+    path.write_text(
+        '{"designation": "Kevin Flynn", "cycles": 36}\n'
+        '{"designation": "Quorra", "cycles": 37}\n',
+        encoding="utf-8",
+    )
+    with Graph.open(":memory:") as graph:
+        summary = graph.import_file(
+            path,
+            "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) "
+            "ON CREATE SET n.cycles = row.cycles",
+        )
+        print(summary.rows)                    # 2
+        print(summary.mutations.created_nodes)  # 2
+        print(sorted(node["designation"] for node in graph.find_nodes("Program")))
+        # ['Kevin Flynn', 'Quorra']
+```
+
+In-memory rows use the same statement through `Graph.import_rows`:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    summary = graph.import_rows(
+        "UNWIND $rows AS row MERGE (n:Program {designation: row.designation})",
+        [{"designation": "Tron"}, {"designation": "Clu"}],
+    )
+    print(summary.rows)  # 2
+```
+
+The shell exposes the same importer as `.import`; see
+[`docs/cli.md`](docs/cli.md). See [`docs/import.md`](docs/import.md) for formats,
+batching, atomicity, and failure reporting.
+
+## Data interop
+
+`Graph.export_jsonl` writes a strict, versioned JSONL snapshot of the graph. The file starts with
+a header carrying the format version and element counts, followed by tagged node and
+relationship records in deterministic order. Export streams the graph inside one read snapshot,
+so the file always describes one committed state.
+
+```python
+import pathlib
+import tempfile
+
+from pygrafito import Graph
+
+with tempfile.TemporaryDirectory() as directory:
+    destination = pathlib.Path(directory) / "grid.jsonl"
+    with Graph.open(":memory:") as graph:
+        graph.add_node("Program", designation="Tron")
+        graph.add_node("Program", designation="Quorra")
+        summary = graph.export_jsonl(destination)
+        print(summary.nodes)          # 2
+        print(summary.relationships)  # 0
+
+    with Graph.open(":memory:") as restored:
+        summary = restored.restore_jsonl(destination)
+        print(summary.nodes)  # 2
+        print(
+            sorted(node["designation"] for node in restored.find_nodes("Program"))
+        )  # ['Quorra', 'Tron']
+```
+
+An existing destination is refused unless `overwrite=True` is passed, and the live database path
+and its journal sidecars are never valid destinations. Restore requires an empty target by
+default; pass `replace=True` to replace a populated graph atomically. A file also exposes
+read-only SQL views for external readers, versioned through `graph_meta`; see
+[`docs/interop.md`](docs/interop.md) for the record grammar, value rules, destination guarantees,
+restore behavior, and the view schema.
+
 ## Performance
 
 A declared index changes the cost profile of a filter. On a 200,000-node in-memory
@@ -530,9 +678,12 @@ produced each row, and the cases where the planner still scans.
 ## Persistence
 
 A file-backed graph persists nodes, labels, relationships, and properties
-across close and reopen. The database uses write-ahead logging; SQLite may reuse
-an integer id after an element is deleted, so treat ids as handles for live
-elements rather than permanent external keys.
+across close and reopen. The database uses write-ahead logging and reports the
+mode it obtained through `Graph.journal_mode`; SQLite may reuse an integer id
+after an element is deleted, so treat ids as handles for live elements rather
+than permanent external keys. See [`docs/embedding.md`](docs/embedding.md) for
+thread affinity, lock waits, read snapshots, and the rule that refuses an
+unrelated SQLite file.
 
 ```python
 import pathlib

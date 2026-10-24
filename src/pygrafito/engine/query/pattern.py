@@ -9,28 +9,31 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from pygrafito.engine.query.ast import (
     Expression,
-    ListLiteral,
-    Literal,
     NodePattern,
-    Parameter,
     PathPattern,
     PropertyEntry,
     RelationshipPattern,
 )
-from pygrafito.engine.query.values import ExpressionEvaluator, QueryValue, Values
+from pygrafito.engine.query.values import (
+    ExpressionEvaluator,
+    PatternValueResolver,
+    QueryValue,
+    Values,
+)
 from pygrafito.engine.traversal import AdjacencySnapshot, TraversalCapture
 from pygrafito.model import (
     Direction,
     Node,
     Path,
-    QueryExecutionError,
-    QuerySemanticError,
     Relationship,
 )
 from pygrafito.storage.nodes import NodeRepository
 from pygrafito.storage.relationships import RelationshipRepository
 
-type NodeSelector = Callable[[NodePattern, Mapping[str, QueryValue]], Sequence[Node]]
+type NodeSelector = Callable[
+    [NodePattern, Mapping[str, QueryValue], ExpressionEvaluator, Mapping[str, QueryValue]],
+    Sequence[Node],
+]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -102,6 +105,7 @@ class PatternEngine:
         self._select_nodes = select_nodes
         self._parameters = parameters
         self._evaluator = evaluator
+        self._values = PatternValueResolver(evaluator, parameters)
 
     def match(
         self,
@@ -197,8 +201,14 @@ class PatternEngine:
         name = pattern.variable
         if name is not None and name in base:
             value = base[name]
-            return (value,) if isinstance(value, Node) else ()
-        return self._select_nodes(pattern, self._parameters)
+            if not isinstance(value, Node):
+                return ()
+            if not all(label in value.labels for label in pattern.labels):
+                return ()
+            if not self._properties_match(pattern.properties, value.properties, base):
+                return ()
+            return (value,)
+        return self._select_nodes(pattern, self._parameters, self._evaluator, base)
 
     def _capture(self, start: Node, depth: int) -> AdjacencySnapshot:
         """Capture the region a bounded walk can reach from a start node.
@@ -335,7 +345,11 @@ class PatternEngine:
         """
         types = frozenset(relationship.types) if relationship.types else None
         for edge, target_id in snapshot.edges(state.current, relationship.direction, types):
-            if edge.id in state.used or not self._relationship_matches(relationship, edge):
+            if edge.id in state.used or not self._relationship_matches(
+                relationship,
+                edge,
+                state.binding,
+            ):
                 continue
             target = snapshot.node(target_id)
             binding = self._bind_node(pattern.nodes[state.position + 1], target, state.binding)
@@ -390,7 +404,11 @@ class PatternEngine:
             return
         types = frozenset(relationship.types) if relationship.types else None
         for edge, target_id in snapshot.edges(state.current, relationship.direction, types):
-            if edge.id in state.used or not self._relationship_matches(relationship, edge):
+            if edge.id in state.used or not self._relationship_matches(
+                relationship,
+                edge,
+                state.binding,
+            ):
                 continue
             target = snapshot.node(target_id)
             next_state = WalkState(
@@ -475,7 +493,7 @@ class PatternEngine:
         """
         if not all(label in node.labels for label in pattern.labels):
             return None
-        if not self._properties_match(pattern.properties, node.properties):
+        if not self._properties_match(pattern.properties, node.properties, binding):
             return None
         name = pattern.variable
         if name is None:
@@ -530,6 +548,7 @@ class PatternEngine:
         self,
         pattern: RelationshipPattern,
         relationship: Relationship,
+        binding: Mapping[str, QueryValue],
     ) -> bool:
         """Check the type and property map of one traversed relationship.
 
@@ -539,6 +558,8 @@ class PatternEngine:
             Relationship position to satisfy.
         relationship : Relationship
             Candidate relationship.
+        binding : Mapping[str, QueryValue]
+            Variables bound so far.
 
         Returns
         -------
@@ -547,12 +568,13 @@ class PatternEngine:
         """
         if pattern.types and relationship.rel_type not in pattern.types:
             return False
-        return self._properties_match(pattern.properties, relationship.properties)
+        return self._properties_match(pattern.properties, relationship.properties, binding)
 
     def _properties_match(
         self,
         entries: Sequence[PropertyEntry],
         properties: Mapping[str, QueryValue],
+        binding: Mapping[str, QueryValue],
     ) -> bool:
         """Compare a pattern property map with stored properties.
 
@@ -562,6 +584,8 @@ class PatternEngine:
             Property-map entries.
         properties : Mapping[str, QueryValue]
             Stored properties.
+        binding : Mapping[str, QueryValue]
+            Variables bound so far.
 
         Returns
         -------
@@ -569,42 +593,12 @@ class PatternEngine:
             ``True`` when every entry matches.
         """
         for entry in entries:
-            expected = self._constant(entry.value)
+            expected = self._values.resolve(entry.value, binding)
+            if expected is None:
+                return False
             if Values.equals(properties.get(entry.key), expected) is not True:
                 return False
         return True
-
-    def _constant(self, expression: Expression) -> QueryValue:
-        """Evaluate a constant pattern expression.
-
-        Parameters
-        ----------
-        expression : Expression
-            Literal, parameter, or list literal.
-
-        Returns
-        -------
-        QueryValue
-            Constant value.
-
-        Raises
-        ------
-        QuerySemanticError
-            If a parameter is missing.
-        QueryExecutionError
-            If the expression is not constant.
-        """
-        if isinstance(expression, Literal):
-            return expression.value
-        if isinstance(expression, Parameter):
-            if expression.name not in self._parameters:
-                message = f"missing query parameter ${expression.name}"
-                raise QuerySemanticError(message)
-            return self._parameters[expression.name]
-        if isinstance(expression, ListLiteral):
-            return [self._constant(item) for item in expression.items]
-        message = "pattern property values must be literals or parameters"
-        raise QueryExecutionError(message)
 
 
 __all__ = [

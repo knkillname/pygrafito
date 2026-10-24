@@ -19,6 +19,7 @@ from pygrafito.engine.query.ast import (
     ListLiteral,
     Literal,
     Match,
+    Merge,
     NodePattern,
     Operators,
     Parameter,
@@ -36,6 +37,7 @@ from pygrafito.engine.query.ast import (
     Star,
     Statement,
     Unary,
+    Unwind,
     Variable,
     With,
 )
@@ -66,8 +68,6 @@ class Parser:
     }
     UNSUPPORTED_CLAUSES: typing.ClassVar[frozenset[Keyword]] = frozenset(
         {
-            Keyword.UNWIND,
-            Keyword.MERGE,
             Keyword.CASE,
         }
     )
@@ -166,10 +166,18 @@ class Parser:
             self._guard_with_position(parsed, current)
             self._advance()
             return self._with_clause()
+        if current.is_keyword(Keyword.UNWIND):
+            self._guard_unwind_position(parsed, current)
+            self._advance()
+            return self._unwind_clause()
         if current.is_keyword(Keyword.CREATE):
             self._guard_write_position(parsed, current)
             self._advance()
             return Create(pattern=self._clause_pattern())
+        if current.is_keyword(Keyword.MERGE):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            return self._merge_clause()
         if current.is_keyword(Keyword.SET):
             self._guard_write_position(parsed, current)
             self._advance()
@@ -221,7 +229,7 @@ class Parser:
         token : Token
             Offending keyword.
         """
-        if self._has_clause(parsed, (Create, Set, Remove, Delete)):
+        if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
             self._fail_syntax("a MATCH clause must precede every write clause", token)
         if self._has_clause(parsed, (Return,)):
             self._fail_syntax("RETURN must be the final clause", token)
@@ -251,8 +259,23 @@ class Parser:
         """
         if self._has_clause(parsed, (Return,)):
             self._fail_syntax("RETURN must be the final clause", token)
-        if self._has_clause(parsed, (Create, Set, Remove, Delete)):
+        if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
             self._fail_syntax("a WITH clause must precede every write clause", token)
+
+    def _guard_unwind_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject an ``UNWIND`` clause after a write or ``RETURN``.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed.
+        token : Token
+            Offending keyword.
+        """
+        if self._has_clause(parsed, (Return,)):
+            self._fail_syntax("RETURN must be the final clause", token)
+        if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
+            self._fail_syntax("an UNWIND clause must precede every write clause", token)
 
     def _guard_return_position(self, parsed: Sequence[Clause], token: Token) -> None:
         """Reject a second ``RETURN`` clause.
@@ -285,13 +308,15 @@ class Parser:
         """
         if not clauses:
             self._fail_syntax("expected a MATCH clause", first)
-        is_write = any(isinstance(clause, (Create, Set, Remove, Delete)) for clause in clauses)
-        has_match = any(isinstance(clause, Match) for clause in clauses)
+        is_write = any(
+            isinstance(clause, (Create, Merge, Set, Remove, Delete)) for clause in clauses
+        )
+        has_row_source = any(isinstance(clause, (Match, Unwind)) for clause in clauses)
         has_return = any(isinstance(clause, Return) for clause in clauses)
         if is_write:
             return
-        if not has_match:
-            self._fail_syntax("expected a MATCH clause", first)
+        if not has_row_source:
+            self._fail_syntax("expected a MATCH or UNWIND clause", first)
         if not has_return:
             self._fail_syntax("expected a RETURN clause", self._current())
 
@@ -367,6 +392,63 @@ class Parser:
                 "multiple path patterns are not supported",
             )
         return pattern
+
+    def _unwind_clause(self) -> Unwind:
+        """Parse an ``UNWIND <expression> AS <variable>`` clause.
+
+        Returns
+        -------
+        Unwind
+            Parsed unwind clause.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If ``AS`` or the variable is missing.
+        """
+        expression = self._expression()
+        self._expect_keyword(Keyword.AS, "expected AS after the UNWIND expression")
+        token = self._current()
+        if not self._is_identifier(token):
+            self._fail_syntax("expected a variable after AS", token)
+        self._advance()
+        return Unwind(expression=expression, variable=self._identifier_text(token))
+
+    def _merge_clause(self) -> Merge:
+        """Parse a ``MERGE`` clause and its optional conditional updates.
+
+        Returns
+        -------
+        Merge
+            Parsed merge clause.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If a conditional clause is duplicated or written out of order.
+        """
+        pattern = self._clause_pattern()
+        on_create: Set | None = None
+        on_match: Set | None = None
+        while self._current().is_keyword(Keyword.ON):
+            token = self._current()
+            self._advance()
+            if self._match_keyword(Keyword.CREATE):
+                if on_create is not None:
+                    self._fail_syntax("a MERGE may contain only one ON CREATE SET", token)
+                if on_match is not None:
+                    self._fail_syntax("ON CREATE SET must precede ON MATCH SET", token)
+                self._expect_keyword(Keyword.SET, "expected SET after ON CREATE")
+                on_create = self._set_clause()
+                continue
+            if self._match_keyword(Keyword.MATCH):
+                if on_match is not None:
+                    self._fail_syntax("a MERGE may contain only one ON MATCH SET", token)
+                self._expect_keyword(Keyword.SET, "expected SET after ON MATCH")
+                on_match = self._set_clause()
+                continue
+            self._fail_syntax("expected CREATE or MATCH after ON", self._current())
+        return Merge(pattern=pattern, on_create=on_create, on_match=on_match)
 
     def _set_clause(self) -> Set:
         """Parse the assignments of a ``SET`` clause.

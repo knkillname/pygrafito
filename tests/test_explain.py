@@ -109,3 +109,20 @@ class TestPlanSelection(_ExplainTestCase):
     def test_invalid_statement_raises(self, graph: Graph) -> None:
         with pytest.raises(QuerySyntaxError):
             graph.explain("MATCH (n:Program WHERE")
+
+
+class TestExplainUnwindAndDynamicValues(_ExplainTestCase):
+    """Verify plan inspection covers UNWIND and dynamic pattern values."""
+
+    def test_unwind_stage_is_reported(self, graph: Graph) -> None:
+        plan = graph.explain("UNWIND [1, 2] AS value MATCH (n:Program) RETURN n")
+        assert any("UNWIND value" in line for line in plan)
+        assert any(line.startswith("SCAN n0") for line in plan)
+
+    def test_dynamic_pattern_value_is_planned_without_a_row(self, graph: Graph) -> None:
+        plan = graph.explain(
+            "UNWIND $rows AS row MATCH (n:Program {designation: row.name}) RETURN n",
+            {"rows": [{"name": "Kevin Flynn"}]},
+        )
+        assert any("UNWIND row" in line for line in plan)
+        assert any("n0" in line for line in plan)

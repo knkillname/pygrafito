@@ -116,6 +116,25 @@ class MutationSummary:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class ImportSummary:
+    """Counts of the changes applied by one import run.
+
+    Parameters
+    ----------
+    rows : int, optional
+        Number of input rows read, by default zero.
+    batches : int, optional
+        Number of statement batches executed, by default zero.
+    mutations : MutationSummary, optional
+        Aggregate mutation counts, by default all zero.
+    """
+
+    rows: int = 0
+    batches: int = 0
+    mutations: MutationSummary = dataclasses.field(default_factory=MutationSummary)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class QueryResult:
     """A materialized, immutable query result.
 
@@ -160,6 +179,7 @@ class QueryResult:
 
 
 __all__ = [
+    "ImportSummary",
     "MutationSummary",
     "QueryResult",
     "Row",

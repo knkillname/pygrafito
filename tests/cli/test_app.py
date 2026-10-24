@@ -225,6 +225,59 @@ class TestSubprocess:
         with Graph.open(database) as graph:
             assert graph.query("MATCH (n) RETURN count(*) AS t").rows[0]["t"] == 0
 
+    def test_import_script(self, tmp_path: Path) -> None:
+        database = tmp_path / "grid.db"
+        rows = tmp_path / "programs.jsonl"
+        rows.write_text('{"designation": "Quorra"}\n', encoding="utf-8")
+        script = tmp_path / "seed.cypher"
+        script.write_text(
+            f'.import {rows} --statement "UNWIND $rows AS row '
+            f'MERGE (n:Program {{designation: row.designation}})"\n'
+            "MATCH (n:Program) RETURN n.designation AS name;\n",
+            encoding="utf-8",
+        )
+        completed = Runner.run(str(database), "-f", str(script))
+        assert completed.returncode == 0, completed.stderr
+        assert "Quorra" in completed.stdout
+
+    def test_import_script_failure_commits_earlier_batches(self, tmp_path: Path) -> None:
+        database = tmp_path / "grid.db"
+        rows = tmp_path / "programs.jsonl"
+        rows.write_text(
+            '{"designation": "Tron", "cycles": 40}\n{"designation": "Clu", "cycles": {"bad": 1}}\n',
+            encoding="utf-8",
+        )
+        script = tmp_path / "seed.cypher"
+        script.write_text(
+            f'.import {rows} --batch 1 --statement "UNWIND $rows AS row '
+            f"CREATE (n:Program {{designation: row.designation, "
+            f'cycles: row.cycles}})"\n',
+            encoding="utf-8",
+        )
+        completed = Runner.run(str(database), "-f", str(script))
+        assert completed.returncode == 1
+        with Graph.open(database) as graph:
+            assert graph.query("MATCH (n:Program) RETURN count(*) AS t").rows[0]["t"] == 1
+
+    def test_atomic_import_script_failure_rolls_back(self, tmp_path: Path) -> None:
+        database = tmp_path / "grid.db"
+        rows = tmp_path / "programs.jsonl"
+        rows.write_text(
+            '{"designation": "Tron", "cycles": 40}\n{"designation": "Clu", "cycles": {"bad": 1}}\n',
+            encoding="utf-8",
+        )
+        script = tmp_path / "seed.cypher"
+        script.write_text(
+            f'.import {rows} --batch 1 --atomic --statement "UNWIND $rows AS row '
+            f"CREATE (n:Program {{designation: row.designation, "
+            f'cycles: row.cycles}})"\n',
+            encoding="utf-8",
+        )
+        completed = Runner.run(str(database), "-f", str(script))
+        assert completed.returncode == 1
+        with Graph.open(database) as graph:
+            assert graph.query("MATCH (n:Program) RETURN count(*) AS t").rows[0]["t"] == 0
+
     def test_json_output_is_clean(self, tmp_path: Path) -> None:
         completed = Runner.run(
             ":memory:",

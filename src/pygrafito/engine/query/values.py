@@ -1695,6 +1695,58 @@ class ExpressionEvaluator:
         raise QueryExecutionError(message)
 
 
+class PatternValueResolver:
+    """Evaluate pattern property expressions against one input row.
+
+    Parameters
+    ----------
+    evaluator : ExpressionEvaluator
+        Scalar expression evaluator.
+    parameters : Mapping[str, QueryValue]
+        Query parameter values.
+    lenient : bool, optional
+        Whether an expression that cannot be evaluated without a row resolves
+        to null, by default ``False``. Plan inspection uses the lenient mode.
+    """
+
+    def __init__(
+        self,
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        *,
+        lenient: bool = False,
+    ) -> None:
+        self._evaluator = evaluator
+        self._parameters = parameters
+        self._lenient = lenient
+
+    def resolve(
+        self,
+        expression: Expression,
+        binding: Mapping[str, QueryValue],
+    ) -> QueryValue:
+        """Evaluate one pattern property expression.
+
+        Parameters
+        ----------
+        expression : Expression
+            Expression to evaluate.
+        binding : Mapping[str, QueryValue]
+            Variables bound by earlier stages.
+
+        Returns
+        -------
+        QueryValue
+            Evaluated value, or null when lenient and the row cannot supply it.
+        """
+        try:
+            return self._evaluator.evaluate(expression, binding, self._parameters)
+        except QuerySemanticError:
+            if self._lenient:
+                return None
+            raise
+
+
 __all__ = [
     "Aggregates",
     "ArgumentKind",
@@ -1703,6 +1755,7 @@ __all__ = [
     "ExpressionEvaluator",
     "FunctionCatalog",
     "FunctionSpec",
+    "PatternValueResolver",
     "QueryValue",
     "ScalarFunctions",
     "SnapshotSource",

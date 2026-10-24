@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Relationship persistence and lookup."""
 
+import sqlite3
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from sqlite3 import Connection
 from typing import Any, ClassVar
@@ -15,6 +16,7 @@ from pygrafito.model import (
     Value,
 )
 from pygrafito.storage.codec import PropertyCodec
+from pygrafito.storage.constraints import ConstraintRegistry, ConstraintTranslator
 
 
 class RelationshipRepository:
@@ -35,6 +37,8 @@ class RelationshipRepository:
     ) -> None:
         self._connection = connection
         self._codec = property_codec
+        self._constraints = ConstraintRegistry(connection, property_codec)
+        self._translator = ConstraintTranslator(connection, property_codec, self._constraints)
 
     MAXIMUM_PARAMETERS: ClassVar[int] = 32_766
 
@@ -170,20 +174,31 @@ class RelationshipRepository:
         self._require_node(start_id)
         self._require_node(end_id)
         encoded = self._codec.encode_properties({} if properties is None else properties)
-        cursor = self._connection.execute(
-            "INSERT INTO relationships (src, dst, rel_type, props) VALUES (?, ?, ?, ?)",
-            (start_id, end_id, relationship_type, encoded),
-        )
-        relationship_id = cursor.lastrowid
-        if relationship_id is None:
-            message = "SQLite did not return an id for the created relationship"
-            raise TransactionError(message)
+        validated_properties = self._codec.decode_properties(encoded)
+        try:
+            cursor = self._connection.execute(
+                "INSERT INTO relationships (src, dst, rel_type, props) VALUES (?, ?, ?, ?)",
+                (start_id, end_id, relationship_type, encoded),
+            )
+            relationship_id = cursor.lastrowid
+            if relationship_id is None:
+                message = "SQLite did not return an id for the created relationship"
+                raise TransactionError(message)
+        except sqlite3.IntegrityError as error:
+            violation = self._translator.translate(
+                error,
+                properties=validated_properties,
+                rel_type=relationship_type,
+            )
+            if violation is not None:
+                raise violation from error
+            raise
         return Relationship(
             id=relationship_id,
             rel_type=relationship_type,
             start_id=start_id,
             end_id=end_id,
-            properties=self._codec.decode_properties(encoded),
+            properties=validated_properties,
         )
 
     def get(self, relationship_id: int) -> Relationship:
@@ -481,8 +496,19 @@ class RelationshipRepository:
             Snapshot of the updated relationship.
         """
         encoded = self._codec.encode_properties(properties)
-        self._connection.execute(
-            "UPDATE relationships SET props = ? WHERE id = ?",
-            (encoded, relationship_id),
-        )
+        try:
+            self._connection.execute(
+                "UPDATE relationships SET props = ? WHERE id = ?",
+                (encoded, relationship_id),
+            )
+        except sqlite3.IntegrityError as error:
+            violation = self._translator.translate(
+                error,
+                properties=properties,
+                rel_type=self.get(relationship_id).rel_type,
+                exclude_id=relationship_id,
+            )
+            if violation is not None:
+                raise violation from error
+            raise
         return self.get(relationship_id)

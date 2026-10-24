@@ -25,11 +25,15 @@ class Direction(Enum):
     BOTH = "both"
 
 
-class IndexKind(Enum):
-    """Element kind that a declared property index covers."""
+class ElementKind(Enum):
+    """Element kind shared by declared indexes and constraints."""
 
     NODE = "node"
     RELATIONSHIP = "relationship"
+
+
+IndexKind = ElementKind
+"""Backward-compatible alias for :class:`ElementKind`."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -38,13 +42,13 @@ class Index:
 
     Parameters
     ----------
-    kind : IndexKind
+    kind : ElementKind
         Element kind the index covers.
     key : str
         Property key whose values the index accelerates.
     """
 
-    kind: IndexKind
+    kind: ElementKind
     key: str
 
     def __post_init__(self) -> None:
@@ -53,15 +57,65 @@ class Index:
         Raises
         ------
         ValidationError
-            If the kind is not an ``IndexKind`` or the key is not a non-empty
+            If the kind is not an ``ElementKind`` or the key is not a non-empty
             string.
         """
-        if not isinstance(self.kind, IndexKind):
-            message = "index kind must be an IndexKind value"
+        if not isinstance(self.kind, ElementKind):
+            message = "index kind must be an ElementKind value"
             raise ValidationError(message)
         if not isinstance(self.key, str) or not self.key:
             message = "index key must be a non-empty string"
             raise ValidationError(message)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Constraint:
+    """Immutable description of one declared uniqueness constraint.
+
+    Parameters
+    ----------
+    kind : ElementKind
+        Element kind the constraint covers.
+    scope : str
+        Label for a node constraint or relationship type for a relationship
+        constraint.
+    key : str
+        Property key whose values must stay distinct inside the scope.
+    """
+
+    kind: ElementKind
+    scope: str
+    key: str
+
+    def __post_init__(self) -> None:
+        """Validate the element kind, scope, and key.
+
+        Raises
+        ------
+        ValidationError
+            If the kind is not an ``ElementKind`` or the scope or key is not a
+            non-empty string.
+        """
+        if not isinstance(self.kind, ElementKind):
+            message = "constraint kind must be an ElementKind value"
+            raise ValidationError(message)
+        if not isinstance(self.scope, str) or not self.scope:
+            message = "constraint scope must be a non-empty string"
+            raise ValidationError(message)
+        if not isinstance(self.key, str) or not self.key:
+            message = "constraint key must be a non-empty string"
+            raise ValidationError(message)
+
+    @property
+    def ordering_key(self) -> tuple[str, str, str]:
+        """Return the key used to order constraints.
+
+        Returns
+        -------
+        tuple[str, str, str]
+            Element kind, scope, and property key.
+        """
+        return (self.kind.value, self.scope, self.key)
 
 
 class PygrafitoError(Exception):
@@ -93,7 +147,57 @@ class ReadOnlyError(PygrafitoError):
 
 
 class UnsupportedSqliteError(PygrafitoError):
-    """Raised when the SQLite runtime cannot provide the required features."""
+    """Raised when SQLite or the database file cannot provide the required features."""
+
+
+class HandleAffinityError(PygrafitoError):
+    """Raised when a handle is used from a thread that does not own it."""
+
+
+class LockTimeoutError(PygrafitoError):
+    """Raised when a write-lock wait exhausts the configured busy timeout."""
+
+
+class ConstraintViolationError(PygrafitoError):
+    """Raised when a write would duplicate a value inside a constrained scope.
+
+    Parameters
+    ----------
+    kind : ElementKind
+        Element kind the constraint covers.
+    scope : str
+        Label or relationship type of the constraint.
+    key : str
+        Property key whose values must stay distinct.
+    value : Value | None
+        Offending value when it is known.
+    existing : int | None, optional
+        Identifier of the surviving element that already holds the value, by
+        default ``None``.
+    """
+
+    def __init__(
+        self,
+        kind: ElementKind,
+        scope: str,
+        key: str,
+        value: Value | None,
+        existing: int | None = None,
+    ) -> None:
+        self.kind = kind
+        self.scope = scope
+        self.key = key
+        self.value = value
+        self.existing = existing
+        subject = "nodes" if kind is ElementKind.NODE else "relationships"
+        scope_name = "label" if kind is ElementKind.NODE else "relationship type"
+        message = (
+            f"{subject} with {scope_name} {scope!r} must have distinct {key!r} values; "
+            f"{value!r} is already held"
+        )
+        if existing is not None:
+            message = f"{message} by {kind.value} {existing}"
+        super().__init__(message)
 
 
 class QueryError(PygrafitoError):
@@ -348,8 +452,15 @@ class TraversalStep:
 
 __all__ = [
     "ConnectedNodeError",
+    "Constraint",
+    "ConstraintViolationError",
     "Direction",
+    "ElementKind",
     "GraphClosedError",
+    "HandleAffinityError",
+    "Index",
+    "IndexKind",
+    "LockTimeoutError",
     "Node",
     "NotFoundError",
     "Path",
@@ -358,6 +469,7 @@ __all__ = [
     "QueryExecutionError",
     "QuerySemanticError",
     "QuerySyntaxError",
+    "ReadOnlyError",
     "Relationship",
     "Scalar",
     "TransactionError",

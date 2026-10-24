@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Node persistence and lookup."""
 
+import sqlite3
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from sqlite3 import Connection
 from typing import Any, ClassVar
@@ -15,6 +16,7 @@ from pygrafito.model import (
     Value,
 )
 from pygrafito.storage.codec import PropertyCodec
+from pygrafito.storage.constraints import ConstraintRegistry, ConstraintTranslator
 
 
 class NodeRepository:
@@ -35,8 +37,11 @@ class NodeRepository:
     ) -> None:
         self._connection = connection
         self._codec = property_codec
+        self._constraints = ConstraintRegistry(connection, property_codec)
+        self._translator = ConstraintTranslator(connection, property_codec, self._constraints)
 
     MAXIMUM_PARAMETERS: ClassVar[int] = 32_766
+    WRITE_SAVEPOINT: ClassVar[str] = "pygrafito_node_write"
 
     def create(
         self,
@@ -64,20 +69,40 @@ class NodeRepository:
         """
         validated_labels = self._validate_labels(labels)
         encoded = self._codec.encode_properties({} if properties is None else properties)
-        cursor = self._connection.execute("INSERT INTO nodes (props) VALUES (?)", (encoded,))
-        node_id = cursor.lastrowid
-        if node_id is None:
-            message = "SQLite did not return an id for the created node"
-            raise TransactionError(message)
-        if validated_labels:
-            self._connection.executemany(
-                "INSERT INTO node_labels (node_id, label) VALUES (?, ?)",
-                [(node_id, label) for label in sorted(validated_labels)],
+        validated_properties = self._codec.decode_properties(encoded)
+        self._connection.execute(f"SAVEPOINT {self.WRITE_SAVEPOINT}")
+        try:
+            cursor = self._connection.execute(
+                "INSERT INTO nodes (props) VALUES (?)",
+                (encoded,),
             )
+            node_id = cursor.lastrowid
+            if node_id is None:
+                message = "SQLite did not return an id for the created node"
+                raise TransactionError(message)
+            if validated_labels:
+                self._connection.executemany(
+                    "INSERT INTO node_labels (node_id, label) VALUES (?, ?)",
+                    [(node_id, label) for label in sorted(validated_labels)],
+                )
+        except sqlite3.IntegrityError as error:
+            self._rollback_write()
+            violation = self._translator.translate(
+                error,
+                properties=validated_properties,
+                labels=validated_labels,
+            )
+            if violation is not None:
+                raise violation from error
+            raise
+        except BaseException:
+            self._rollback_write()
+            raise
+        self._connection.execute(f"RELEASE SAVEPOINT {self.WRITE_SAVEPOINT}")
         return Node(
             id=node_id,
             labels=validated_labels,
-            properties=self._codec.decode_properties(encoded),
+            properties=validated_properties,
         )
 
     def get(self, node_id: int) -> Node:
@@ -191,10 +216,27 @@ class NodeRepository:
         """
         self.get(node_id)
         validated_labels = self._validate_labels(labels)
-        self._connection.executemany(
-            "INSERT OR IGNORE INTO node_labels (node_id, label) VALUES (?, ?)",
-            [(node_id, label) for label in sorted(validated_labels)],
-        )
+        self._connection.execute(f"SAVEPOINT {self.WRITE_SAVEPOINT}")
+        try:
+            self._connection.executemany(
+                "INSERT OR IGNORE INTO node_labels (node_id, label) VALUES (?, ?)",
+                [(node_id, label) for label in sorted(validated_labels)],
+            )
+        except sqlite3.IntegrityError as error:
+            self._rollback_write()
+            violation = self._translator.translate(
+                error,
+                properties=dict(self.get(node_id)),
+                labels=validated_labels,
+                exclude_id=node_id,
+            )
+            if violation is not None:
+                raise violation from error
+            raise
+        except BaseException:
+            self._rollback_write()
+            raise
+        self._connection.execute(f"RELEASE SAVEPOINT {self.WRITE_SAVEPOINT}")
         return self.get(node_id)
 
     def remove_labels(
@@ -526,11 +568,30 @@ class NodeRepository:
             Snapshot of the updated node.
         """
         encoded = self._codec.encode_properties(properties)
-        self._connection.execute(
-            "UPDATE nodes SET props = ? WHERE id = ?",
-            (encoded, node_id),
-        )
+        try:
+            self._connection.execute(
+                "UPDATE nodes SET props = ? WHERE id = ?",
+                (encoded, node_id),
+            )
+        except sqlite3.IntegrityError as error:
+            violation = self._translator.translate(
+                error,
+                properties=properties,
+                labels=self._labels(node_id),
+                exclude_id=node_id,
+            )
+            if violation is not None:
+                raise violation from error
+            raise
         return self._node_from_payload(node_id, encoded, self._labels(node_id))
+
+    def _rollback_write(self) -> None:
+        """Undo the current node write, ignoring rollback failures."""
+        try:
+            self._connection.execute(f"ROLLBACK TO SAVEPOINT {self.WRITE_SAVEPOINT}")
+            self._connection.execute(f"RELEASE SAVEPOINT {self.WRITE_SAVEPOINT}")
+        except sqlite3.Error:
+            return
 
     def _validate_labels(
         self,

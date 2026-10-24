@@ -535,7 +535,42 @@ class With:
     limit: Expression | None = None
 
 
-type Clause = Match | With | Create | Set | Remove | Delete | Return
+@dataclasses.dataclass(frozen=True, slots=True)
+class Unwind:
+    """An ``UNWIND`` clause that expands a list into rows.
+
+    Parameters
+    ----------
+    expression : Expression
+        List-valued expression to expand.
+    variable : str
+        Variable bound to each expanded element.
+    """
+
+    expression: Expression
+    variable: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Merge:
+    """A ``MERGE`` clause with optional conditional updates.
+
+    Parameters
+    ----------
+    pattern : PathPattern
+        Pattern that is matched as a whole or created.
+    on_create : Set | None, optional
+        Assignments applied to rows the clause creates, by default ``None``.
+    on_match : Set | None, optional
+        Assignments applied to rows the clause matches, by default ``None``.
+    """
+
+    pattern: PathPattern
+    on_create: Set | None = None
+    on_match: Set | None = None
+
+
+type Clause = Match | With | Unwind | Create | Merge | Set | Remove | Delete | Return
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -564,6 +599,7 @@ __all__ = [
     "ListLiteral",
     "Literal",
     "Match",
+    "Merge",
     "NodePattern",
     "Operators",
     "Parameter",
@@ -581,6 +617,7 @@ __all__ = [
     "Star",
     "Statement",
     "Unary",
+    "Unwind",
     "Variable",
     "With",
 ]

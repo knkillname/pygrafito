@@ -10,9 +10,12 @@ useful dataset takes seconds to build.
 """
 
 import argparse
+import csv
 import dataclasses
 import functools
+import pathlib
 import statistics
+import tempfile
 import time
 import typing
 from collections.abc import Callable
@@ -180,6 +183,7 @@ class Runner:
     """
 
     CHAIN_STEPS: typing.ClassVar[int] = 3
+    INGEST_ROWS: typing.ClassVar[int] = 10_000
 
     def __init__(self, options: Options) -> None:
         self._options = options
@@ -214,6 +218,7 @@ class Runner:
         finally:
             graph.close()
         self._report_writes()
+        self._report_ingestion()
 
     def _measure_queries(self, graph: Graph) -> dict[str, float]:
         """Time every query scenario in the current index state.
@@ -520,6 +525,82 @@ class Runner:
         update_indexed = self._update_rate(indexed=True)
         print(f"{'insert':<16}{insert_plain:>12.0f}/s{insert_indexed:>12.0f}/s")
         print(f"{'update':<16}{update_plain:>12.0f}/s{update_indexed:>12.0f}/s")
+
+    def _report_ingestion(self) -> None:
+        """Print merge and CSV import throughput."""
+        print()
+        print(f"{'ingestion':<16}{'rows/s':>14}")
+        print(f"{'merge':<16}{self._merge_rate():>12.0f}/s")
+        print(f"{'csv import':<16}{self._import_rate():>12.0f}/s")
+
+    def _ingest_count(self) -> int:
+        """Return the row count used by the ingestion scenarios.
+
+        Returns
+        -------
+        int
+            At most 10,000 rows, and never more than the seeded node count.
+        """
+        return min(self.INGEST_ROWS, max(self._options.nodes, 1))
+
+    def _merge_rate(self) -> float:
+        """Return rows merged per second by one ``UNWIND`` statement.
+
+        Returns
+        -------
+        float
+            Rows merged per second.
+        """
+        count = self._ingest_count()
+        rows = [
+            {
+                "designation": f"merge-{position}",
+                "cycles": position % Dataset.CYCLE_MODULUS,
+            }
+            for position in range(count)
+        ]
+        graph = Graph.open(":memory:")
+        try:
+            started = time.perf_counter()
+            graph.query(
+                "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) "
+                "ON CREATE SET n.cycles = row.cycles",
+                {"rows": rows},
+            )
+            elapsed = time.perf_counter() - started
+            return count / elapsed if elapsed else float("inf")
+        finally:
+            graph.close()
+
+    def _import_rate(self) -> float:
+        """Return rows imported per second from a CSV file.
+
+        Returns
+        -------
+        float
+            Rows imported per second.
+        """
+        count = self._ingest_count()
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "programs.csv"
+            with path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["designation", "cycles"])
+                for position in range(count):
+                    writer.writerow([f"import-{position}", position % Dataset.CYCLE_MODULUS])
+            graph = Graph.open(":memory:")
+            try:
+                started = time.perf_counter()
+                graph.import_file(
+                    path,
+                    "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) "
+                    "ON CREATE SET n.cycles = toInteger(row.cycles)",
+                    batch_size=1000,
+                )
+                elapsed = time.perf_counter() - started
+                return count / elapsed if elapsed else float("inf")
+            finally:
+                graph.close()
 
     def _insert_rate(self, *, indexed: bool) -> float:
         """Return inserted nodes per second.

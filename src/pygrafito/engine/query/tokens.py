@@ -61,6 +61,7 @@ class Keyword(Enum):
     DETACH = "DETACH"
     CASE = "CASE"
     CALL = "CALL"
+    ON = "ON"
 
 
 class KeywordIndex:
