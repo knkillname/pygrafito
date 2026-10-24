@@ -469,6 +469,8 @@ class QueryExecutor:
             message = "the executor is not attached to a graph database"
             raise TransactionError(message)
         self._database.ensure_open()
+        if plan.analysis.is_write:
+            self._database.ensure_writable()
         if self._connection.in_transaction:
             message = "a graph transaction is active; use Transaction.query"
             raise TransactionError(message)

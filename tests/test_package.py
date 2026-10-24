@@ -4,6 +4,14 @@
 """Smoke tests for the package skeleton."""
 
 import pygrafito
+import pygrafito.__main__
+import pygrafito.cli
+import pygrafito.cli.app
+import pygrafito.cli.commands
+import pygrafito.cli.formatting
+import pygrafito.cli.reader
+import pygrafito.cli.session
+import pygrafito.cli.shell
 import pygrafito.engine
 import pygrafito.engine.graph
 import pygrafito.engine.query.ast
@@ -35,6 +43,14 @@ class TestPackage:
     def test_package_imports(self) -> None:
         modules = (
             pygrafito,
+            pygrafito.__main__,
+            pygrafito.cli,
+            pygrafito.cli.app,
+            pygrafito.cli.commands,
+            pygrafito.cli.formatting,
+            pygrafito.cli.reader,
+            pygrafito.cli.session,
+            pygrafito.cli.shell,
             pygrafito.engine,
             pygrafito.engine.graph,
             pygrafito.engine.query.ast,
@@ -80,6 +96,7 @@ class TestPackage:
             "QueryResult",
             "QuerySemanticError",
             "QuerySyntaxError",
+            "ReadOnlyError",
             "Relationship",
             "Row",
             "Transaction",

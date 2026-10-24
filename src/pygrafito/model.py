@@ -88,6 +88,10 @@ class TransactionError(PygrafitoError):
     """Raised when a transaction cannot be started, committed, or reused."""
 
 
+class ReadOnlyError(PygrafitoError):
+    """Raised when a write is requested on a read-only graph handle."""
+
+
 class UnsupportedSqliteError(PygrafitoError):
     """Raised when the SQLite runtime cannot provide the required features."""
 

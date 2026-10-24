@@ -80,6 +80,22 @@ class Transaction:
             If the transaction is already active, was already used, or SQLite
             cannot start a transaction.
         """
+        return self.begin()
+
+    def begin(self) -> Self:
+        """Start the transaction explicitly.
+
+        Returns
+        -------
+        Self
+            The active transaction.
+
+        Raises
+        ------
+        TransactionError
+            If the transaction is already active, was already used, or SQLite
+            cannot start a transaction.
+        """
         if self._finished:
             message = "transaction has already been used"
             raise TransactionError(message)
@@ -119,14 +135,48 @@ class Transaction:
         TransactionError
             If the transaction is not active or SQLite cannot finish it.
         """
-        if not self._active:
-            message = "transaction is not active"
-            raise TransactionError(message)
+        if exc_type is None:
+            self.commit()
+        else:
+            self.rollback()
+
+    def commit(self) -> None:
+        """Commit the transaction and mark it finished.
+
+        Raises
+        ------
+        TransactionError
+            If the transaction is not active or SQLite cannot commit it.
+        """
+        self._require_active()
+        self._finish("COMMIT")
+
+    def rollback(self) -> None:
+        """Roll the transaction back and mark it finished.
+
+        Raises
+        ------
+        TransactionError
+            If the transaction is not active or SQLite cannot roll it back.
+        """
+        self._require_active()
+        self._finish("ROLLBACK")
+
+    def _finish(self, statement: str) -> None:
+        """Execute a finishing statement and reset the transaction state.
+
+        Parameters
+        ----------
+        statement : str
+            ``COMMIT`` or ``ROLLBACK``.
+
+        Raises
+        ------
+        TransactionError
+            If SQLite cannot finish the transaction.
+        """
         try:
-            if exc_type is None:
-                self._connection.execute("COMMIT")
-            else:
-                self._connection.execute("ROLLBACK")
+            self._connection.execute(statement)
         except Error as error:
             if self._connection.in_transaction:
                 with contextlib.suppress(Error):

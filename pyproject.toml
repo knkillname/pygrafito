@@ -22,6 +22,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+pygrafito = "pygrafito.cli.app:App.main"
+
 [project.urls]
 Documentation = "https://github.com/knkillname/pygrafito#readme"
 Issues = "https://github.com/knkillname/pygrafito/issues"
@@ -88,7 +91,7 @@ convention = "numpy"
 [tool.pyrefly]
 preset = "strict"
 project-includes = ["src/pygrafito", "tests"]
-search-path = ["src"]
+search-path = ["src", "."]
 python-version = "3.14"
 disable-search-path-heuristics = true
 

@@ -12,6 +12,7 @@ import pytest
 from pygrafito.engine.transaction import Transaction
 from pygrafito.model import (
     Node,
+    NotFoundError,
     Relationship,
     TransactionError,
     ValidationError,
@@ -322,3 +323,71 @@ class TestSqliteFailures(_TransactionTestCase):
         )
         with pytest.raises(TransactionError), active:
             pass
+
+
+class TestManualControl(_TransactionTestCase):
+    """Verify explicit begin, commit, and rollback calls."""
+
+    def test_manual_commit(self, storage: Storage) -> None:
+        database, node_repository, _ = storage
+        active = self.make_transaction(storage).begin()
+        node = active.add_node("Program", designation="Tron")
+        active.commit()
+        assert not database.connection.in_transaction
+        assert node_repository.get(node.id)["designation"] == "Tron"
+
+    def test_manual_rollback(self, storage: Storage) -> None:
+        database, node_repository, _ = storage
+        active = self.make_transaction(storage).begin()
+        node = active.add_node("Program", designation="Clu")
+        active.rollback()
+        assert not database.connection.in_transaction
+        with pytest.raises(NotFoundError):
+            node_repository.get(node.id)
+        assert list(node_repository.all()) == []
+
+    def test_begin_twice(self, storage: Storage) -> None:
+        database, _, _ = storage
+        active = self.make_transaction(storage).begin()
+        with pytest.raises(TransactionError, match="already active"):
+            active.begin()
+        assert database.connection.in_transaction
+        active.rollback()
+
+    def test_commit_without_begin(self, storage: Storage) -> None:
+        active = self.make_transaction(storage)
+        with pytest.raises(TransactionError, match="not active"):
+            active.commit()
+
+    def test_rollback_without_begin(self, storage: Storage) -> None:
+        active = self.make_transaction(storage)
+        with pytest.raises(TransactionError, match="not active"):
+            active.rollback()
+
+    def test_commit_twice(self, storage: Storage) -> None:
+        active = self.make_transaction(storage).begin()
+        active.commit()
+        with pytest.raises(TransactionError, match="not active"):
+            active.commit()
+
+    def test_rollback_after_commit(self, storage: Storage) -> None:
+        active = self.make_transaction(storage).begin()
+        active.commit()
+        with pytest.raises(TransactionError, match="not active"):
+            active.rollback()
+
+    def test_begin_after_finish(self, storage: Storage) -> None:
+        active = self.make_transaction(storage).begin()
+        active.rollback()
+        with pytest.raises(TransactionError, match="already been used"):
+            active.begin()
+
+    def test_failed_write_keeps_transaction_usable(self, storage: Storage) -> None:
+        database, node_repository, _ = storage
+        active = self.make_transaction(storage).begin()
+        with pytest.raises(ValidationError):
+            active.add_node("Program", cycles=2**70)
+        assert database.connection.in_transaction
+        node = active.add_node("Program", designation="Quorra")
+        active.commit()
+        assert node_repository.get(node.id)["designation"] == "Quorra"

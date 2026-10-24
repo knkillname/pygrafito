@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Public graph facade."""
 
+import os
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path as FilePath
@@ -34,6 +35,7 @@ from pygrafito.model import (
     Relationship,
     TransactionError,
     TraversalStep,
+    ValidationError,
     Value,
 )
 from pygrafito.storage.codec import PropertyCodec
@@ -78,6 +80,7 @@ class Graph:
         path: str | FilePath,
         *,
         create: bool = True,
+        readonly: bool = False,
     ) -> Self:
         """Open or create a graph database.
 
@@ -87,6 +90,10 @@ class Graph:
             Filesystem path of the database, or ``":memory:"``.
         create : bool, optional
             Whether a missing file may be created, by default ``True``.
+        readonly : bool, optional
+            Whether to open an existing file without write access, by default
+            ``False``. A read-only open never creates a file and is not
+            available for an in-memory database.
 
         Returns
         -------
@@ -96,11 +103,14 @@ class Graph:
         Raises
         ------
         NotFoundError
-            If ``create`` is false and the file does not exist.
+            If the file does not exist and may not be created.
+        ValidationError
+            If a read-only in-memory graph is requested.
         UnsupportedSqliteError
-            If the SQLite runtime lacks required features.
+            If the SQLite runtime lacks required features, or a read-only open
+            needs to write the schema.
         """
-        return cls(Database(path, create=create))
+        return cls(Database(path, create=create, readonly=readonly))
 
     def close(self) -> None:
         """Close the graph handle. Closing twice is a no-op."""
@@ -141,9 +151,14 @@ class Graph:
         Returns
         -------
         Transaction
-            Transaction that is not active until entered.
+            Transaction that is not active until entered or begun.
+
+        Raises
+        ------
+        ReadOnlyError
+            If the graph handle was opened read-only.
         """
-        self._database.ensure_open()
+        self._database.ensure_writable()
         return Transaction(
             self._database.connection,
             self._nodes,
@@ -303,6 +318,73 @@ class Graph:
         self._database.ensure_open()
         return self._indexes.all()
 
+    def backup_to(self, path: str | FilePath) -> FilePath:
+        """Write a consistent copy of the open database.
+
+        The copy is written to a temporary sibling of the destination and
+        atomically moved into place, so an interrupted copy never leaves a
+        partial database at the destination.
+
+        Parameters
+        ----------
+        path : str | FilePath
+            Destination path that must not already exist.
+
+        Returns
+        -------
+        FilePath
+            The written destination path.
+
+        Raises
+        ------
+        ValidationError
+            If the destination already exists or cannot be written.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        """
+        self._database.ensure_open()
+        if self._database.connection.in_transaction:
+            message = "a graph transaction is active; finish it before a backup"
+            raise TransactionError(message)
+        destination = FilePath(path)
+        if destination.exists():
+            message = f"backup destination already exists: {destination}"
+            raise ValidationError(message)
+        temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+        try:
+            target = sqlite3.connect(str(temporary), isolation_level=None)
+            try:
+                self._database.connection.backup(target)
+            finally:
+                target.close()
+            temporary.replace(destination)
+        except (OSError, sqlite3.Error) as error:
+            temporary.unlink(missing_ok=True)
+            message = f"could not write backup: {destination}"
+            raise ValidationError(message) from error
+        return destination
+
+    def check_integrity(self) -> tuple[str, ...]:
+        """Report structural integrity problems of the open database.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One line per reported problem, or an empty tuple when the store is
+            healthy.
+        """
+        self._database.ensure_open()
+        problems: list[str] = []
+        for row in self._database.connection.execute("PRAGMA integrity_check"):
+            value = str(row[0])
+            if value != "ok":
+                problems.append(f"integrity: {value}")
+        for row in self._database.connection.execute("PRAGMA foreign_key_check"):
+            problems.append(
+                f"foreign key: table={row[0]} rowid={row[1]} parent={row[2]} fkid={row[3]}"
+            )
+        return tuple(problems)
+
     def _create_index(self, index: Index) -> Index:
         """Create one declared index after the access checks.
 
@@ -333,14 +415,16 @@ class Graph:
             return
 
     def _require_index_access(self) -> None:
-        """Reject index changes while an explicit transaction is active.
+        """Reject index changes while a transaction is active.
 
         Raises
         ------
+        ReadOnlyError
+            If the graph handle was opened read-only.
         TransactionError
             If an explicit transaction is active on this graph.
         """
-        self._database.ensure_open()
+        self._database.ensure_writable()
         if self._database.connection.in_transaction:
             message = "a graph transaction is active; declare indexes outside it"
             raise TransactionError(message)

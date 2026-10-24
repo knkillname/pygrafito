@@ -79,6 +79,11 @@ jobs:
               assert graph.node(node.id)["designation"] == "Tron"
           PY
 
+      - name: Smoke test the installed command
+        run: |
+          .wheel-smoke/bin/pygrafito --help
+          .wheel-smoke/bin/python -m pygrafito --help
+
       - name: Verify wheel contents
         run: |
           python - <<'PY'

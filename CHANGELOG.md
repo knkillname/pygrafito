@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Read-only graph handles: `Graph.open(path, readonly=True)` serves reads, queries, and
+  traversal from an existing file, never creates a missing file, and raises `ReadOnlyError`
+  for every write, transaction, or index change.
+- Manual transaction control: `Transaction.begin`, `Transaction.commit`, and
+  `Transaction.rollback` drive a transaction without a context block, while the context-manager
+  form keeps its previous behavior.
+- `Graph.backup_to` writes a consistent copy of a live database through a temporary file and an
+  atomic replace, and `Graph.check_integrity` reports storage and foreign-key problems. Both work
+  on a read-only handle.
+- A command-line shell available as the `pygrafito` command and as `python -m pygrafito`:
+  interactive and scripted statement input, dot-commands, `table`/`json`/`jsonl`/`csv`/`line`
+  output, redirection, parameters, explicit transactions, graph introspection, read-only
+  sessions, and integrity and backup commands. See `docs/cli.md`.
+
+### Changed
+
+- The type checker also searches the repository root so test-package imports resolve during
+  `hatch check`.
+
 ## [0.5.0] - 2026-10-23
 
 ### Added

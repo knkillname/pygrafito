@@ -13,6 +13,7 @@ this README is executed by the test suite.
 
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [Command-line shell](#command-line-shell)
 - [Nodes, labels, and properties](#nodes-labels-and-properties)
 - [Relationships](#relationships)
 - [Transactions](#transactions)
@@ -58,6 +59,43 @@ with tempfile.TemporaryDirectory() as directory:
 
 Open `":memory:"` instead of a filesystem path when the graph should live only
 for the lifetime of the handle.
+
+## Command-line shell
+
+The `pygrafito` command opens an interactive shell on a database file;
+`python -m pygrafito` is equivalent. With no database argument the shell uses a
+transient in-memory graph.
+
+```console
+$ pygrafito grid.db
+pygrafito 0.5.0 | grid.db | type ".help" for commands
+grid.db> CREATE (n:Program {designation: 'Tron', cycles: 40});
+1 node created
+grid.db> MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles;
++------+--------+
+| name | cycles |
++------+--------+
+| Tron | 40     |
++------+--------+
+1 row
+```
+
+Run a one-off statement with `-c`, a script with `-f`, or pipe input. Results go
+to standard output and diagnostics to standard error, so a script can select a
+machine-readable format:
+
+```console
+$ pygrafito grid.db -c "MATCH (n:Program) RETURN n.designation AS name;" --format json
+[
+  {
+    "name": "Tron"
+  }
+]
+$ cat seed.txt | pygrafito grid.db --readonly
+```
+
+See [`docs/cli.md`](docs/cli.md) for the statement rules, output modes, shell
+commands, transactions, and maintenance commands.
 
 ## Nodes, labels, and properties
 
@@ -137,6 +175,20 @@ with Graph.open(":memory:") as graph:
 Writes use `BEGIN IMMEDIATE`, and one `Graph` owns exactly one connection. A
 graph handle is not thread-safe; using it from another thread raises an error
 rather than sharing the connection silently.
+
+A transaction can also be driven without a context block, which is useful when
+several statements are decided at runtime:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    active = graph.transaction().begin()
+    active.add_node("Program", designation="Tron")
+    active.rollback()
+
+    print(graph.query("MATCH (n) RETURN count(*) AS total").rows[0]["total"])  # 0
+```
 
 ## Deletion
 
@@ -495,6 +547,50 @@ with tempfile.TemporaryDirectory() as directory:
 
     with Graph.open(path) as graph:
         print(graph.node(node.id)["designation"])  # Kevin Flynn
+```
+
+A file can also be opened read-only. A read-only handle serves reads, queries, and traversal,
+rejects every write with `ReadOnlyError`, and never creates a missing file.
+
+```python
+import pathlib
+import tempfile
+
+from pygrafito import Graph, ReadOnlyError
+
+with tempfile.TemporaryDirectory() as directory:
+    path = pathlib.Path(directory) / "graph.db"
+    with Graph.open(path) as graph:
+        graph.add_node("Program", designation="Kevin Flynn")
+
+    with Graph.open(path, readonly=True) as graph:
+        print(graph.query("MATCH (n:Program) RETURN n.designation AS name").rows[0]["name"])
+        # Kevin Flynn
+        try:
+            graph.add_node("Program", designation="Tron")
+        except ReadOnlyError:
+            print("writes are rejected")  # writes are rejected
+```
+
+`Graph.backup_to` writes a consistent copy of a live database, and `Graph.check_integrity`
+reports structural problems. Both work on a read-only handle:
+
+```python
+import pathlib
+import tempfile
+
+from pygrafito import Graph
+
+with tempfile.TemporaryDirectory() as directory:
+    path = pathlib.Path(directory) / "graph.db"
+    backup = pathlib.Path(directory) / "backup.db"
+    with Graph.open(path) as graph:
+        graph.add_node("Program", designation="Tron")
+        graph.backup_to(backup)
+        print(graph.check_integrity())  # ()
+
+    with Graph.open(backup) as copy:
+        print(copy.node(1)["designation"])  # Tron
 ```
 
 ## License
