@@ -20,6 +20,8 @@ from pygrafito.engine.query.ast import (
 from pygrafito.engine.query.parser import Parser
 from pygrafito.engine.query.semantic import (
     Analysis,
+    MatchStage,
+    OptionalMatchStage,
     SemanticAnalyzer,
     VariableKind,
 )
@@ -55,6 +57,11 @@ class TestScopesAndKinds:
     def test_path_and_node_kind_conflict(self) -> None:
         with pytest.raises(QuerySemanticError):
             self.analyze("MATCH p = (p) RETURN p")
+
+    def test_path_variable_cannot_be_bound_twice(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH p = (a), p = (b) RETURN p")
+        assert "already bound" in caught.value.message
 
     def test_unbound_variable_in_return(self) -> None:
         with pytest.raises(QuerySemanticError) as caught:
@@ -187,7 +194,7 @@ class TestGroupingAndColumns:
     def test_generated_text_when_source_text_is_missing(self) -> None:
         statement = Statement(
             clauses=(
-                Match(pattern=PathPattern(nodes=(NodePattern(variable="n"),))),
+                Match(patterns=(PathPattern(nodes=(NodePattern(variable="n"),)),)),
                 Return(
                     items=(
                         ReturnItem(
@@ -329,18 +336,120 @@ class TestOrderingResolution:
         assert [sort.descending for sort in analysis.sorts] == [False, True]
 
 
+class TestStagePipeline:
+    """Verify read clauses are analysed into ordered stages."""
+
+    def analyze(self, text: str) -> Analysis:
+        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    def test_single_match_is_one_stage(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) RETURN n")
+        assert len(analysis.stages) == 1
+        assert isinstance(analysis.stages[0], MatchStage)
+        assert analysis.stages[0].patterns[0].nodes[0].labels == ("Program",)
+
+    def test_write_clauses_are_separate_from_stages(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) SET n.cycles = 1 RETURN n")
+        assert len(analysis.stages) == 1
+        assert len(analysis.write_clauses) == 1
+
+    def test_optional_stage_records_introduced_variables(self) -> None:
+        analysis = self.analyze(
+            "MATCH (a:Program) OPTIONAL MATCH (a)-[r:ALLIES_WITH]->(b) RETURN a, b"
+        )
+        stage = analysis.stages[1]
+        assert isinstance(stage, OptionalMatchStage)
+        assert stage.introduced == {"r", "b"}
+        assert analysis.variable_kinds["b"] is VariableKind.NODE
+
+
+class TestWithStage:
+    """Verify WITH projection, scope, and aggregation boundaries."""
+
+    def analyze(self, text: str) -> Analysis:
+        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    def test_scope_is_reset(self) -> None:
+        analysis = self.analyze("MATCH (a:Program) WITH a.designation AS name RETURN name")
+        assert set(analysis.variable_kinds) == {"name"}
+        assert analysis.variable_kinds["name"] is VariableKind.SCALAR
+
+    def test_node_alias_keeps_its_kind(self) -> None:
+        analysis = self.analyze("MATCH (a:Program) WITH a RETURN a.designation")
+        assert analysis.variable_kinds["a"] is VariableKind.NODE
+
+    def test_expression_requires_an_alias(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a:Program) WITH a.cycles + 1 RETURN a")
+        assert "must have an alias" in caught.value.message
+
+    def test_duplicate_output_names_are_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a:Program) WITH a AS name, a.designation AS name RETURN name")
+
+    def test_aggregate_alias_is_visible_downstream(self) -> None:
+        analysis = self.analyze(
+            "MATCH (a)-[:ALLIES_WITH]->(b) WITH a, count(*) AS friends WHERE friends > 1 RETURN a"
+        )
+        assert "friends" in analysis.variable_kinds
+
+    def test_unprojected_variable_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a:Program) WITH a.designation AS name RETURN a")
+
+
+class TestVariableLength:
+    """Verify quantified relationship bounds and the list variable kind."""
+
+    def analyze(self, text: str) -> Analysis:
+        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    def test_relationship_variable_is_a_list(self) -> None:
+        analysis = self.analyze("MATCH (a)-[r:ALLIES_WITH*1..3]->(b) RETURN r")
+        assert analysis.variable_kinds["r"] is VariableKind.RELATIONSHIP_LIST
+
+    def test_bare_quantifier_requires_an_upper_bound(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a)-[*]->(b) RETURN b")
+        assert "upper bound" in caught.value.message
+
+    def test_open_range_requires_an_upper_bound(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a)-[*1..]->(b) RETURN b")
+        assert "upper bound" in caught.value.message
+
+    def test_negative_bounds_are_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a)-[*1..-2]->(b) RETURN b")
+
+    def test_inverted_bounds_are_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a)-[*3..1]->(b) RETURN b")
+
+    def test_type_rejects_a_relationship_list(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a)-[r*1..2]->(b) RETURN type(r)")
+
+    def test_size_accepts_a_relationship_list(self) -> None:
+        analysis = self.analyze("MATCH (a)-[r*1..2]->(b) RETURN size(r) AS length")
+        assert analysis.columns == ("length",)
+
+    def test_property_access_rejects_a_relationship_list(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a)-[r*1..2]->(b) RETURN r.since_cycle")
+
+    def test_create_rejects_a_quantified_relationship(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a), (b) CREATE (a)-[*1..2]->(b)")
+
+
 class TestUnsupportedConstructs:
     """Verify every recognized unsupported construct raises a query error."""
 
     @pytest.mark.parametrize(
         "text",
         [
-            "MATCH (a)-[r*1..3]->(b) RETURN b",
-            "MATCH (a)-[*]->(b) RETURN b",
-            "MATCH (a), (b) RETURN a",
-            "OPTIONAL MATCH (a) RETURN a",
-            "MATCH (a) OPTIONAL MATCH (b) RETURN a",
-            "MATCH (a) WITH a RETURN a",
+            "MATCH (a) WITH * RETURN a",
             "MATCH (a) UNWIND [1] AS x RETURN a",
             "MATCH (a) MERGE (b) RETURN a",
             "MATCH (a) RETURN CASE WHEN true THEN 1 END",

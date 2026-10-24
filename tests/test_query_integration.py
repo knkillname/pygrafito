@@ -14,6 +14,38 @@ from pygrafito.storage.schema import Schema
 class TestQueryIntegration:
     """Verify queries across persistence, transactions, and later writes."""
 
+    def test_composed_query_survives_reopen(self, tmp_path: Path) -> None:
+        path = tmp_path / "composition.db"
+        query = (
+            "MATCH (a:Program {designation: 'Kevin Flynn'}), "
+            "(b:Program {designation: 'Quorra'}) "
+            "OPTIONAL MATCH (a)-[:TRUSTS]->(trusted) "
+            "WITH a, b, count(trusted) AS trusted_count "
+            "MATCH (a)-[:ALLIES_WITH*1..2]->(reachable) "
+            "RETURN a.designation AS start, b.designation AS other, trusted_count, "
+            "reachable.designation AS reachable ORDER BY reachable"
+        )
+        with Graph.open(path) as graph:
+            kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+            quorra = graph.add_node("Program", designation="Quorra", cycles=37)
+            tron = graph.add_node("Program", designation="Tron", cycles=40)
+            graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+            graph.add_relationship(quorra, "ALLIES_WITH", tron)
+            graph.add_relationship(kevin, "TRUSTS", tron)
+            original = [tuple(row.values()) for row in graph.query(query)]
+
+        with Graph.open(path) as reopened:
+            repeated = [tuple(row.values()) for row in reopened.query(query)]
+
+        assert (
+            original
+            == repeated
+            == [
+                ("Kevin Flynn", "Quorra", 1, "Quorra"),
+                ("Kevin Flynn", "Quorra", 1, "Tron"),
+            ]
+        )
+
     def test_file_persistence_with_prepared_queries(self, tmp_path: Path) -> None:
         path = tmp_path / "grid.db"
         with Graph.open(path) as graph:

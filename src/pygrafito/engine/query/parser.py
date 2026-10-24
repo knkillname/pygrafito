@@ -37,6 +37,7 @@ from pygrafito.engine.query.ast import (
     Statement,
     Unary,
     Variable,
+    With,
 )
 from pygrafito.engine.query.lexer import Lexer
 from pygrafito.engine.query.tokens import Keyword, Span, Token, TokenKind
@@ -65,7 +66,6 @@ class Parser:
     }
     UNSUPPORTED_CLAUSES: typing.ClassVar[frozenset[Keyword]] = frozenset(
         {
-            Keyword.WITH,
             Keyword.UNWIND,
             Keyword.MERGE,
             Keyword.CASE,
@@ -151,10 +151,21 @@ class Parser:
         """
         current = self._current()
         self._reject_unsupported_clause(current)
+        if current.is_keyword(Keyword.OPTIONAL):
+            self._advance()
+            if not self._current().is_keyword(Keyword.MATCH):
+                self._fail_syntax("expected MATCH after OPTIONAL", self._current())
+            self._guard_match_position(parsed, current)
+            self._advance()
+            return self._match_clause(optional=True)
         if current.is_keyword(Keyword.MATCH):
             self._guard_match_position(parsed, current)
             self._advance()
             return self._match_clause()
+        if current.is_keyword(Keyword.WITH):
+            self._guard_with_position(parsed, current)
+            self._advance()
+            return self._with_clause()
         if current.is_keyword(Keyword.CREATE):
             self._guard_write_position(parsed, current)
             self._advance()
@@ -210,8 +221,6 @@ class Parser:
         token : Token
             Offending keyword.
         """
-        if self._has_clause(parsed, (Match,)):
-            self._fail_syntax("a statement may contain only one MATCH clause", token)
         if self._has_clause(parsed, (Create, Set, Remove, Delete)):
             self._fail_syntax("a MATCH clause must precede every write clause", token)
         if self._has_clause(parsed, (Return,)):
@@ -229,6 +238,21 @@ class Parser:
         """
         if self._has_clause(parsed, (Return,)):
             self._fail_syntax("RETURN must be the final clause", token)
+
+    def _guard_with_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a ``WITH`` clause after a write or ``RETURN``.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed.
+        token : Token
+            Offending keyword.
+        """
+        if self._has_clause(parsed, (Return,)):
+            self._fail_syntax("RETURN must be the final clause", token)
+        if self._has_clause(parsed, (Create, Set, Remove, Delete)):
+            self._fail_syntax("a WITH clause must precede every write clause", token)
 
     def _guard_return_position(self, parsed: Sequence[Clause], token: Token) -> None:
         """Reject a second ``RETURN`` clause.
@@ -302,26 +326,31 @@ class Parser:
         QuerySemanticError
             If the token starts an unsupported construct.
         """
-        if token.is_keyword(Keyword.OPTIONAL) and self._peek(1).is_keyword(Keyword.MATCH):
-            self._reject_unsupported(token, "OPTIONAL MATCH is not supported")
         if token.is_keyword(Keyword.CALL):
             self._reject_unsupported(token, "subqueries are not supported")
         if token.kind is TokenKind.KEYWORD and Keyword(token.value) in self.UNSUPPORTED_CLAUSES:
             self._reject_unsupported(token, f"{token.value} is not supported")
 
-    def _match_clause(self) -> Match:
-        """Parse the pattern and optional filter of a ``MATCH`` clause.
+    def _match_clause(self, *, optional: bool = False) -> Match:
+        """Parse the patterns and optional filter of a ``MATCH`` clause.
+
+        Parameters
+        ----------
+        optional : bool, optional
+            Whether the clause is ``OPTIONAL MATCH``, by default ``False``.
 
         Returns
         -------
         Match
             Parsed match clause.
         """
-        pattern = self._clause_pattern()
+        patterns = [self._path_pattern()]
+        while self._match_punctuation(","):
+            patterns.append(self._path_pattern())
         where: Expression | None = None
         if self._match_keyword(Keyword.WHERE):
             where = self._expression()
-        return Match(pattern=pattern, where=where)
+        return Match(patterns=tuple(patterns), where=where, optional=optional)
 
     def _clause_pattern(self) -> PathPattern:
         """Parse exactly one path pattern for a clause.
@@ -437,6 +466,39 @@ class Parser:
                 break
         return Delete(variables=tuple(variables), detach=detach)
 
+    def _with_clause(self) -> With:
+        """Parse a ``WITH`` clause and its filter and pagination.
+
+        Returns
+        -------
+        With
+            Parsed ``WITH`` clause.
+        """
+        if self._check_operator("*"):
+            self._reject_unsupported(self._current(), "WITH * is not supported")
+        distinct = self._match_keyword(Keyword.DISTINCT)
+        items = [self._return_item()]
+        while self._match_punctuation(","):
+            items.append(self._return_item())
+        where: Expression | None = None
+        if self._match_keyword(Keyword.WHERE):
+            where = self._expression()
+        order_by = self._order_by()
+        skip: Expression | None = None
+        limit: Expression | None = None
+        if self._match_keyword(Keyword.SKIP):
+            skip = self._expression()
+        if self._match_keyword(Keyword.LIMIT):
+            limit = self._expression()
+        return With(
+            items=tuple(items),
+            distinct=distinct,
+            where=where,
+            order_by=order_by,
+            skip=skip,
+            limit=limit,
+        )
+
     def _return_clause(self) -> Return:
         """Parse a ``RETURN`` clause and its pagination.
 
@@ -520,11 +582,6 @@ class Parser:
         while self._current().text in {"-", "<"}:
             relationships.append(self._relationship_pattern())
             nodes.append(self._node_pattern())
-            if self._check_punctuation(","):
-                self._reject_unsupported(
-                    self._current(),
-                    "multiple path patterns are not supported",
-                )
         return PathPattern(
             nodes=tuple(nodes),
             relationships=tuple(relationships),
@@ -566,16 +623,18 @@ class Parser:
         """
         if self._match_operator("<"):
             self._expect_operator("-", "expected '-' after '<' in a relationship pattern")
-            variable, types, properties = self._relationship_detail()
+            variable, types, properties, min_hops, max_hops = self._relationship_detail()
             self._expect_operator("-", "expected '-' to close an incoming relationship")
             return RelationshipPattern(
                 variable=variable,
                 types=types,
                 direction=Direction.INCOMING,
                 properties=properties,
+                min_hops=min_hops,
+                max_hops=max_hops,
             )
         self._expect_operator("-", "expected '-' to start a relationship pattern")
-        variable, types, properties = self._relationship_detail()
+        variable, types, properties, min_hops, max_hops = self._relationship_detail()
         self._expect_operator("-", "expected '-' to close a relationship pattern")
         direction = Direction.OUTGOING if self._match_operator(">") else Direction.BOTH
         return RelationshipPattern(
@@ -583,43 +642,94 @@ class Parser:
             types=types,
             direction=direction,
             properties=properties,
+            min_hops=min_hops,
+            max_hops=max_hops,
         )
 
     def _relationship_detail(
         self,
-    ) -> tuple[str | None, tuple[str, ...], tuple[PropertyEntry, ...]]:
+    ) -> tuple[
+        str | None,
+        tuple[str, ...],
+        tuple[PropertyEntry, ...],
+        int | None,
+        int | None,
+    ]:
         """Parse the optional bracket contents of a relationship pattern.
 
         Returns
         -------
-        tuple[str | None, tuple[str, ...], tuple[PropertyEntry, ...]]
-            Variable, accepted types, and property map.
+        tuple[str | None, tuple[str, ...], tuple[PropertyEntry, ...], int | None, int | None]
+            Variable, accepted types, property map, and quantifier bounds.
         """
         if not self._match_punctuation("["):
-            return None, (), ()
+            return None, (), (), None, None
         variable: str | None = None
         types: list[str] = []
         properties: tuple[PropertyEntry, ...] = ()
         if self._is_identifier(self._current()):
             variable = self._identifier_text(self._advance())
-        if self._check_operator("*"):
-            self._reject_unsupported(
-                self._current(),
-                "variable-length relationship patterns are not supported",
-            )
         if self._match_punctuation(":"):
             types.append(self._label("a relationship type"))
             while self._match_punctuation("|"):
                 types.append(self._label("a relationship type"))
-        if self._check_operator("*"):
-            self._reject_unsupported(
-                self._current(),
-                "variable-length relationship patterns are not supported",
-            )
+        min_hops, max_hops = self._quantifier()
         if self._check_punctuation("{"):
             properties = self._property_map()
         self._expect_punctuation("]", "expected ']' to close a relationship pattern")
-        return variable, tuple(types), properties
+        return variable, tuple(types), properties, min_hops, max_hops
+
+    def _quantifier(self) -> tuple[int | None, int | None]:
+        """Parse an optional ``*`` relationship quantifier.
+
+        Returns
+        -------
+        tuple[int | None, int | None]
+            Lower and upper hop bounds; both ``None`` for an ordinary
+            relationship and for a bare ``*``.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If a bound is not an integer or the range separator is malformed.
+        """
+        if not self._match_operator("*"):
+            return None, None
+        lower: int | None = None
+        if self._match_operator("-"):
+            lower = -self._integer_bound()
+        elif self._current().kind is TokenKind.INTEGER:
+            lower = self._integer_bound()
+        if self._match_punctuation("."):
+            self._expect_punctuation(".", "expected '..' in a variable-length pattern")
+            upper: int | None = None
+            if self._match_operator("-"):
+                upper = -self._integer_bound()
+            elif self._current().kind is TokenKind.INTEGER:
+                upper = self._integer_bound()
+            return (1 if lower is None else lower), upper
+        if lower is None:
+            return 1, None
+        return lower, lower
+
+    def _integer_bound(self) -> int:
+        """Consume one integer quantifier bound.
+
+        Returns
+        -------
+        int
+            Bound value.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the current token is not an integer.
+        """
+        token = self._current()
+        if token.kind is not TokenKind.INTEGER:
+            self._fail_syntax("expected an integer bound in a variable-length pattern", token)
+        self._advance()
+        return int(token.value)
 
     def _property_map(self) -> tuple[PropertyEntry, ...]:
         """Parse a pattern property map.

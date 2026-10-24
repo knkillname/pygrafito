@@ -162,6 +162,13 @@ class Scenarios:
         """Run the Python lookup by label and property."""
         list(graph.find_nodes("Program", cycles=36))
 
+    @staticmethod
+    def quantified(graph: Graph) -> None:
+        """Expand a bounded quantified path from an indexed property filter."""
+        graph.query(
+            "MATCH (a:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b) RETURN count(*) AS total"
+        )
+
 
 class Runner:
     """Run the benchmark and print its tables.
@@ -181,6 +188,7 @@ class Runner:
             "range": Scenarios.range_filter,
             "type filter": Scenarios.type_filter,
             "node lookup": Scenarios.node_lookup,
+            "quantified": Scenarios.quantified,
         }
 
     def run(self) -> None:

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Multiple comma-separated path patterns per `MATCH` and multiple `MATCH`
+  clauses, joined on shared variables. A later match stage removes rows without
+  a match.
+- `OPTIONAL MATCH` with left-join semantics: unmatched rows survive with the
+  variables the stage introduces bound to null.
+- `WITH` stages that project rows into a new scope, with `DISTINCT`, `WHERE`,
+  `ORDER BY`, `SKIP`, `LIMIT`, and per-stage aggregation.
+- Quantified relationships with an explicit upper bound (`*n`, `*n..m`,
+  `*0..m`). Trails are relationship-unique, a quantified relationship variable
+  binds the traversed list, and path variables include the expanded
+  relationships.
+
+### Changed
+
+- `Graph.explain` reports the access path of every read stage in order and
+  includes a synthetic expansion line for a stage run by the pattern engine.
+
 ## [0.4.0] - 2026-10-23
 
 ### Added

@@ -114,7 +114,7 @@ class TestAstNodes:
         statement = Statement(
             clauses=(
                 Match(
-                    pattern=PathPattern(nodes=(NodePattern(variable="n"),)),
+                    patterns=(PathPattern(nodes=(NodePattern(variable="n"),)),),
                     where=Literal(value=True),
                 ),
                 Return(
@@ -152,7 +152,7 @@ class TestAstNodes:
             PathPattern(nodes=(NodePattern(),)),
             ReturnItem(expression=Literal(value=1)),
             SortItem(expression=Literal(value=1)),
-            Match(pattern=PathPattern(nodes=(NodePattern(),))),
+            Match(patterns=(PathPattern(nodes=(NodePattern(),)),)),
             Create(pattern=PathPattern(nodes=(NodePattern(),))),
             Set(
                 assignments=(PropertyAssignment(variable="n", key="k", value=Literal(value=1)),),

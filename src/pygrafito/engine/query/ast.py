@@ -253,12 +253,20 @@ class RelationshipPattern:
         outgoing.
     properties : tuple[PropertyEntry, ...], optional
         Property map every match must satisfy, by default none.
+    min_hops : int | None, optional
+        Minimum relationship count for a quantified pattern, by default
+        ``None`` for an ordinary one-hop relationship.
+    max_hops : int | None, optional
+        Maximum relationship count for a quantified pattern, by default
+        ``None`` for an ordinary one-hop relationship.
     """
 
     variable: str | None = None
     types: tuple[str, ...] = ()
     direction: Direction = Direction.OUTGOING
     properties: tuple[PropertyEntry, ...] = ()
+    min_hops: int | None = None
+    max_hops: int | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -321,14 +329,17 @@ class Match:
 
     Parameters
     ----------
-    pattern : PathPattern
-        Pattern matched by the clause.
+    patterns : tuple[PathPattern, ...]
+        Path patterns evaluated together as one stage.
     where : Expression | None, optional
         Filter predicate, by default ``None``.
+    optional : bool, optional
+        Whether the clause is ``OPTIONAL MATCH``, by default ``False``.
     """
 
-    pattern: PathPattern
+    patterns: tuple[PathPattern, ...]
     where: Expression | None = None
+    optional: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -496,7 +507,35 @@ class Return:
     limit: Expression | None = None
 
 
-type Clause = Match | Create | Set | Remove | Delete | Return
+@dataclasses.dataclass(frozen=True, slots=True)
+class With:
+    """A ``WITH`` clause that projects rows into a new scope.
+
+    Parameters
+    ----------
+    items : tuple[ReturnItem, ...]
+        Projected expressions in output order.
+    distinct : bool, optional
+        Whether duplicate rows are removed, by default ``False``.
+    where : Expression | None, optional
+        Filter evaluated against the projected scope, by default ``None``.
+    order_by : tuple[SortItem, ...], optional
+        Sort keys in significant order, by default none.
+    skip : Expression | None, optional
+        Skip expression, by default ``None``.
+    limit : Expression | None, optional
+        Limit expression, by default ``None``.
+    """
+
+    items: tuple[ReturnItem, ...]
+    distinct: bool = False
+    where: Expression | None = None
+    order_by: tuple[SortItem, ...] = ()
+    skip: Expression | None = None
+    limit: Expression | None = None
+
+
+type Clause = Match | With | Create | Set | Remove | Delete | Return
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -543,4 +582,5 @@ __all__ = [
     "Statement",
     "Unary",
     "Variable",
+    "With",
 ]

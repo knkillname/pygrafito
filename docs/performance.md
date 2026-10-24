@@ -8,7 +8,8 @@ produced each row. It is a single-machine baseline, not a guarantee.
 The harness is `benchmarks/run.py`. It builds a themed synthetic graph in an in-memory
 database, measures the same statements before and after declaring indexes, compares
 whole-graph traversal with bounded traversal, and reports the median of several
-repetitions. Index declaration and seeding happen outside the measured window.
+repetitions. The query table also includes one bounded quantified path. Index declaration
+and seeding happen outside the measured window.
 
 ```console
 hatch run python benchmarks/run.py --nodes 20000 --relationships 60000
@@ -64,6 +65,22 @@ instead of scanning every relationship, but the measured statement still joins t
 matching rows to their endpoint nodes and counts them, so wall-clock time is dominated by
 that work at these selectivities. The index is doing its job; the query shape is what
 sets the floor.
+
+### Quantified matching
+
+A bounded quantified pattern selects its start nodes through the same indexed predicates
+and then expands the declared number of hops in the pattern engine. On the same
+20,000-node / 60,000-relationship dataset:
+
+| Scenario | No index | Indexed | Speedup |
+| --- | ---: | ---: | ---: |
+| `MATCH (a:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b)` | 14.70 ms | 5.46 ms | 2.7x |
+
+The command is the same `benchmarks/run.py --nodes 20000 --relationships 60000` run
+shown above; the `quantified` row is reported in its query table. The indexed gain comes
+from finding the start nodes by `cycles` instead of scanning the node table. Expansion
+work itself is bounded by the region the start node can reach within two hops, not by
+the size of the database.
 
 ## What the numbers do not promise
 

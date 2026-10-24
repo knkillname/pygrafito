@@ -5,6 +5,8 @@
 
 import pytest
 
+from pygrafito.engine.query.parser import Parser
+from pygrafito.engine.query.semantic import SemanticAnalyzer
 from pygrafito.model import (
     PygrafitoError,
     QueryError,
@@ -42,3 +44,46 @@ class TestQueryErrors:
     def test_execution_error_is_not_a_syntax_error(self) -> None:
         assert not issubclass(QueryExecutionError, QuerySyntaxError)
         assert not issubclass(QuerySemanticError, QuerySyntaxError)
+
+
+class TestComposedQueryErrors:
+    """Verify the error class and position of new composition failures."""
+
+    @staticmethod
+    def analyze(text: str) -> None:
+        SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "MATCH (a)-[:ALLIES_WITH*1.3]->(b) RETURN b",
+            "CREATE (n:Program) WITH n RETURN n",
+            "MATCH (a) WITH a",
+            "MATCH (a) RETURN a CREATE (b:Program)",
+        ],
+    )
+    def test_clause_and_quantifier_syntax_errors_report_positions(self, text: str) -> None:
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement(text)
+        assert caught.value.line is not None
+        assert caught.value.column is not None
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "MATCH (a)-[*]->(b) RETURN b",
+            "MATCH (a)-[*3..1]->(b) RETURN b",
+            "MATCH (a)-[r*1..2]->(b) RETURN type(r)",
+            "MATCH (a:Program) WITH a.cycles + 1 RETURN a",
+            "MATCH p = (a), p = (b) RETURN p",
+        ],
+    )
+    def test_semantic_errors_use_the_semantic_class(self, text: str) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze(text)
+
+    def test_unbound_later_reference_reports_a_position(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a:Program) WITH a.designation AS name RETURN a")
+        assert caught.value.line == 1
+        assert caught.value.column is not None

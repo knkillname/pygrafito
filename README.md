@@ -299,6 +299,91 @@ with Graph.open(":memory:") as graph:
     # [('Kevin Flynn', 'ALLIES_WITH', 'Quorra'), ('Quorra', 'ALLIES_WITH', 'Tron')]
 ```
 
+Comma-separated patterns in one `MATCH` join on shared variables, and several
+`MATCH` clauses chain as stages:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("Program", designation="Kevin Flynn")
+    quorra = graph.add_node("Program", designation="Quorra")
+    tron = graph.add_node("Program", designation="Tron")
+    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+    graph.add_relationship(quorra, "ALLIES_WITH", tron)
+
+    result = graph.query(
+        "MATCH (a:Program)-[:ALLIES_WITH]->(b), (b)-[:ALLIES_WITH]->(c) "
+        "RETURN a.designation AS start, c.designation AS end"
+    )
+    print([tuple(row.values()) for row in result])  # [('Kevin Flynn', 'Tron')]
+
+    chained = graph.query(
+        "MATCH (a:Program {designation: 'Kevin Flynn'}) "
+        "MATCH (a)-[:ALLIES_WITH]->(b) RETURN b.designation AS name"
+    )
+    print([row["name"] for row in chained])  # ['Quorra']
+```
+
+An `OPTIONAL MATCH` is a left join: unmatched rows survive with nulls.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("Program", designation="Kevin Flynn")
+    sam = graph.add_node("Program", designation="Sam Flynn")
+    graph.add_relationship(kevin, "TRUSTS", sam)
+
+    result = graph.query(
+        "MATCH (a:Program) OPTIONAL MATCH (a)-[:TRUSTS]->(b) "
+        "RETURN a.designation AS name, b.designation AS trusted ORDER BY name"
+    )
+    print([tuple(row.values()) for row in result])
+    # [('Kevin Flynn', 'Sam Flynn'), ('Sam Flynn', None)]
+```
+
+A `WITH` stage projects rows into a new scope, so grouped results can be
+filtered, ordered, and paginated before the final projection:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("Program", designation="Kevin Flynn")
+    quorra = graph.add_node("Program", designation="Quorra")
+    tron = graph.add_node("Program", designation="Tron")
+    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+    graph.add_relationship(kevin, "ALLIES_WITH", tron)
+
+    result = graph.query(
+        "MATCH (a:Program)-[:ALLIES_WITH]->(b) "
+        "WITH a.designation AS name, count(*) AS allies "
+        "WHERE allies > 1 RETURN name, allies"
+    )
+    print([tuple(row.values()) for row in result])  # [('Kevin Flynn', 2)]
+```
+
+A quantified relationship follows a bounded number of hops. Trails are
+relationship-unique, and the relationship variable binds the traversed list:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("Program", designation="Kevin Flynn")
+    quorra = graph.add_node("Program", designation="Quorra")
+    tron = graph.add_node("Program", designation="Tron")
+    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+    graph.add_relationship(quorra, "ALLIES_WITH", tron)
+
+    result = graph.query(
+        "MATCH (a:Program {designation: 'Kevin Flynn'})-[r:ALLIES_WITH*1..2]->(b) "
+        "RETURN b.designation AS name, size(r) AS hops ORDER BY name"
+    )
+    print([tuple(row.values()) for row in result])  # [('Quorra', 1), ('Tron', 2)]
+```
+
 Use `Graph.prepare` when the same statement runs more than once. Prepared
 columns are available before the first execution, and parameters may change on
 each call.

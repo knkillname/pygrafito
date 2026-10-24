@@ -343,6 +343,36 @@ class TestBatchNodeLoading:
             database.close()
 
 
+class TestPatternSets:
+    """Verify multiple patterns compile into one joined SQL statement."""
+
+    def compiled(
+        self,
+        text: str,
+        parameters: dict[str, QueryValue] | None = None,
+    ) -> CompiledMatch:
+        statement = Parser.parse_statement(text)
+        match = next(clause for clause in statement.clauses if isinstance(clause, Match))
+        return Compiler(match).compile(parameters or {})
+
+    def test_shared_variable_reuses_node_alias(self) -> None:
+        compiled = self.compiled("MATCH (a)-[:TRUSTS]->(b), (b)-[:ALLIES_WITH]->(c) RETURN c")
+        assert compiled.sql.count("nodes AS") == 3
+        assert "CROSS JOIN" not in compiled.sql
+
+    def test_disconnected_patterns_cross_join(self) -> None:
+        compiled = self.compiled("MATCH (a), (b) RETURN a, b")
+        assert "CROSS JOIN nodes AS n1" in compiled.sql
+        assert [column.variable for column in compiled.node_columns] == ["a", "b"]
+
+    def test_bound_value_constrains_the_first_alias(self) -> None:
+        statement = Parser.parse_statement("MATCH (a)-[:TRUSTS]->(b) RETURN b")
+        match = next(clause for clause in statement.clauses if isinstance(clause, Match))
+        compiled = Compiler(match).compile({}, {"a": 7})
+        assert "n0.id = ?" in compiled.sql
+        assert 7 in compiled.arguments
+
+
 class TestPlanPipeline:
     """Verify the physical operator pipeline is built in execution order."""
 
@@ -353,6 +383,8 @@ class TestPlanPipeline:
     def test_projection_only(self) -> None:
         plan = self.plan("MATCH (n) RETURN n")
         assert plan.operators == (PlanOperator.MATCH, PlanOperator.PROJECT)
+        assert len(plan.stages) == 1
+        assert plan.stages[0].operators == (PlanOperator.MATCH,)
 
     def test_filter_projection(self) -> None:
         plan = self.plan("MATCH (n) WHERE n.cycles > 1 RETURN n")

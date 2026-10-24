@@ -23,6 +23,7 @@ from pygrafito.engine.query.ast import (
     Star,
     Unary,
     Variable,
+    With,
 )
 from pygrafito.engine.query.parser import Parser
 from pygrafito.model import Direction, QuerySemanticError, QuerySyntaxError
@@ -73,10 +74,84 @@ class TestAcceptedSyntax:
 
     def test_minimal_query(self) -> None:
         statement = Parser.parse_statement("MATCH (n:Program) RETURN n.designation AS name")
-        assert len(self.match(statement).pattern.nodes) == 1
-        assert self.match(statement).pattern.nodes[0].labels == ("Program",)
+        assert len(self.match(statement).patterns[0].nodes) == 1
+        assert self.match(statement).patterns[0].nodes[0].labels == ("Program",)
         assert self.returned(statement).items[0].alias == "name"
         assert self.returned(statement).items[0].text == "n.designation"
+
+    def test_two_patterns_in_one_match(self) -> None:
+        statement = Parser.parse_statement("MATCH (a:Program), (b:ISO) RETURN a, b")
+        clause = self.match(statement)
+        assert len(clause.patterns) == 2
+        assert clause.patterns[0].nodes[0].labels == ("Program",)
+        assert clause.patterns[1].nodes[0].labels == ("ISO",)
+
+    def test_three_patterns_in_one_match(self) -> None:
+        statement = Parser.parse_statement("MATCH (a), (b), (c) RETURN a, b, c")
+        assert len(self.match(statement).patterns) == 3
+
+    def test_multiple_match_clauses(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (a:Program) MATCH (a)-[:ALLIES_WITH]->(b:Program) RETURN b"
+        )
+        clauses = [clause for clause in statement.clauses if isinstance(clause, Match)]
+        assert len(clauses) == 2
+        assert len(clauses[0].patterns) == 1
+        assert clauses[1].patterns[0].relationships[0].types == ("ALLIES_WITH",)
+
+    def test_optional_match_with_where(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (a:Program) OPTIONAL MATCH (a)-[r:ALLIES_WITH]->(b) "
+            "WHERE b.cycles > 40 RETURN a, b"
+        )
+        clauses = [clause for clause in statement.clauses if isinstance(clause, Match)]
+        assert len(clauses) == 2
+        assert clauses[1].optional
+        assert clauses[1].where is not None
+        assert clauses[1].patterns[0].relationships[0].types == ("ALLIES_WITH",)
+
+    def test_with_projection_filter_and_pagination(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (a:Program) WITH DISTINCT a.designation AS name "
+            "WHERE name STARTS WITH 'Q' ORDER BY name DESC SKIP 1 LIMIT 2 RETURN name"
+        )
+        clause = next(clause for clause in statement.clauses if isinstance(clause, With))
+        assert clause.distinct
+        assert clause.where is not None
+        assert clause.order_by[0].descending
+        assert clause.skip is not None
+        assert clause.limit is not None
+
+    def test_with_can_be_followed_by_match(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (a:Program) WITH a MATCH (a)-[:ALLIES_WITH]->(b) RETURN b"
+        )
+        kinds = [type(clause).__name__ for clause in statement.clauses]
+        assert kinds == ["Match", "With", "Match", "Return"]
+
+    def test_quantified_relationship_forms(self) -> None:
+        forms = {
+            "MATCH (a)-[:ALLIES_WITH*2]->(b) RETURN b": (2, 2),
+            "MATCH (a)-[:ALLIES_WITH*1..3]->(b) RETURN b": (1, 3),
+            "MATCH (a)-[:ALLIES_WITH*0..2]->(b) RETURN b": (0, 2),
+            "MATCH (a)-[*1..2]->(b) RETURN b": (1, 2),
+        }
+        for text, expected in forms.items():
+            relationship = self.match(Parser.parse_statement(text)).patterns[0].relationships[0]
+            assert (relationship.min_hops, relationship.max_hops) == expected
+
+    def test_bare_quantifier_has_no_upper_bound(self) -> None:
+        relationship = (
+            self.match(Parser.parse_statement("MATCH (a)-[*]->(b) RETURN b"))
+            .patterns[0]
+            .relationships[0]
+        )
+        assert relationship.min_hops == 1
+        assert relationship.max_hops is None
+
+    def test_malformed_quantifier_is_a_syntax_error(self) -> None:
+        with pytest.raises(QuerySyntaxError):
+            Parser.parse_statement("MATCH (a)-[:ALLIES_WITH*1.3]->(b) RETURN b")
 
     def test_keywords_are_case_insensitive(self) -> None:
         statement = Parser.parse_statement("match (n) where true return n")
@@ -84,17 +159,17 @@ class TestAcceptedSyntax:
 
     def test_keyword_casing_does_not_change_identifiers(self) -> None:
         statement = Parser.parse_statement("MATCH (n:Program) RETURN n")
-        assert self.match(statement).pattern.nodes[0].labels == ("Program",)
+        assert self.match(statement).patterns[0].nodes[0].labels == ("Program",)
 
     def test_comments_are_ignored(self) -> None:
         statement = Parser.parse_statement("MATCH // line\n (n) /* block */ RETURN n // trailing")
-        assert self.match(statement).pattern.nodes[0].variable == "n"
+        assert self.match(statement).patterns[0].nodes[0].variable == "n"
 
     def test_node_labels_and_properties(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (p:Program:ISO {designation: 'Quorra', cycles: $cycles}) RETURN p"
         )
-        node = self.match(statement).pattern.nodes[0]
+        node = self.match(statement).patterns[0].nodes[0]
         assert node.labels == ("Program", "ISO")
         assert [entry.key for entry in node.properties] == ["designation", "cycles"]
         cycles = node.properties[1].value
@@ -103,29 +178,29 @@ class TestAcceptedSyntax:
 
     def test_anonymous_node_and_relationship(self) -> None:
         statement = Parser.parse_statement("MATCH (:Program)-[]->(:Program) RETURN 1")
-        assert self.match(statement).pattern.nodes[0].variable is None
-        assert self.match(statement).pattern.relationships[0].variable is None
-        assert self.match(statement).pattern.nodes[1].variable is None
+        assert self.match(statement).patterns[0].nodes[0].variable is None
+        assert self.match(statement).patterns[0].relationships[0].variable is None
+        assert self.match(statement).patterns[0].nodes[1].variable is None
 
     def test_path_variable(self) -> None:
         statement = Parser.parse_statement("MATCH p = (a)-[r]->(b) RETURN p")
-        assert self.match(statement).pattern.variable == "p"
+        assert self.match(statement).patterns[0].variable == "p"
 
     def test_relationship_directions(self) -> None:
         outgoing = Parser.parse_statement("MATCH (a)-->(b) RETURN b")
         incoming = Parser.parse_statement("MATCH (a)<--(b) RETURN b")
         both = Parser.parse_statement("MATCH (a)--(b) RETURN b")
         bracketed = Parser.parse_statement("MATCH (a)-[r]-(b) RETURN b")
-        assert self.match(outgoing).pattern.relationships[0].direction is Direction.OUTGOING
-        assert self.match(incoming).pattern.relationships[0].direction is Direction.INCOMING
-        assert self.match(both).pattern.relationships[0].direction is Direction.BOTH
-        assert self.match(bracketed).pattern.relationships[0].direction is Direction.BOTH
+        assert self.match(outgoing).patterns[0].relationships[0].direction is Direction.OUTGOING
+        assert self.match(incoming).patterns[0].relationships[0].direction is Direction.INCOMING
+        assert self.match(both).patterns[0].relationships[0].direction is Direction.BOTH
+        assert self.match(bracketed).patterns[0].relationships[0].direction is Direction.BOTH
 
     def test_relationship_types_and_properties(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (a)-[r:ALLIES_WITH|TRUSTS {since_cycle: 2020}]->(b) RETURN r"
         )
-        relationship = self.match(statement).pattern.relationships[0]
+        relationship = self.match(statement).patterns[0].relationships[0]
         assert relationship.types == ("ALLIES_WITH", "TRUSTS")
         assert relationship.properties[0].key == "since_cycle"
         assert relationship.direction is Direction.OUTGOING
@@ -134,18 +209,18 @@ class TestAcceptedSyntax:
         statement = Parser.parse_statement(
             "MATCH (a:Program)-[:ALLIES_WITH]->(b)-[:TRUSTS]->(c) RETURN c"
         )
-        assert len(self.match(statement).pattern.nodes) == 3
-        assert len(self.match(statement).pattern.relationships) == 2
+        assert len(self.match(statement).patterns[0].nodes) == 3
+        assert len(self.match(statement).patterns[0].relationships) == 2
 
     def test_backtick_identifiers(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (`a.b`:`Grid Node`)-[`r.x`:`GRID LINK` {`a.b`: 1}]->(b) "
             "RETURN `a.b`.`a.b` AS `the value`"
         )
-        node = self.match(statement).pattern.nodes[0]
+        node = self.match(statement).patterns[0].nodes[0]
         assert node.variable == "a.b"
         assert node.labels == ("Grid Node",)
-        relationship = self.match(statement).pattern.relationships[0]
+        relationship = self.match(statement).patterns[0].relationships[0]
         assert relationship.variable == "r.x"
         assert relationship.types == ("GRID LINK",)
         assert relationship.properties[0].key == "a.b"
@@ -155,7 +230,7 @@ class TestAcceptedSyntax:
         statement = Parser.parse_statement(
             "MATCH (n {tags: ['ISO', 'Program'], offset: -3}) RETURN n"
         )
-        values = [entry.value for entry in self.match(statement).pattern.nodes[0].properties]
+        values = [entry.value for entry in self.match(statement).patterns[0].nodes[0].properties]
         assert isinstance(values[0], ListLiteral)
         assert isinstance(values[1], Unary)
 
@@ -314,11 +389,11 @@ class TestParserErrors:
             ("MATCH (n) RETURN n trailing", 1, 20, "unexpected token"),
             ("MATCH (n) RETURN n ORDER n", 1, 26, "expected BY"),
             ("MATCH (n)-[r RETURN n", 1, 14, "expected ']'"),
-            ("MATCH (a) MATCH (b) RETURN a", 1, 11, "only one MATCH clause"),
             ("MATCH (a) RETURN a RETURN a", 1, 20, "only one RETURN clause"),
             ("MATCH (a) RETURN a CREATE (b)", 1, 20, "RETURN must be the final clause"),
             ("CREATE (a) MATCH (b) RETURN b", 1, 12, "must precede every write clause"),
             ("MATCH (a) DETACH (b)", 1, 18, "expected DELETE after DETACH"),
+            ("MATCH (a) OPTIONAL (b) RETURN a", 1, 20, "expected MATCH after OPTIONAL"),
         ],
     )
     def test_syntax_error_positions(
@@ -334,16 +409,20 @@ class TestParserErrors:
         assert caught.value.line == line
         assert caught.value.column == column
 
+    def test_with_must_not_end_a_statement(self) -> None:
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement("MATCH (a) WITH a")
+        assert "RETURN" in caught.value.message
+
+    def test_with_cannot_follow_a_write_clause(self) -> None:
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement("CREATE (n:Program) WITH n RETURN n")
+        assert "must precede every write clause" in caught.value.message
+
     @pytest.mark.parametrize(
         ("text", "fragment"),
         [
-            ("MATCH (a)-[r*1..3]->(b) RETURN b", "variable-length"),
-            ("MATCH (a)-[*]->(b) RETURN b", "variable-length"),
-            ("MATCH (a)-[:ALLIES_WITH*]->(b) RETURN b", "variable-length"),
-            ("MATCH (a), (b) RETURN a", "multiple path patterns"),
-            ("OPTIONAL MATCH (a) RETURN a", "OPTIONAL MATCH"),
-            ("MATCH (a) OPTIONAL MATCH (b) RETURN a", "OPTIONAL MATCH"),
-            ("MATCH (a) WITH a RETURN a", "WITH"),
+            ("MATCH (a) WITH * RETURN a", "WITH *"),
             ("MATCH (a) UNWIND [1] AS x RETURN a", "UNWIND"),
             ("MATCH (a) MERGE (b) RETURN a", "MERGE"),
             ("MATCH (a) RETURN CASE WHEN true THEN 1 END", "CASE"),

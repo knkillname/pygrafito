@@ -31,8 +31,9 @@ write and runs in its own transaction.
 A statement is a non-empty ordered sequence of clauses:
 
 ```text
-[MATCH <path pattern>]
-[WHERE <expression>]
+{ [OPTIONAL] MATCH <path pattern> [, <path pattern> ...] [WHERE <expression>]
+  | WITH [DISTINCT] <projection> [WHERE <expression>]
+    [ORDER BY <sort item> [, <sort item> ...]] [SKIP <expression>] [LIMIT <expression>] }
 [{CREATE | SET | REMOVE | DELETE | DETACH DELETE} ...]
 [RETURN [DISTINCT] <projection> [, <projection> ...]
  [ORDER BY <sort item> [, <sort item> ...]]
@@ -41,11 +42,13 @@ A statement is a non-empty ordered sequence of clauses:
 [;]
 ```
 
-`MATCH` is optional when the statement contains a write clause, and `RETURN` is
-optional in that case too. A read statement requires both. Each clause carries
-exactly one path pattern; there is at most one `MATCH`, it precedes every write
-clause, and `RETURN` is at most once and always last. Multiple statements,
-multiple `MATCH` clauses, and multiple path patterns are rejected.
+A `MATCH` clause carries one or more comma-separated path patterns and an
+optional `WHERE`; `OPTIONAL MATCH` uses the same shape with left-join semantics.
+A statement may contain several `MATCH` clauses: each clause is a stage joined
+against the rows produced by the previous one. `MATCH` is optional when the
+statement contains a write clause, and `RETURN` is optional in that case too. A
+read statement requires both. The last `MATCH` precedes every write clause, and
+`RETURN` is at most once and always last. Multiple statements are rejected.
 
 
 ## Node patterns
@@ -84,10 +87,43 @@ direction, and an optional property map:
 (a)-[r:ALLIES_WITH|TRUSTS]->(b)   type alternatives
 (a)-[r {since_cycle: 2020}]->(b)  property filter
 (a)-->(b)                         anonymous outgoing relationship
+(a)-[:ALLIES_WITH*1..3]->(b)      quantified, bounded
 ```
 
 A bound relationship snapshot preserves its stored start node, end node, and
 type even when the pattern traverses it against its stored direction.
+
+## Variable-length relationships
+
+A relationship may carry a quantifier after its types:
+
+```text
+(a)-[:ALLIES_WITH*2]->(b)          exactly two hops
+(a)-[:ALLIES_WITH*1..3]->(b)       between one and three hops
+(a)-[:ALLIES_WITH*0..2]->(b)       zero through two hops
+(a)-[*1..2]->(b)                   anonymous, any type
+```
+
+Every hop applies the pattern's direction, type alternatives, and property map.
+The upper bound is required: a bare `*` or an open range such as `*1..` is
+rejected, because the engine never explores an unbounded trail space. Bounds are
+non-negative integers and the lower bound cannot exceed the upper bound.
+
+Trails are relationship-unique: one match never uses the same relationship
+twice, while nodes may repeat. That is the same rule the Python `paths()` API
+uses. A relationship variable on a quantified pattern binds the ordered list of
+traversed relationships, and a path variable includes every expanded
+relationship:
+
+```text
+MATCH (a)-[r:ALLIES_WITH*1..3]->(b) RETURN r, size(r)
+MATCH p = (a)-[:ALLIES_WITH*1..2]->(b) RETURN p
+```
+
+A relationship-list variable may be projected or passed to `size`; it cannot be
+used where a single relationship is required, so `type(r)` and `r.property` are
+semantic errors. The same applies to pattern property maps: they must be
+literals or parameters.
 
 ## Pattern variables and paths
 
@@ -107,6 +143,72 @@ from the start of the pattern to its end:
 ```text
 MATCH p = (q)<-[:ALLIES_WITH]-(k) RETURN p
 ```
+
+## Multiple patterns and match stages
+
+A comma-separated pattern list in one `MATCH` is evaluated as one stage. A
+variable shared by two patterns refers to the same element, so the patterns join
+on it. Patterns that share no variable produce the cartesian product of their
+matches.
+
+```text
+MATCH (a:Program)-[:ALLIES_WITH]->(b), (b)-[:ALLIES_WITH]->(c) RETURN c
+MATCH (a:Program), (b:System) RETURN a, b
+```
+
+Several `MATCH` clauses are several stages. Each clause joins against the rows
+the previous clause produced, so a later clause can constrain a variable bound
+earlier and introduce new ones:
+
+```text
+MATCH (a:Program) MATCH (a)-[:TRUSTS]->(b) RETURN b
+```
+
+A row with no match in a later stage is removed. A path variable may be bound
+only once, and a variable always keeps one kind: a node cannot later become a
+relationship.
+
+## OPTIONAL MATCH
+
+`OPTIONAL MATCH` is a left join. A pattern that matches produces one row per
+match; a pattern that matches nothing keeps the input row with the variables the
+stage introduces bound to `null`. Variables bound before the stage keep their
+values.
+
+```text
+MATCH (a:Program) OPTIONAL MATCH (a)-[:TRUSTS]->(b) RETURN a, b
+```
+
+The `WHERE` attached to an `OPTIONAL MATCH` is part of the optional stage, so it
+filters matches rather than input rows. A null property compares as null, and a
+null never satisfies a filter, so a later stage either drops the row or sees
+`null` in its projection. A statement may start with `OPTIONAL MATCH`; when
+nothing matches it returns one null row.
+
+## WITH
+
+`WITH` ends a read stage and projects its rows into a new scope. Only the names
+it projects remain visible to later stages; a projected variable keeps its kind,
+and a non-variable expression requires an alias. Duplicate output names are
+rejected.
+
+```text
+MATCH (a:Program)-[:ALLIES_WITH]->(b) WITH a, count(*) AS friends RETURN a, friends
+MATCH (n:Program) WITH n.designation AS name WHERE name STARTS WITH 'Q' RETURN name
+```
+
+A `WITH` stage supports `DISTINCT`, `WHERE`, `ORDER BY`, `SKIP`, and `LIMIT`, and
+its aggregate aliases are ordinary names downstream. This is how a grouped result
+is filtered, ordered, or paginated:
+
+```text
+MATCH (a)-[:ALLIES_WITH]->(b) WITH a, count(*) AS friends
+WHERE friends > 2 RETURN a
+```
+
+`WHERE` after `WITH` sees only the projected scope. A `MATCH` may follow a
+`WITH`, and a write clause may follow one too. A statement cannot end with
+`WITH`: it must be followed by another read stage, a write clause, or `RETURN`.
 
 ## Pattern match row semantics
 
@@ -456,9 +558,11 @@ variables.
 
 ```text
 statement        = { clause } [";"]
-clause           = match-clause | create-clause | set-clause
+clause           = match-clause | with-clause | create-clause | set-clause
                  | remove-clause | delete-clause | return-clause
-match-clause     = "MATCH" path-pattern [where-clause]
+match-clause     = [ "OPTIONAL" ] "MATCH" path-pattern { "," path-pattern } [where-clause]
+with-clause      = "WITH" [ "DISTINCT" ] return-item { "," return-item }
+                   [where-clause] [order-clause] [skip-clause] [limit-clause]
 create-clause    = "CREATE" path-pattern
 set-clause       = "SET" set-item { "," set-item }
 set-item         = identifier "." key "=" expression
@@ -473,9 +577,10 @@ path-pattern     = [identifier "="] node-pattern
                    { relationship-pattern node-pattern }
 node-pattern     = "(" [identifier] { ":" label } [property-map] ")"
 relationship     = "-" [ "[" [identifier] [":" type {"|" type}]
-                   [property-map] "]" ] "-" [">"]
+                   [quantifier] [property-map] "]" ] "-" [">"]
                  | "<" "-" [ "[" [identifier] [":" type {"|" type}]
-                   [property-map] "]" ] "-"
+                   [quantifier] [property-map] "]" ] "-"
+quantifier       = "*" [ INTEGER [ ".." [ INTEGER ] ] ]
 property-map     = "{" [ key ":" expression { "," key ":" expression } ] "}"
 where-clause     = "WHERE" expression
 return-item      = expression [ "AS" identifier ]
@@ -494,10 +599,8 @@ alias may be backtick-quoted. A write clause may omit `MATCH` and `RETURN`, and
 
 The following are recognized and rejected with a query error before execution:
 
-- variable-length patterns such as `-[r*1..3]->`
-- multiple path patterns or multiple `MATCH` clauses
-- `OPTIONAL MATCH`
-- `WITH`, `UNWIND`, and subqueries (`CALL { ... }`, `EXISTS { ... }`)
+- `WITH *`
+- `UNWIND` and subqueries (`CALL { ... }`, `EXISTS { ... }`)
 - `CASE` expressions and map literals
 - `MERGE` and conditional updates (`ON CREATE`, `ON MATCH`)
 - whole-map assignment (`SET n = {...}`) and merge assignment (`SET n += {...}`)

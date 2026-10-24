@@ -146,6 +146,104 @@ class TestConformance:
             "RETURN n.designation ORDER BY n.designation",
             (("Clu",), ("Quorra",), ("Tron",)),
         ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'})-[:ALLIES_WITH]->(b), "
+            "(b)-[:ALLIES_WITH]->(c) RETURN c.designation",
+            (("Clu",), ("Clu",)),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS]->(b), "
+            "(b)-[:ALLIES_WITH]->(c) RETURN b.designation, c.designation",
+            (("Tron", "Clu"),),
+        ),
+        Case(
+            "MATCH (a:System), (b:Program) RETURN count(*) AS total",
+            ((6,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'}) MATCH (a)-[:TRUSTS]->(b) RETURN b.designation",
+            (("Tron",),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Sam Flynn'}) MATCH (a)-[:TRUSTS]->(b) "
+            "RETURN count(*) AS total",
+            ((0,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'}) "
+            "OPTIONAL MATCH (a)-[:ALLIES_WITH]->(b) RETURN count(*) AS total",
+            ((2,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Sam Flynn'}) "
+            "OPTIONAL MATCH (a)-[:TRUSTS]->(b) RETURN b.designation",
+            ((None,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Sam Flynn'}) "
+            "OPTIONAL MATCH (a)-[:TRUSTS]->(b) "
+            "RETURN a.designation, b.designation",
+            (("Sam Flynn", None),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'}) "
+            "OPTIONAL MATCH (a)-[:ALLIES_WITH]->(b) WHERE b.cycles > 40 "
+            "RETURN b.designation",
+            ((None,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Sam Flynn'}) OPTIONAL MATCH (a)-[:TRUSTS]->(b) "
+            "MATCH (a) WHERE b.designation = 'Tron' RETURN b",
+            (),
+        ),
+        Case(
+            "OPTIONAL MATCH (n:Missing) RETURN n.designation",
+            ((None,),),
+        ),
+        Case(
+            "MATCH (a)-[:ALLIES_WITH]->(b) WITH a, count(*) AS friends "
+            "WHERE friends > 1 RETURN a.designation",
+            (("Kevin Flynn",),),
+        ),
+        Case(
+            "MATCH (a)-[:ALLIES_WITH]->(b) WITH a.designation AS name, count(*) AS friends "
+            "ORDER BY friends DESC, name LIMIT 1 RETURN name, friends",
+            (("Kevin Flynn", 2),),
+        ),
+        Case(
+            "MATCH (a)-[:ALLIES_WITH]->(b) WITH a.designation AS name, count(*) AS friends "
+            "ORDER BY name SKIP 1 LIMIT 2 RETURN name",
+            (("Quorra",), ("Tron",)),
+        ),
+        Case(
+            "MATCH (n:Program) WITH n.cycles AS cycles, count(*) AS total "
+            "RETURN cycles, total ORDER BY total, cycles",
+            ((37, 1), (40, 1), (36, 2), (None, 2)),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'})-[:ALLIES_WITH*2]->(b) RETURN count(*) AS total",
+            ((2,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'})-[:ALLIES_WITH*1..2]->(b) "
+            "RETURN count(*) AS total",
+            ((4,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'})-[:ALLIES_WITH*0..1]->(b) "
+            "RETURN count(*) AS total",
+            ((3,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Kevin Flynn'})-[r:ALLIES_WITH*2..2]->(b) "
+            "RETURN DISTINCT size(r) AS length",
+            ((2,),),
+        ),
+        Case(
+            "MATCH (a {designation: 'Clu'})<-[r:ALLIES_WITH*1..2]-(b) "
+            "RETURN b.designation ORDER BY b.designation",
+            (("Kevin Flynn",), ("Kevin Flynn",), ("Quorra",), ("Tron",)),
+        ),
     )
 
     @pytest.fixture
@@ -201,6 +299,18 @@ class TestConformance:
         assert isinstance(path, Path)
         assert [node["designation"] for node in path.nodes] == ["Kevin Flynn", "Tron"]
         assert [relationship.rel_type for relationship in path.relationships] == ["TRUSTS"]
+
+    def test_quantified_path_conformance(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH p = (a {designation: 'Kevin Flynn'})-[:ALLIES_WITH*2..2]->(b) RETURN p"
+        )
+        for row in result.rows:
+            path = row["p"]
+            assert isinstance(path, Path)
+            assert len(path.nodes) == 3
+            assert len(path.relationships) == 2
+            assert path.nodes[0]["designation"] == "Kevin Flynn"
+            assert path.nodes[-1]["designation"] == "Clu"
 
     def test_injection_conformance(self, graph: Graph) -> None:
         graph.add_node("Program", designation="Quorra' OR 1=1 --")

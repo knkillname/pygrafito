@@ -17,7 +17,10 @@ from pygrafito.engine.query.ast import (
     IsNull,
     ListLiteral,
     Literal,
+    Match,
+    NodePattern,
     Parameter,
+    PathPattern,
     Property,
     Star,
     Unary,
@@ -30,9 +33,16 @@ from pygrafito.engine.query.compiler import (
     RelationshipColumns,
 )
 from pygrafito.engine.query.mutation import MutationExecutor
-from pygrafito.engine.query.plan import Plan, PlanOperator
+from pygrafito.engine.query.pattern import PatternEngine
+from pygrafito.engine.query.plan import Plan
 from pygrafito.engine.query.results import QueryResult, Row
-from pygrafito.engine.query.semantic import Analysis, SortSpec
+from pygrafito.engine.query.semantic import (
+    MatchStage,
+    OptionalMatchStage,
+    ReturnColumn,
+    SortSpec,
+    WithStage,
+)
 from pygrafito.engine.query.values import (
     Aggregates,
     ExpressionEvaluator,
@@ -336,9 +346,42 @@ class QueryExecutor:
         """
         analysis = plan.analysis
         analysis.require_parameters(parameters)
-        match = analysis.match_clause
-        if match is None:
+        if not plan.stages:
             return ()
+        lines: list[str] = []
+        for plan_stage in plan.stages:
+            lines.extend(self._explain_stage(plan_stage.stage, parameters))
+        return tuple(lines)
+
+    def _explain_stage(
+        self,
+        stage: MatchStage | OptionalMatchStage | WithStage,
+        parameters: Mapping[str, QueryValue],
+    ) -> tuple[str, ...]:
+        """Return the planned access path of one read stage.
+
+        Parameters
+        ----------
+        stage : MatchStage | OptionalMatchStage | WithStage
+            Read stage to inspect.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One detail line per plan row for the stage.
+
+        Raises
+        ------
+        QueryExecutionError
+            If SQLite cannot plan the stage.
+        """
+        if isinstance(stage, WithStage):
+            return ()
+        if self._is_quantified(stage.patterns):
+            return self._explain_quantified(stage, parameters)
+        match = Match(patterns=stage.patterns, where=stage.where)
         compiled = Compiler(match, self._codec).compile(parameters)
         try:
             rows = self._connection.execute(
@@ -349,6 +392,52 @@ class QueryExecutor:
             message = "query planning failed"
             raise QueryExecutionError(message) from error
         return tuple(str(row[3]) for row in rows)
+
+    def _explain_quantified(
+        self,
+        stage: MatchStage | OptionalMatchStage,
+        parameters: Mapping[str, QueryValue],
+    ) -> tuple[str, ...]:
+        """Explain a stage that expands quantified relationships.
+
+        Parameters
+        ----------
+        stage : MatchStage | OptionalMatchStage
+            Stage run by the pattern engine.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        tuple[str, ...]
+            Start-node access plans followed by one expansion line.
+        """
+        lines: list[str] = []
+        for pattern in stage.patterns:
+            first = pattern.nodes[0]
+            synthetic = NodePattern(
+                variable="__pygrafito_start",
+                labels=first.labels,
+                properties=first.properties,
+            )
+            match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
+            compiled = Compiler(match, self._codec).compile(parameters)
+            try:
+                rows = self._connection.execute(
+                    f"EXPLAIN QUERY PLAN {compiled.sql}",
+                    compiled.arguments,
+                ).fetchall()
+            except sqlite3.Error as error:
+                message = "query planning failed"
+                raise QueryExecutionError(message) from error
+            lines.extend(str(row[3]) for row in rows)
+        depth = sum(
+            1 if relationship.max_hops is None else relationship.max_hops
+            for pattern in stage.patterns
+            for relationship in pattern.relationships
+        )
+        lines.append(f"QUANTIFIED PATTERN max_hops={depth}")
+        return tuple(lines)
 
     def execute_graph(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
         """Execute a statement inside its own short transaction.
@@ -510,11 +599,19 @@ class QueryExecutor:
         snapshots = RepositorySnapshots(self._nodes, self._relationships)
         functions = ScalarFunctions(snapshots)
         evaluator = ExpressionEvaluator(functions)
-        bindings = self._initial_bindings(analysis, parameters, evaluator)
+        bindings: list[dict[str, QueryValue]] = [{}]
+        for plan_stage in plan.stages:
+            bindings = self._run_stage(
+                plan_stage.stage,
+                bindings,
+                evaluator,
+                functions,
+                parameters,
+            )
         mutations = MutationExecutor(self._nodes, self._relationships)
         if analysis.is_write:
             bindings = mutations.apply(
-                analysis.statement.clauses,
+                analysis.write_clauses,
                 bindings,
                 evaluator,
                 parameters,
@@ -532,9 +629,9 @@ class QueryExecutor:
             functions,
             parameters,
         )
-        if plan.includes(PlanOperator.DISTINCT):
+        if return_clause.distinct:
             rows = self._distinct(rows)
-        if plan.includes(PlanOperator.ORDER):
+        if analysis.sorts:
             self._order(rows, analysis.sorts, evaluator, parameters)
         start = 0 if skip is None else skip
         end = None if limit is None else start + limit
@@ -545,44 +642,423 @@ class QueryExecutor:
             summary=mutations.summary,
         )
 
-    def _initial_bindings(
+    def _run_stage(
         self,
-        analysis: Analysis,
-        parameters: Mapping[str, QueryValue],
+        stage: MatchStage | OptionalMatchStage | WithStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
+        functions: ScalarFunctions,
+        parameters: Mapping[str, QueryValue],
     ) -> list[dict[str, QueryValue]]:
-        """Produce the bindings that write clauses and projection consume.
-
-        A statement without ``MATCH`` starts from one empty binding, so a
-        standalone ``CREATE`` runs exactly once.
+        """Run one read stage over the rows produced by earlier stages.
 
         Parameters
         ----------
-        analysis : Analysis
-            Static analysis of the statement.
-        parameters : Mapping[str, QueryValue]
-            Query parameter values.
+        stage : MatchStage | OptionalMatchStage | WithStage
+            Read stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows from earlier stages.
         evaluator : ExpressionEvaluator
             Scalar expression evaluator.
+        functions : ScalarFunctions
+            Scalar function implementation.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
 
         Returns
         -------
         list[dict[str, QueryValue]]
-            Match bindings, or one empty binding without a match clause.
+            Output rows of the stage.
         """
-        match = analysis.match_clause
-        if match is None:
-            return [{}]
+        if isinstance(stage, MatchStage):
+            return self._run_match_stage(stage, bindings, evaluator, parameters)
+        if isinstance(stage, OptionalMatchStage):
+            return self._run_optional_match_stage(stage, bindings, evaluator, parameters)
+        if isinstance(stage, WithStage):
+            return self._run_with_stage(stage, bindings, evaluator, functions, parameters)
+        message = f"unsupported read stage: {type(stage).__name__}"
+        raise QueryExecutionError(message)
+
+    def _run_match_stage(
+        self,
+        stage: MatchStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+    ) -> list[dict[str, QueryValue]]:
+        """Run a mandatory match stage.
+
+        Parameters
+        ----------
+        stage : MatchStage
+            Stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            One output row per match for every input row.
+        """
+        results: list[dict[str, QueryValue]] = []
+        names = self._pattern_variables(stage.patterns)
+        if self._is_quantified(stage.patterns):
+            return self._run_pattern_stage(
+                stage.patterns,
+                stage.where,
+                bindings,
+                evaluator,
+                parameters,
+                optional=False,
+                introduced=frozenset(),
+            )
+        for binding in bindings:
+            if self._has_null_binding(binding, names):
+                continue
+            matches = self._match_rows(
+                stage.patterns,
+                stage.where,
+                evaluator,
+                parameters,
+                binding,
+            )
+            results.extend({**binding, **match} for match in matches)
+        return results
+
+    def _run_optional_match_stage(
+        self,
+        stage: OptionalMatchStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+    ) -> list[dict[str, QueryValue]]:
+        """Run an optional match stage as a left join.
+
+        Parameters
+        ----------
+        stage : OptionalMatchStage
+            Stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            One output row per match, or the input row with nulls when the
+            stage does not match.
+        """
+        results: list[dict[str, QueryValue]] = []
+        names = self._pattern_variables(stage.patterns)
+        if self._is_quantified(stage.patterns):
+            return self._run_pattern_stage(
+                stage.patterns,
+                stage.where,
+                bindings,
+                evaluator,
+                parameters,
+                optional=True,
+                introduced=stage.introduced,
+            )
+        for binding in bindings:
+            if self._has_null_binding(binding, names):
+                results.append({**binding, **dict.fromkeys(sorted(stage.introduced))})
+                continue
+            matches = self._match_rows(
+                stage.patterns,
+                stage.where,
+                evaluator,
+                parameters,
+                binding,
+            )
+            if not matches:
+                results.append({**binding, **dict.fromkeys(sorted(stage.introduced))})
+                continue
+            results.extend({**binding, **match} for match in matches)
+        return results
+
+    def _run_with_stage(
+        self,
+        stage: WithStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        functions: ScalarFunctions,
+        parameters: Mapping[str, QueryValue],
+    ) -> list[dict[str, QueryValue]]:
+        """Run a ``WITH`` stage as a row transformer.
+
+        Parameters
+        ----------
+        stage : WithStage
+            Stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        functions : ScalarFunctions
+            Scalar function implementation.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            Rows projected into the stage's output scope.
+        """
+        if stage.has_aggregates:
+            aggregate_rows = self._aggregate_project(
+                stage.items,
+                stage.grouping,
+                bindings,
+                evaluator,
+                functions,
+                parameters,
+            )
+            rows = [
+                ProjectedRow(
+                    binding={
+                        item.name: value
+                        for item, value in zip(stage.items, row.values, strict=True)
+                    },
+                    values=row.values,
+                )
+                for row in aggregate_rows
+            ]
+        else:
+            rows = []
+            for binding in bindings:
+                values = tuple(
+                    evaluator.evaluate(item.expression, binding, parameters) for item in stage.items
+                )
+                rows.append(
+                    ProjectedRow(
+                        binding={
+                            item.name: value
+                            for item, value in zip(stage.items, values, strict=True)
+                        },
+                        values=values,
+                    )
+                )
+        if stage.where is not None:
+            rows = [
+                row
+                for row in rows
+                if evaluator.evaluate(stage.where, row.binding, parameters) is True
+            ]
+        if stage.distinct:
+            rows = self._distinct(rows)
+        if stage.order_by:
+            self._order(rows, stage.order_by, evaluator, parameters)
+        skip = self._page_value(stage.skip, parameters, "SKIP")
+        limit = self._page_value(stage.limit, parameters, "LIMIT")
+        start = 0 if skip is None else skip
+        end = None if limit is None else start + limit
+        return [dict(row.binding) for row in rows[start:end]]
+
+    def _run_pattern_stage(
+        self,
+        patterns: Sequence[PathPattern],
+        where: Expression | None,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        *,
+        optional: bool,
+        introduced: frozenset[str],
+    ) -> list[dict[str, QueryValue]]:
+        """Run a match stage that contains a quantified relationship.
+
+        Parameters
+        ----------
+        patterns : Sequence[PathPattern]
+            Patterns of the stage.
+        where : Expression | None
+            Stage filter, or ``None``.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        optional : bool
+            Whether the stage is ``OPTIONAL MATCH``.
+        introduced : frozenset[str]
+            Variables to null when an optional stage does not match.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            One output row per match, or one null-extended row per input for
+            an optional stage without matches.
+        """
+        engine = PatternEngine(
+            self._nodes,
+            self._relationships,
+            self._select_start_nodes,
+            parameters,
+            evaluator,
+        )
+        names = self._pattern_variables(patterns)
+        results: list[dict[str, QueryValue]] = []
+        for binding in bindings:
+            if self._has_null_binding(binding, names):
+                if optional:
+                    results.append({**binding, **dict.fromkeys(sorted(introduced))})
+                continue
+            matches = engine.match(patterns, where, binding)
+            if optional and not matches:
+                results.append({**binding, **dict.fromkeys(sorted(introduced))})
+                continue
+            results.extend({**binding, **match} for match in matches)
+        return results
+
+    def _select_start_nodes(
+        self,
+        pattern: NodePattern,
+        parameters: Mapping[str, QueryValue],
+    ) -> list[Node]:
+        """Return candidate start nodes using the indexed node predicates.
+
+        Parameters
+        ----------
+        pattern : NodePattern
+            First node pattern of a path.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        list[Node]
+            Nodes matching the labels and property map.
+        """
+        synthetic = NodePattern(
+            variable="__pygrafito_start",
+            labels=pattern.labels,
+            properties=pattern.properties,
+        )
+        match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
         compiled = Compiler(match, self._codec).compile(parameters)
+        nodes: list[Node] = []
+        for binding in self._match_bindings(compiled):
+            node = binding.get("__pygrafito_start")
+            if isinstance(node, Node):
+                nodes.append(node)
+        return nodes
+
+    @staticmethod
+    def _is_quantified(patterns: Sequence[PathPattern]) -> bool:
+        """Report whether a pattern set contains a quantified relationship.
+
+        Parameters
+        ----------
+        patterns : Sequence[PathPattern]
+            Patterns to inspect.
+
+        Returns
+        -------
+        bool
+            ``True`` when any relationship carries a hop bound.
+        """
+        return any(
+            relationship.min_hops is not None or relationship.max_hops is not None
+            for pattern in patterns
+            for relationship in pattern.relationships
+        )
+
+    @staticmethod
+    def _pattern_variables(patterns: Sequence[PathPattern]) -> set[str]:
+        """Return every variable referenced by a pattern set.
+
+        Parameters
+        ----------
+        patterns : Sequence[PathPattern]
+            Patterns to inspect.
+
+        Returns
+        -------
+        set[str]
+            Variable names the patterns reference.
+        """
+        names: set[str] = set()
+        for pattern in patterns:
+            if pattern.variable is not None:
+                names.add(pattern.variable)
+            for node in pattern.nodes:
+                if node.variable is not None:
+                    names.add(node.variable)
+            for relationship in pattern.relationships:
+                if relationship.variable is not None:
+                    names.add(relationship.variable)
+        return names
+
+    @staticmethod
+    def _has_null_binding(
+        binding: Mapping[str, QueryValue],
+        names: set[str],
+    ) -> bool:
+        """Report whether a pattern references a variable bound to null.
+
+        Parameters
+        ----------
+        binding : Mapping[str, QueryValue]
+            Input row.
+        names : set[str]
+            Variables referenced by the pattern.
+
+        Returns
+        -------
+        bool
+            ``True`` when a referenced variable is present and null.
+        """
+        return any(name in binding and binding[name] is None for name in names)
+
+    def _match_rows(
+        self,
+        patterns: Sequence[PathPattern],
+        where: Expression | None,
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        bound: Mapping[str, QueryValue] | None = None,
+    ) -> list[dict[str, QueryValue]]:
+        """Run one pattern set and return its filtered variable bindings.
+
+        Parameters
+        ----------
+        patterns : Sequence[PathPattern]
+            Path patterns to match as one stage.
+        where : Expression | None
+            Filter attached to the pattern set, or ``None``.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        bound : Mapping[str, QueryValue] | None, optional
+            Values already bound by an earlier stage, by default none.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            Variable bindings in SQL row order.
+        """
+        match = Match(patterns=tuple(patterns), where=where)
+        compiled = Compiler(match, self._codec).compile(parameters, bound)
         bindings = self._match_bindings(compiled)
         if compiled.residual is None:
             return bindings
         residual = compiled.residual
-        return [
-            binding
-            for binding in bindings
-            if evaluator.evaluate(residual, binding, parameters) is True
-        ]
+        filtered: list[dict[str, QueryValue]] = []
+        for binding in bindings:
+            scope: Mapping[str, QueryValue] = binding if bound is None else {**bound, **binding}
+            if evaluator.evaluate(residual, scope, parameters) is True:
+                filtered.append(binding)
+        return filtered
 
     def _match_bindings(self, compiled: CompiledMatch) -> list[dict[str, QueryValue]]:
         """Run the match SQL and build one variable binding per row.
@@ -785,9 +1261,10 @@ class QueryExecutor:
             Projected rows before distinct, ordering, and pagination.
         """
         analysis = plan.analysis
-        if plan.includes(PlanOperator.AGGREGATE):
+        if analysis.has_aggregates:
             return self._aggregate_project(
-                analysis,
+                analysis.items,
+                analysis.grouping,
                 bindings,
                 evaluator,
                 functions,
@@ -803,7 +1280,8 @@ class QueryExecutor:
 
     def _aggregate_project(
         self,
-        analysis: Analysis,
+        items: Sequence[ReturnColumn],
+        grouping: Sequence[Expression],
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         functions: ScalarFunctions,
@@ -813,8 +1291,10 @@ class QueryExecutor:
 
         Parameters
         ----------
-        analysis : Analysis
-            Static analysis of the statement.
+        items : Sequence[ReturnColumn]
+            Analysed projection columns.
+        grouping : Sequence[Expression]
+            Implicit grouping-key expressions.
         bindings : Sequence[Mapping[str, QueryValue]]
             Filtered match bindings.
         evaluator : ExpressionEvaluator
@@ -830,20 +1310,18 @@ class QueryExecutor:
             One projected row per group, or one empty-group row for ungrouped
             aggregates.
         """
-        groups = self._groups(analysis, bindings, evaluator, parameters)
+        groups = self._groups(grouping, bindings, evaluator, parameters)
         group_evaluator = GroupEvaluator(evaluator, functions, parameters)
         rows: list[ProjectedRow] = []
         for group in groups:
-            values = tuple(
-                group_evaluator.evaluate(item.expression, group) for item in analysis.items
-            )
+            values = tuple(group_evaluator.evaluate(item.expression, group) for item in items)
             representative = group[0] if group else {}
             rows.append(ProjectedRow(binding=representative, values=values))
         return rows
 
     @staticmethod
     def _groups(
-        analysis: Analysis,
+        grouping: Sequence[Expression],
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
@@ -852,8 +1330,8 @@ class QueryExecutor:
 
         Parameters
         ----------
-        analysis : Analysis
-            Static analysis of the statement.
+        grouping : Sequence[Expression]
+            Implicit grouping-key expressions.
         bindings : Sequence[Mapping[str, QueryValue]]
             Filtered match bindings.
         evaluator : ExpressionEvaluator
@@ -867,13 +1345,13 @@ class QueryExecutor:
             Groups in first-seen order; ungrouped aggregates always produce one
             group, even for empty input.
         """
-        if not analysis.grouping:
+        if not grouping:
             return [list(bindings)]
         groups: dict[tuple[ValueKey, ...], list[Mapping[str, QueryValue]]] = {}
         for binding in bindings:
             key = tuple(
                 ValueKey(evaluator.evaluate(expression, binding, parameters))
-                for expression in analysis.grouping
+                for expression in grouping
             )
             groups.setdefault(key, []).append(binding)
         return list(groups.values())

@@ -25,7 +25,13 @@ from pygrafito.engine.query.ast import (
     Variable,
 )
 from pygrafito.engine.query.values import QueryValue, Values
-from pygrafito.model import Direction, QuerySemanticError, ValidationError
+from pygrafito.model import (
+    Direction,
+    Node,
+    QuerySemanticError,
+    Relationship,
+    ValidationError,
+)
 from pygrafito.storage.codec import PropertyCodec
 
 
@@ -758,15 +764,22 @@ class Compiler:
         self._relationship_counter = 0
         self._label_counter = 0
         self._parameters: Mapping[str, QueryValue] = {}
+        self._bound: Mapping[str, QueryValue] = {}
         self._predicates_builder: PredicateCompiler | None = None
 
-    def compile(self, parameters: Mapping[str, QueryValue]) -> CompiledMatch:
+    def compile(
+        self,
+        parameters: Mapping[str, QueryValue],
+        bound: Mapping[str, QueryValue] | None = None,
+    ) -> CompiledMatch:
         """Compile the match clause against one parameter mapping.
 
         Parameters
         ----------
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        bound : Mapping[str, QueryValue] | None, optional
+            Values already bound by an earlier stage, by default none.
 
         Returns
         -------
@@ -774,7 +787,13 @@ class Compiler:
             SQL text, arguments, and row selections.
         """
         self._reset(parameters)
-        self._compile_pattern(self._match.pattern)
+        self._bound = {} if bound is None else bound
+        paths: list[PathSelection] = []
+        for pattern in self._match.patterns:
+            node_start = len(self._path_node_aliases)
+            relationship_start = len(self._path_relationships)
+            self._compile_pattern(pattern)
+            paths.extend(self._build_paths(pattern, node_start, relationship_start))
         residual = self._compile_where()
         sql = self._build_sql()
         return CompiledMatch(
@@ -782,7 +801,7 @@ class Compiler:
             arguments=tuple(self._arguments),
             node_columns=tuple(self._node_columns),
             relationship_columns=tuple(self._relationship_columns),
-            paths=self._build_paths(self._match.pattern),
+            paths=tuple(paths),
             residual=residual,
         )
 
@@ -810,6 +829,7 @@ class Compiler:
         self._relationship_counter = 0
         self._label_counter = 0
         self._parameters = parameters
+        self._bound = {}
         self._predicates_builder = PredicateCompiler(
             self._codec,
             parameters,
@@ -853,7 +873,10 @@ class Compiler:
             alias = f"n{self._node_counter}"
             self._node_counter += 1
             if expected_id is None:
-                self._joins.append(f"nodes AS {alias}")
+                if self._joins:
+                    self._joins.append(f"CROSS JOIN nodes AS {alias}")
+                else:
+                    self._joins.append(f"nodes AS {alias}")
             else:
                 self._joins.append(f"JOIN nodes AS {alias} ON {alias}.id = {expected_id}")
             column = self._select(f"{alias}.id")
@@ -861,6 +884,7 @@ class Compiler:
             self._node_column_by_alias[alias] = column
             if pattern.variable is not None:
                 self._node_aliases[pattern.variable] = alias
+                self._add_bound_entity(alias, pattern.variable)
         elif expected_id is not None:
             self._predicates.append(f"{alias}.id = {expected_id}")
         self._add_node_predicates(alias, pattern)
@@ -932,6 +956,7 @@ class Compiler:
             self._relationship_by_alias[alias] = columns
             if pattern.variable is not None:
                 self._relationship_aliases[pattern.variable] = alias
+                self._add_bound_entity(alias, pattern.variable)
         else:
             condition = self._direction_condition(pattern.direction, alias, current_id)
             self._predicates.append(condition)
@@ -1042,13 +1067,63 @@ class Compiler:
             self._predicates.append(sql)
         return residual
 
-    def _build_paths(self, pattern: PathPattern) -> tuple[PathSelection, ...]:
+    def _add_bound_entity(self, alias: str, variable: str) -> None:
+        """Constrain one alias to an element bound by an earlier stage.
+
+        Parameters
+        ----------
+        alias : str
+            Table alias for the element.
+        variable : str
+            Variable already bound by an earlier stage.
+        """
+        if variable not in self._bound:
+            return
+        self._predicates.append(f"{alias}.id = ?")
+        self._arguments.append(self._bound_id(variable))
+
+    def _bound_id(self, variable: str) -> int:
+        """Return the element id of a value bound by an earlier stage.
+
+        Parameters
+        ----------
+        variable : str
+            Variable already bound by an earlier stage.
+
+        Returns
+        -------
+        int
+            Node or relationship id.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the bound value is not a node or relationship.
+        """
+        value = self._bound[variable]
+        if isinstance(value, (Node, Relationship)):
+            return value.id
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        message = f"variable {variable!r} cannot be used as a pattern element"
+        raise QuerySemanticError(message)
+
+    def _build_paths(
+        self,
+        pattern: PathPattern,
+        node_start: int,
+        relationship_start: int,
+    ) -> tuple[PathSelection, ...]:
         """Build path-variable selections from compiled positions.
 
         Parameters
         ----------
         pattern : PathPattern
             Compiled path pattern.
+        node_start : int
+            Index of the pattern's first node selection.
+        relationship_start : int
+            Index of the pattern's first relationship selection.
 
         Returns
         -------
@@ -1057,12 +1132,14 @@ class Compiler:
         """
         if pattern.variable is None:
             return ()
-        nodes = tuple(self._node_column_by_alias[alias] for alias in self._path_node_aliases)
+        nodes = tuple(
+            self._node_column_by_alias[alias] for alias in self._path_node_aliases[node_start:]
+        )
         return (
             PathSelection(
                 variable=pattern.variable,
                 nodes=nodes,
-                relationships=tuple(self._path_relationships),
+                relationships=tuple(self._path_relationships[relationship_start:]),
             ),
         )
 

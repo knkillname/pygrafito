@@ -344,6 +344,190 @@ class TestQueryExecution(_QueryGraph):
             )
 
 
+class TestComposedMatch(_QueryGraph):
+    """Verify multiple patterns and chained match stages."""
+
+    def test_shared_variable_joins_patterns(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'})-[:ALLIES_WITH]->(b), "
+            "(b)-[:ALLIES_WITH]->(c) RETURN c.designation"
+        )
+        assert self.designations(result) == ["Clu", "Clu"]
+
+    def test_disconnected_patterns_form_a_cartesian_product(self, graph: Graph) -> None:
+        result = graph.query("MATCH (a:Program), (b:System) RETURN count(*) AS total")
+        assert self.values(result) == [(6,)]
+
+    def test_chained_match_stage_joins(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'}) "
+            "MATCH (a)-[:TRUSTS]->(b) RETURN b.designation ORDER BY b.designation"
+        )
+        assert self.designations(result) == ["Tron"]
+
+    def test_chained_match_drops_unmatched_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Sam Flynn'}) MATCH (a)-[:TRUSTS]->(b) RETURN b"
+        )
+        assert self.values(result) == []
+
+    def test_where_filters_the_pattern_set(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program), (b:Program) WHERE a.cycles = b.cycles "
+            "AND a.designation <> b.designation RETURN b.designation ORDER BY b.designation"
+        )
+        assert self.designations(result) == ["Kevin Flynn", "Rinzler"]
+
+
+class TestOptionalMatch(_QueryGraph):
+    """Verify left-join semantics and null propagation."""
+
+    def test_zero_matches_produces_a_null_row(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Sam Flynn'}) "
+            "OPTIONAL MATCH (a)-[:TRUSTS]->(b) RETURN b.designation"
+        )
+        assert self.values(result) == [(None,)]
+
+    def test_one_match_is_returned(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'}) "
+            "OPTIONAL MATCH (a)-[:TRUSTS]->(b) RETURN b.designation"
+        )
+        assert self.designations(result) == ["Tron"]
+
+    def test_each_match_expands_the_row(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'}) "
+            "OPTIONAL MATCH (a)-[:ALLIES_WITH]->(b) RETURN b.designation"
+        )
+        assert self.designations(result) == ["Quorra", "Quorra"]
+
+    def test_earlier_variable_is_unchanged(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Sam Flynn'}) "
+            "OPTIONAL MATCH (a)-[:TRUSTS]->(b) RETURN a.designation AS a, b.designation AS b"
+        )
+        assert self.values(result) == [("Sam Flynn", None)]
+
+    def test_optional_where_filters_the_optional_match(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'}) "
+            "OPTIONAL MATCH (a)-[:ALLIES_WITH]->(b) WHERE b.cycles > 40 "
+            "RETURN b.designation"
+        )
+        assert self.values(result) == [(None,)]
+
+    def test_later_mandatory_match_drops_null_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Sam Flynn'}) OPTIONAL MATCH (a)-[:TRUSTS]->(b) "
+            "MATCH (b)-[:ALLIES_WITH]->(c) RETURN a.designation AS a, c.designation AS c"
+        )
+        assert self.values(result) == []
+
+    def test_later_mandatory_match_keeps_matched_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Kevin Flynn'}) OPTIONAL MATCH (a)-[:TRUSTS]->(b) "
+            "MATCH (b)-[:ALLIES_WITH]->(c) RETURN a.designation AS a, c.designation AS c"
+        )
+        assert self.values(result) == [("Kevin Flynn", "Clu")]
+
+    def test_downstream_where_excludes_nulls(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Sam Flynn'}) OPTIONAL MATCH (a)-[:TRUSTS]->(b) "
+            "MATCH (a) WHERE b.designation = 'Tron' RETURN b"
+        )
+        assert self.values(result) == []
+
+    def test_optional_match_may_start_a_statement(self, graph: Graph) -> None:
+        result = graph.query("OPTIONAL MATCH (n:Missing) RETURN n.designation")
+        assert self.values(result) == [(None,)]
+
+    def test_optional_match_first_returns_every_match(self, graph: Graph) -> None:
+        result = graph.query("OPTIONAL MATCH (n:System) RETURN n.designation")
+        assert self.designations(result) == ["The Grid"]
+
+    def test_optional_quantified_match_can_be_empty(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Clu'}) "
+            "OPTIONAL MATCH (a)-[:ALLIES_WITH*1..2]->(b) RETURN b.designation"
+        )
+        assert self.values(result) == [(None,)]
+
+
+class TestWithStage(_QueryGraph):
+    """Verify WITH projection, aggregation, and pagination boundaries."""
+
+    def test_projects_a_new_scope(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) WITH n.designation AS name RETURN name ORDER BY name"
+        )
+        assert self.designations(result) == [
+            "Clu",
+            "Kevin Flynn",
+            "Quorra",
+            "Rinzler",
+            "Sam Flynn",
+            "Tron",
+        ]
+
+    def test_filters_on_an_aggregate_alias(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a)-[:ALLIES_WITH]->(b) WITH a, count(*) AS friends "
+            "WHERE friends > 1 RETURN a.designation AS name"
+        )
+        assert self.designations(result) == ["Kevin Flynn"]
+
+    def test_orders_by_an_aggregate_alias(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a)-[:ALLIES_WITH]->(b) WITH a.designation AS name, count(*) AS friends "
+            "ORDER BY friends DESC, name LIMIT 1 RETURN name, friends"
+        )
+        assert self.values(result) == [("Kevin Flynn", 2)]
+
+    def test_paginates_grouped_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a)-[:ALLIES_WITH]->(b) WITH a.designation AS name, count(*) AS friends "
+            "ORDER BY name SKIP 1 LIMIT 2 RETURN name"
+        )
+        assert self.designations(result) == ["Quorra", "Sam Flynn"]
+
+    def test_distinct_removes_duplicate_projected_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program) WITH DISTINCT n.cycles AS cycles RETURN count(*) AS total"
+        )
+        assert self.values(result) == [(4,)]
+
+    def test_match_after_with_joins_projected_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program) WITH a MATCH (a)-[:TRUSTS]->(b) "
+            "RETURN b.designation ORDER BY b.designation"
+        )
+        assert self.designations(result) == ["Kevin Flynn", "Tron"]
+
+    def test_with_before_write_shapes_mutation_input(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program) WITH a WHERE a.designation = 'Kevin Flynn' "
+            "CREATE (b:ISO {designation: 'Tron'}) RETURN b.designation AS name"
+        )
+        assert self.designations(result) == ["Tron"]
+        assert result.summary.created_nodes == 1
+
+    def test_null_from_optional_survives_with(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a {designation: 'Sam Flynn'}) OPTIONAL MATCH (a)-[:TRUSTS]->(b) "
+            "WITH a, b WHERE b IS NULL RETURN a.designation"
+        )
+        assert self.designations(result) == ["Sam Flynn"]
+
+    def test_with_then_quantified_path(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Kevin Flynn'}) WITH a "
+            "MATCH (a)-[:ALLIES_WITH*1..2]->(b) RETURN count(*) AS total"
+        )
+        assert self.values(result) == [(4,)]
+
+
 class TestAggregationAndOrdering(_QueryGraph):
     """Verify grouping, aggregates, ordering, and pagination."""
 
@@ -589,6 +773,17 @@ class TestTransactions(_QueryGraph):
             transaction.add_node("ISO", designation="Quorra")
             result = transaction.query("MATCH (n:ISO) RETURN n.designation")
             assert result.rows[0]["n.designation"] == "Quorra"
+
+    def test_staged_query_sees_uncommitted_writes(self, graph: Graph) -> None:
+        with graph.transaction() as transaction:
+            yori = transaction.add_node("Program", designation="Yori")
+            castor = transaction.add_node("Program", designation="Castor")
+            transaction.add_relationship(yori, "ALLIES_WITH", castor)
+            result = transaction.query(
+                "MATCH (a:Program {designation: 'Yori'}) WITH a "
+                "MATCH (a)-[:ALLIES_WITH]->(b) RETURN b.designation"
+            )
+            assert [tuple(row.values()) for row in result] == [("Castor",)]
 
     def test_graph_query_is_blocked_during_transaction(self, graph: Graph) -> None:
         with graph.transaction() as transaction:

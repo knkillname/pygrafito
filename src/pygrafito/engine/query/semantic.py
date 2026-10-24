@@ -23,6 +23,7 @@ from pygrafito.engine.query.ast import (
     PathPattern,
     Property,
     PropertyEntry,
+    RelationshipPattern,
     Remove,
     Return,
     ReturnItem,
@@ -32,6 +33,7 @@ from pygrafito.engine.query.ast import (
     Statement,
     Unary,
     Variable,
+    With,
 )
 from pygrafito.engine.query.tokens import Span
 from pygrafito.engine.query.values import (
@@ -47,7 +49,9 @@ class VariableKind(Enum):
 
     NODE = "node"
     RELATIONSHIP = "relationship"
+    RELATIONSHIP_LIST = "relationship list"
     PATH = "path"
+    SCALAR = "scalar"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -92,6 +96,79 @@ class SortSpec:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class MatchStage:
+    """One mandatory ``MATCH`` stage.
+
+    Parameters
+    ----------
+    patterns : tuple[PathPattern, ...]
+        Path patterns evaluated together as one stage.
+    where : Expression | None
+        Filter attached to the stage, or ``None``.
+    """
+
+    patterns: tuple[PathPattern, ...]
+    where: Expression | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class OptionalMatchStage:
+    """One ``OPTIONAL MATCH`` stage with left-join semantics.
+
+    Parameters
+    ----------
+    patterns : tuple[PathPattern, ...]
+        Path patterns evaluated together as one stage.
+    where : Expression | None
+        Filter attached to the optional stage, or ``None``.
+    introduced : frozenset[str]
+        Variables the stage introduces, which are null when it does not match.
+    """
+
+    patterns: tuple[PathPattern, ...]
+    where: Expression | None
+    introduced: frozenset[str]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class WithStage:
+    """One ``WITH`` stage that projects rows into a new scope.
+
+    Parameters
+    ----------
+    items : tuple[ReturnColumn, ...]
+        Analysed projection columns of the stage.
+    where : Expression | None
+        Filter evaluated against the projected scope, or ``None``.
+    distinct : bool
+        Whether duplicate projected rows are removed.
+    order_by : tuple[SortSpec, ...]
+        Resolved ordering keys of the stage.
+    skip : Expression | None
+        Pagination offset expression, or ``None``.
+    limit : Expression | None
+        Pagination limit expression, or ``None``.
+    grouping : tuple[Expression, ...]
+        Implicit grouping-key expressions.
+    has_aggregates : bool
+        Whether any projected expression contains an aggregate.
+    """
+
+    items: tuple[ReturnColumn, ...]
+    where: Expression | None
+    distinct: bool
+    order_by: tuple[SortSpec, ...]
+    skip: Expression | None
+    limit: Expression | None
+    grouping: tuple[Expression, ...]
+    has_aggregates: bool
+
+
+type ReadStage = MatchStage | OptionalMatchStage | WithStage
+type WriteClause = Create | Set | Remove | Delete
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Analysis:
     """Result of lexing, parsing, and static analysis.
 
@@ -99,30 +176,33 @@ class Analysis:
     ----------
     statement : Statement
         Parsed statement.
-    match_clause : Match | None
-        Match clause of the statement, if any.
+    stages : tuple[ReadStage, ...]
+        Read stages in source order.
+    write_clauses : tuple[WriteClause, ...]
+        Trailing write clauses in source order.
     return_clause : Return | None
-        Return clause of the statement, if any.
+        Final return clause of the statement, if any.
     is_write : bool
         Whether the statement contains any write clause.
     columns : tuple[str, ...]
         Final result column names in projection order.
     items : tuple[ReturnColumn, ...]
-        Analysed projection columns.
+        Analysed final projection columns.
     variable_kinds : Mapping[str, VariableKind]
-        Kind of every variable bound by the statement.
+        Kind of every variable bound after every read stage.
     parameters : frozenset[str]
         Parameter names referenced by the statement.
     has_aggregates : bool
-        Whether any projected expression contains an aggregate.
+        Whether any final projected expression contains an aggregate.
     grouping : tuple[Expression, ...]
-        Implicit grouping-key expressions.
+        Implicit grouping-key expressions of the final projection.
     sorts : tuple[SortSpec, ...]
-        Resolved ordering keys in significance order.
+        Resolved final ordering keys in significance order.
     """
 
     statement: Statement
-    match_clause: Match | None
+    stages: tuple[ReadStage, ...]
+    write_clauses: tuple[WriteClause, ...]
     return_clause: Return | None
     is_write: bool
     columns: tuple[str, ...]
@@ -192,27 +272,45 @@ class SemanticAnalyzer:
         Analysis
             Output contract and resolved ordering keys.
         """
-        match_clause: Match | None = None
+        stages: list[ReadStage] = []
+        write_clauses: list[WriteClause] = []
         return_clause: Return | None = None
-        is_write = False
         for clause in self._statement.clauses:
             if isinstance(clause, Match):
-                self._bind_pattern(clause.pattern)
+                before = frozenset(self._kinds)
+                for pattern in clause.patterns:
+                    self._bind_pattern(pattern)
                 if clause.where is not None:
                     self._validate_expression(clause.where, aggregates_allowed=False)
-                match_clause = clause
+                if clause.optional:
+                    stages.append(
+                        OptionalMatchStage(
+                            patterns=clause.patterns,
+                            where=clause.where,
+                            introduced=frozenset(set(self._kinds) - before),
+                        )
+                    )
+                else:
+                    stages.append(
+                        MatchStage(
+                            patterns=clause.patterns,
+                            where=clause.where,
+                        )
+                    )
+            elif isinstance(clause, With):
+                stages.append(self._bind_with(clause))
             elif isinstance(clause, Create):
                 self._bind_create(clause.pattern)
-                is_write = True
+                write_clauses.append(clause)
             elif isinstance(clause, Set):
                 self._validate_set(clause)
-                is_write = True
+                write_clauses.append(clause)
             elif isinstance(clause, Remove):
                 self._validate_remove(clause)
-                is_write = True
+                write_clauses.append(clause)
             elif isinstance(clause, Delete):
                 self._validate_delete(clause)
-                is_write = True
+                write_clauses.append(clause)
             elif isinstance(clause, Return):
                 return_clause = clause
             else:
@@ -235,9 +333,10 @@ class SemanticAnalyzer:
             )
         return Analysis(
             statement=self._statement,
-            match_clause=match_clause,
+            stages=tuple(stages),
+            write_clauses=tuple(write_clauses),
             return_clause=return_clause,
-            is_write=is_write,
+            is_write=bool(write_clauses),
             columns=tuple(item.name for item in items),
             items=items,
             variable_kinds=MappingProxyType(dict(self._kinds)),
@@ -265,6 +364,64 @@ class SemanticAnalyzer:
         items = tuple(self._column(item) for item in clause.items)
         self._require_unique_columns(items)
         return items
+
+    def _bind_with(self, clause: With) -> WithStage:
+        """Analyse a ``WITH`` stage and replace the visible scope.
+
+        Parameters
+        ----------
+        clause : With
+            Clause to analyse.
+
+        Returns
+        -------
+        WithStage
+            Analysed stage with its own projection, grouping, and ordering.
+
+        Raises
+        ------
+        QuerySemanticError
+            If an expression has no alias, two columns share a name, or an
+            expression cannot be evaluated in the projected scope.
+        """
+        items = tuple(self._column(item) for item in clause.items)
+        for item in clause.items:
+            if not isinstance(item.expression, Variable) and item.alias is None:
+                message = "a WITH expression must have an alias"
+                raise QuerySemanticError(message)
+        self._require_unique_columns(items)
+        has_aggregates = any(item.aggregate for item in items)
+        grouping = tuple(item.expression for item in items if not item.aggregate)
+        if has_aggregates:
+            self._validate_grouping(items, grouping)
+        self._kinds = {
+            item.name: (
+                self._kinds.get(item.expression.name, VariableKind.SCALAR)
+                if isinstance(item.expression, Variable)
+                else VariableKind.SCALAR
+            )
+            for item in items
+        }
+        if clause.where is not None:
+            self._validate_expression(clause.where, aggregates_allowed=False)
+        self._validate_pagination(clause.skip, "SKIP")
+        self._validate_pagination(clause.limit, "LIMIT")
+        sorts = self._resolve_sorts(
+            clause.order_by,
+            items,
+            grouping,
+            has_aggregates,
+        )
+        return WithStage(
+            items=items,
+            where=clause.where,
+            distinct=clause.distinct,
+            order_by=sorts,
+            skip=clause.skip,
+            limit=clause.limit,
+            grouping=grouping,
+            has_aggregates=has_aggregates,
+        )
 
     def _bind_create(self, pattern: PathPattern) -> None:
         """Register the variables created by a ``CREATE`` pattern.
@@ -309,6 +466,9 @@ class SemanticAnalyzer:
             else:
                 self._register(node.variable, VariableKind.NODE)
         for relationship in pattern.relationships:
+            if relationship.min_hops is not None or relationship.max_hops is not None:
+                message = "CREATE cannot use a variable-length relationship"
+                raise QuerySemanticError(message)
             self._validate_property_map(relationship.properties)
             if len(relationship.types) != 1:
                 message = "a created relationship must have exactly one type"
@@ -415,8 +575,12 @@ class SemanticAnalyzer:
                 line=span.line if span else None,
                 column=span.column if span else None,
             )
-        if kind is VariableKind.PATH:
-            message = f"{clause} cannot target path variable {name!r}"
+        if kind in {
+            VariableKind.PATH,
+            VariableKind.RELATIONSHIP_LIST,
+            VariableKind.SCALAR,
+        }:
+            message = f"{clause} cannot target {kind.value} variable {name!r}"
             raise QuerySemanticError(
                 message,
                 line=span.line if span else None,
@@ -433,15 +597,52 @@ class SemanticAnalyzer:
             Pattern to bind.
         """
         if pattern.variable is not None:
+            existing = self._kinds.get(pattern.variable)
+            if existing is not None:
+                message = f"path variable {pattern.variable!r} is already bound"
+                raise QuerySemanticError(message)
             self._register(pattern.variable, VariableKind.PATH)
         for node in pattern.nodes:
             if node.variable is not None:
                 self._register(node.variable, VariableKind.NODE)
             self._validate_property_map(node.properties)
         for relationship in pattern.relationships:
+            quantified = relationship.min_hops is not None or relationship.max_hops is not None
+            if quantified:
+                self._validate_quantifier(relationship)
             if relationship.variable is not None:
-                self._register(relationship.variable, VariableKind.RELATIONSHIP)
+                self._register(
+                    relationship.variable,
+                    VariableKind.RELATIONSHIP_LIST if quantified else VariableKind.RELATIONSHIP,
+                )
             self._validate_property_map(relationship.properties)
+
+    @staticmethod
+    def _validate_quantifier(relationship: RelationshipPattern) -> None:
+        """Validate the bounds of a quantified relationship.
+
+        Parameters
+        ----------
+        relationship : RelationshipPattern
+            Relationship pattern carrying the quantifier.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the upper bound is missing, a bound is negative, or the lower
+            bound exceeds the upper bound.
+        """
+        upper = relationship.max_hops
+        if upper is None:
+            message = "a variable-length relationship requires an explicit upper bound"
+            raise QuerySemanticError(message)
+        lower = 1 if relationship.min_hops is None else relationship.min_hops
+        if lower < 0 or upper < 0:
+            message = "variable-length bounds must be non-negative"
+            raise QuerySemanticError(message)
+        if lower > upper:
+            message = "the variable-length lower bound cannot exceed the upper bound"
+            raise QuerySemanticError(message)
 
     def _register(self, name: str, kind: VariableKind) -> None:
         """Register one variable, rejecting kind conflicts.
@@ -740,12 +941,14 @@ class SemanticAnalyzer:
             self._parameters.add(expression.name)
             return
         if isinstance(expression, Property):
-            if (
-                isinstance(expression.target, Variable)
-                and self._kinds.get(expression.target.name) is VariableKind.PATH
-            ):
-                message = "path variables do not have properties"
-                raise QuerySemanticError(message)
+            if isinstance(expression.target, Variable):
+                kind = self._kinds.get(expression.target.name)
+                if kind is VariableKind.PATH:
+                    message = "path variables do not have properties"
+                    raise QuerySemanticError(message)
+                if kind is VariableKind.RELATIONSHIP_LIST:
+                    message = "relationship lists do not have properties"
+                    raise QuerySemanticError(message)
             self._validate_expression(
                 expression.target,
                 aggregates_allowed=aggregates_allowed,
@@ -949,6 +1152,8 @@ class SemanticAnalyzer:
                 return ArgumentKind.NODE
             if kind is VariableKind.RELATIONSHIP:
                 return ArgumentKind.RELATIONSHIP
+            if kind is VariableKind.RELATIONSHIP_LIST:
+                return ArgumentKind.LIST
             if kind is VariableKind.PATH:
                 return ArgumentKind.PATH
             return None
@@ -1159,8 +1364,13 @@ class SemanticAnalyzer:
 
 __all__ = [
     "Analysis",
+    "MatchStage",
+    "OptionalMatchStage",
+    "ReadStage",
     "ReturnColumn",
     "SemanticAnalyzer",
     "SortSpec",
     "VariableKind",
+    "WithStage",
+    "WriteClause",
 ]

@@ -36,6 +36,18 @@ class TestExplain(_ExplainTestCase):
         assert plan
         assert all(isinstance(line, str) for line in plan)
 
+    def test_two_stage_statement_reports_each_stage(self, graph: Graph) -> None:
+        graph.create_node_index("cycles")
+        plan = graph.explain(
+            "MATCH (a:Program) WHERE a.cycles = 36 WITH a MATCH (a)-[:ALLIES_WITH]->(b) RETURN b"
+        )
+        assert any("pygrafito_idx_node_" in line for line in plan)
+        assert len(plan) >= 2
+
+    def test_quantified_statement_reports_expansion(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH (n:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b) RETURN b")
+        assert any("QUANTIFIED PATTERN max_hops=2" in line for line in plan)
+
     def test_write_statement_changes_nothing(self, graph: Graph) -> None:
         before = graph.query("MATCH (n) RETURN count(*) AS total").rows[0]["total"]
         plan = graph.explain("CREATE (n:Program {designation: 'Tron', cycles: 40})")
