@@ -68,7 +68,7 @@ transient in-memory graph.
 
 ```console
 $ pygrafito grid.db
-pygrafito 0.5.0 | grid.db | type ".help" for commands
+pygrafito 0.6.0 | grid.db | type ".help" for commands
 grid.db> CREATE (n:Program {designation: 'Tron', cycles: 40});
 1 node created
 grid.db> MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles;
