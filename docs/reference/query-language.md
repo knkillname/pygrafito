@@ -1,4 +1,8 @@
-# Query language
+# Query language reference
+
+This page is the complete reference for the `pygrafito` query dialect: grammar, pattern
+semantics, write clauses, value and null rules, functions, aggregation, ordering, parameters,
+and errors. For a task-first introduction, start with [Query your graph](../guides/querying.md).
 
 `pygrafito` includes a pattern-matching query dialect for reading and writing a
 property graph. A statement describes a fixed-length path pattern, filters the

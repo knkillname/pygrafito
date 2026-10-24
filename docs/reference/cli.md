@@ -1,4 +1,8 @@
-# Command-line shell
+# CLI reference
+
+This page is the complete reference for the `pygrafito` shell: invocation, input rules, output
+modes, session commands, transactions, introspection, maintenance, and exit codes. For a
+task-first introduction, start with [Use the shell](../guides/shell.md).
 
 `pygrafito` includes a shell for inspecting, querying, and maintaining a graph database without
 writing Python. The `pygrafito` command and `python -m pygrafito` start the same shell.
@@ -322,7 +326,7 @@ Options:
 The command is refused while an explicit transaction is active, and its writes
 are refused in a read-only session. A failure reports the source, row, and batch
 on standard error and leaves the session usable; earlier batches stay committed
-unless `--atomic` was used. See [`import.md`](import.md) for formats and failure
+unless `--atomic` was used. See [Importing data](../guides/importing.md) for formats and failure
 details.
 
 ## Export and restore
@@ -352,7 +356,7 @@ restored 3 nodes and 3 relationships from grid.jsonl
 ```
 
 Both commands print their summary on the command output stream and report failures on standard
-error without ending the session. See [`interop.md`](interop.md) for the snapshot grammar, value
+error without ending the session. See [Snapshot format](snapshot-format.md) for the snapshot grammar, value
 rules, id remapping, and view schema.
 
 ## Backup and integrity

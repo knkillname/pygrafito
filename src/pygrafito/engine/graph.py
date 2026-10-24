@@ -105,7 +105,7 @@ class Graph:
             available for an in-memory database.
         busy_timeout : int | None, optional
             Milliseconds a lock wait may take before it fails, by default
-            :attr:`pygrafito.storage.connection.Database.BUSY_TIMEOUT_MS`.
+            5000 milliseconds.
 
         Returns
         -------

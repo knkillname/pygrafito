@@ -1,4 +1,8 @@
-# Indexes
+# Index behavior
+
+This page is the reference for property-index scope, accelerated predicates, planner behavior,
+cost, persistence, and interaction with uniqueness constraints. For a task-first introduction,
+start with [Speed up property filters](../guides/indexes.md).
 
 A property index is an explicit, persistent acceleration structure over one property
 key. Declaring an index never changes what a query returns; it only changes how much
@@ -91,7 +95,7 @@ concept with their own API. `Graph.indexes()` reports only indexes declared thro
 `Graph.create_node_index` and `Graph.create_relationship_index`; the support index of a
 node constraint and the unique index of a relationship constraint are owned by the
 constraint and are not listed. Declaring an ordinary index on a relationship key already
-covered by a relationship constraint is redundant. See [`constraints.md`](constraints.md)
+covered by a relationship constraint is redundant. See [Enforce unique values](../guides/constraints.md)
 for declaration, enforcement, and violation reporting.
 
 ## Property key handling

@@ -1,7 +1,11 @@
-# Data interop
+# Snapshot format
 
-A graph file is ordinary SQLite, and this change makes that file a supported interface in two
-ways: a portable JSONL snapshot and a set of read-only SQL views. This page documents the
+This page is the reference for the versioned JSONL snapshot format, restore guarantees, and the
+read-only SQL views. For a task-first introduction, start with
+[Move data in and out](../guides/interop.md).
+
+A graph file is ordinary SQLite, and the snapshot and views make that file a supported interface
+in two ways: a portable JSONL snapshot and a set of read-only SQL views. This page documents the
 snapshot contract first; the export, restore, and view sections follow below.
 
 ## Export
@@ -42,7 +46,7 @@ A snapshot is UTF-8 JSONL: one JSON object per line, with `\n` line endings and 
 mark. The first non-blank line is a header, followed by node records and then relationship
 records.
 
-```jsonl
+```text
 {"kind":"header","format":"pygrafito-jsonl","version":1,"nodes":3,"relationships":2}
 {"kind":"node","id":1,"labels":["Program"],"properties":{"designation":"Tron"}}
 {"kind":"node","id":2,"labels":["Program","ISO"],"properties":{"designation":"Quorra"}}

@@ -12,12 +12,15 @@
 
 - `hatch check --fix` — Ruff lint/format plus Pyrefly, Hatch 1.18's built-in type checker. Do not use `hatch run check` or configure a separate type-checking environment.
 - `hatch test` — pytest in the Hatch test environment. Pytest arguments are forwarded: `hatch test tests/test_codec.py::test_name`.
-- `python -m pygrafito <database> -c "<statement>"` — run the shell against a graph; see `docs/cli.md`.
+- `hatch run docs:build` — build the Sphinx site with warnings treated as errors.
+- `hatch run docs:serve` — serve a live preview of the documentation site.
+- `python -m pygrafito <database> -c "<statement>"` — run the shell against a graph; see `docs/reference/cli.md`.
 - `hatch version <version>` — set the project version. Never edit `src/pygrafito/__about__.py` directly.
 - `openspec status --change <name> --json`; `openspec validate <name> --strict`.
 - `openspec validate --specs --strict`.
 - CI runs `hatch check` and `hatch test`; the package job runs `uv build`, installs the wheel in a
-  clean environment, and verifies `py.typed` and `LICENSE.txt` are packaged.
+  clean environment, and verifies `py.typed` and `LICENSE.txt` are packaged. The docs workflow
+  builds the Sphinx site and deploys `main` to GitHub Pages.
 - Coverage gate: at least 80%; `fail_under` is enabled in `pyproject.toml`.
 
 Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do not invent a parallel workflow.

@@ -52,9 +52,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The `.export` and `.restore` shell commands expose snapshot export and restore, including
   `--overwrite` and `--replace`, with the same transaction, read-only, and failure-isolation
   rules as the other maintenance commands.
+- A Sphinx documentation site under `docs/`, built with MyST Markdown and Furo, with a landing
+  page, a five-minute quickstart, task-first guides, reference pages, and a public API reference.
+  The site deploys to GitHub Pages from `main`.
+- `hatch run docs:build` and `hatch run docs:serve`, backed by an optional `docs` dependency extra.
+  Every landing, quickstart, and guide example is executed by the test suite, and reference and API
+  snippets are syntax-checked.
 
 ### Changed
 
+- Documentation is organized into guides and reference pages, and `README.md` is now a compact
+  GitHub/PyPI landing with one tested example and links to the published site. The
+  `Documentation` URL points at `https://knkillname.github.io/pygrafito/`.
 - Pattern property maps in `MATCH` and `CREATE` may reference variables from earlier stages;
   `CREATE` no longer requires literals or parameters. A pattern still cannot reference a
   variable it introduces itself.

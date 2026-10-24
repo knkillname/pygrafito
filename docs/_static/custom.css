@@ -1,0 +1,12 @@
+/* SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+.sd-card {
+  border-radius: 0.6rem;
+}
+
+.sd-card .sd-card-title {
+  font-weight: 600;
+}

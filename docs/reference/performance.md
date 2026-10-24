@@ -1,7 +1,8 @@
 # Performance
 
-This page records what that engine costs on a machine, with the exact command that
-produced each row. It is a single-machine baseline, not a guarantee.
+This page records what the engine costs on one machine, with the exact command that produced each
+row. It is a single-machine baseline, not a guarantee. For the task of making a filter faster, see
+[Speed up property filters](../guides/indexes.md).
 
 ## Method
 

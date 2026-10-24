@@ -1,9 +1,14 @@
 # Embedding contract
 
+This page is the reference for the guarantees a file-backed graph provides: journal mode, thread
+affinity, lock waits, read snapshots, and the rules for creating or refusing a database file. For
+a task-first introduction, start with [Embed a graph safely](../guides/embedding.md).
+
 A file-backed graph is designed to be embedded in an application that may run several handles,
 in one process or several. This page states what those handles may rely on: journal mode, thread
 affinity, lock waits, read snapshots, and the rules for creating or refusing a database file.
-The read-only SQL views for external readers are documented in [`interop.md`](interop.md).
+The read-only SQL views for external readers are documented in
+[Snapshot format](snapshot-format.md).
 
 ## Opening a graph
 
