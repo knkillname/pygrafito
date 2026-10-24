@@ -109,13 +109,13 @@ workflow only, with no runtime behaviour or public API deltas.
 - [x] 7.1 Add `.github/workflows/docs.yml` to build on pull requests and deploy `main` with
       `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`; verify
       a pull-request run passes and the uploaded artifact contains `index.html` and `.nojekyll`.
-- [ ] 7.2 Set the repository's Pages source to GitHub Actions and deploy from `main`; verify
+- [x] 7.2 Set the repository's Pages source to GitHub Actions and deploy from `main`; verify
       `https://knkillname.github.io/pygrafito/` serves the landing page.
 - [x] 7.3 Run `hatch check --fix`, `hatch test`, and `hatch run docs:build`; verify all pass, the
       Sphinx build has no warnings, and coverage remains at least 80%.
 - [x] 7.4 Run `openspec validate add-sphinx-documentation --strict` and
       `openspec validate --specs --strict`; verify both pass.
-- [ ] 7.5 Spot-check the published site: landing to quickstart to guide to reference to API, search,
+- [x] 7.5 Spot-check the published site: landing to quickstart to guide to reference to API, search,
       code copy buttons, dark mode, and edit-this-page links; verify every navigation target
       resolves.
 
