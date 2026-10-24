@@ -1,4 +1,8 @@
-# Indexes
+# Index behavior
+
+This page is the reference for property-index scope, accelerated predicates, planner behavior,
+cost, persistence, and interaction with uniqueness constraints. For a task-first introduction,
+start with [Speed up property filters](../guides/indexes.md).
 
 A property index is an explicit, persistent acceleration structure over one property
 key. Declaring an index never changes what a query returns; it only changes how much
@@ -84,6 +88,16 @@ graph is reopened. Declaring or removing an index does not change the schema ver
 a file that carries indexes remains usable by a build that does not create any: unknown
 indexes are simply ignored.
 
+## Indexes and uniqueness constraints
+
+Uniqueness constraints use standard indexes and triggers too, but they are a separate
+concept with their own API. `Graph.indexes()` reports only indexes declared through
+`Graph.create_node_index` and `Graph.create_relationship_index`; the support index of a
+node constraint and the unique index of a relationship constraint are owned by the
+constraint and are not listed. Declaring an ordinary index on a relationship key already
+covered by a relationship constraint is redundant. See [Enforce unique values](../guides/constraints.md)
+for declaration, enforcement, and violation reporting.
+
 ## Property key handling
 
 Indexes and filters embed the property key as an escaped JSON path inside the statement.
@@ -113,8 +127,10 @@ with Graph.open(":memory:") as graph:
 ```
 
 The plan is read-only: explaining a write statement creates, changes, and deletes
-nothing. A statement without `MATCH` returns an empty tuple because it has no access
-path to explain.
+nothing. A statement with no read stage returns an empty tuple because it has no
+access path to explain; an `UNWIND` stage reports its own line. Pattern property
+values that are computed from an input row are planned with a placeholder value,
+so the plan is representative rather than row-specific.
 
 ## When an index is not used
 

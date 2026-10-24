@@ -6,12 +6,13 @@
 import dataclasses
 import typing
 
-from pygrafito.engine.query.ast import Binary, Create, Delete, Operators, Remove, Set
+from pygrafito.engine.query.ast import Binary, Create, Delete, Merge, Operators, Remove, Set
 from pygrafito.engine.query.semantic import (
     Analysis,
     MatchStage,
     OptionalMatchStage,
     ReadStage,
+    UnwindStage,
     WithStage,
 )
 
@@ -21,8 +22,10 @@ class PlanOperator:
 
     MATCH: str = "match"
     OPTIONAL_MATCH: str = "optional_match"
+    UNWIND: str = "unwind"
     FILTER: str = "filter"
     CREATE: str = "create"
+    MERGE: str = "merge"
     SET: str = "set"
     REMOVE: str = "remove"
     DELETE: str = "delete"
@@ -105,6 +108,7 @@ class PlanBuilder:
 
     _MUTATIONS: typing.ClassVar[dict[type[object], str]] = {
         Create: PlanOperator.CREATE,
+        Merge: PlanOperator.MERGE,
         Set: PlanOperator.SET,
         Remove: PlanOperator.REMOVE,
         Delete: PlanOperator.DELETE,
@@ -217,6 +221,8 @@ class PlanBuilder:
             operators.append(PlanOperator.OPTIONAL_MATCH)
             if stage.where is not None:
                 operators.append(PlanOperator.FILTER)
+        elif isinstance(stage, UnwindStage):
+            operators.append(PlanOperator.UNWIND)
         elif isinstance(stage, WithStage):
             operators.append(PlanOperator.WITH)
             operators.append(PlanOperator.PROJECT)

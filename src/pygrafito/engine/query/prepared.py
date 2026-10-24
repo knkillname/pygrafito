@@ -51,6 +51,28 @@ class PreparedQuery:
         """
         return self._plan.analysis.columns
 
+    @property
+    def is_write(self) -> bool:
+        """Return whether the prepared statement changes data.
+
+        Returns
+        -------
+        bool
+            ``True`` when the statement contains a write clause.
+        """
+        return self._plan.analysis.is_write
+
+    @property
+    def parameters(self) -> frozenset[str]:
+        """Return the parameter names referenced by the statement.
+
+        Returns
+        -------
+        frozenset[str]
+            Parameter names without the leading ``$``.
+        """
+        return self._plan.analysis.parameters
+
     def execute(
         self,
         parameters: Mapping[str, QueryValue] | None = None,

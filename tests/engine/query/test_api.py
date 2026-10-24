@@ -57,6 +57,16 @@ class TestPublicApi:
         assert prepared.columns == ("name",)
         assert "MATCH" in prepared.text
 
+    def test_prepared_query_metadata(self, graph: Graph) -> None:
+        read = graph.prepare("MATCH (n:Program) WHERE n.cycles > $minimum RETURN n")
+        assert read.is_write is False
+        assert read.parameters == frozenset({"minimum"})
+        write = graph.prepare(
+            "UNWIND $rows AS row MERGE (n:Program {designation: row.designation})"
+        )
+        assert write.is_write is True
+        assert write.parameters == frozenset({"rows"})
+
     def test_prepared_query_reuses_the_statement(self, graph: Graph) -> None:
         prepared = graph.prepare(
             "MATCH (n:Program) WHERE n.cycles > $minimum RETURN n.designation AS name ORDER BY name"

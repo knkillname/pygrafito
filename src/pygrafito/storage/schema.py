@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Database schema bootstrap and compatibility checks."""
 
+import contextlib
 import sqlite3
 from sqlite3 import Connection, OperationalError
 
@@ -20,6 +21,7 @@ class Schema:
 
     VERSION: int = 1
     MINIMUM_SQLITE_VERSION: tuple[int, int, int] = (3, 38, 0)
+    GRAPH_TABLES: frozenset[str] = frozenset({"nodes", "node_labels", "relationships"})
 
     _STATEMENTS: tuple[str, ...] = (
         """
@@ -53,11 +55,46 @@ class Schema:
     def __init__(self, connection: Connection) -> None:
         self._connection = connection
 
-    def bootstrap(self) -> None:
+    def bootstrap(self, *, readonly: bool = False) -> None:
         """Create the schema when missing and record the schema version.
 
         The operation is idempotent: existing tables and indexes are left
         untouched, and an already-current ``user_version`` is not rewritten.
+        A write-capable bootstrap runs inside one ``BEGIN IMMEDIATE``
+        transaction and re-reads the version after taking the write lock, so
+        concurrent first opens agree on the recorded layout. A read-only
+        bootstrap only replays the idempotent DDL, because it cannot take a
+        write lock and its existing tables make every statement a no-op.
+
+        Parameters
+        ----------
+        readonly : bool, optional
+            Whether the connection cannot take a write lock, by default
+            ``False``.
+
+        Raises
+        ------
+        UnsupportedSqliteError
+            If the database declares a newer schema version than this library
+            can operate.
+        """
+        if readonly:
+            self._apply_statements()
+            return
+        if self.version() == self.VERSION:
+            self._apply_statements()
+            return
+        self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            self._bootstrap_transaction()
+        except BaseException:
+            with contextlib.suppress(sqlite3.Error):
+                self._connection.execute("ROLLBACK")
+            raise
+        self._connection.execute("COMMIT")
+
+    def _bootstrap_transaction(self) -> None:
+        """Create the schema and record the version inside a write lock.
 
         Raises
         ------
@@ -72,10 +109,68 @@ class Schema:
                 f"version {self.VERSION}"
             )
             raise UnsupportedSqliteError(message)
-        for statement in self._STATEMENTS:
-            self._connection.execute(statement)
+        self._apply_statements()
         if current != self.VERSION:
             self._connection.execute(f"PRAGMA user_version = {self.VERSION}")
+
+    def _apply_statements(self) -> None:
+        """Run the idempotent schema statements."""
+        for statement in self._STATEMENTS:
+            self._connection.execute(statement)
+
+    def refuse_foreign_database(self) -> None:
+        """Reject a database file that belongs to another application.
+
+        A file is foreign when it records no graph layout, holds no graph
+        table, and contains at least one unrelated table. Views never count as
+        unrelated tables. The check runs before the journal-mode switch and
+        the schema bootstrap, so a refused file keeps its original content.
+
+        Raises
+        ------
+        UnsupportedSqliteError
+            If the file is an unrelated SQLite database.
+        """
+        if self.version() != 0:
+            return
+        tables = self._tables()
+        if tables & self.GRAPH_TABLES:
+            return
+        if self._unrelated_tables(tables):
+            message = (
+                "database file is not a pygrafito graph: it records no graph layout "
+                "and holds unrelated tables"
+            )
+            raise UnsupportedSqliteError(message)
+
+    def _tables(self) -> frozenset[str]:
+        """Return the user tables present in the database.
+
+        Returns
+        -------
+        frozenset[str]
+            Table names, excluding SQLite internal tables and views.
+        """
+        rows = self._connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        ).fetchall()
+        return frozenset(str(row[0]) for row in rows)
+
+    @classmethod
+    def _unrelated_tables(cls, tables: frozenset[str]) -> frozenset[str]:
+        """Return the tables that do not belong to the graph layout.
+
+        Parameters
+        ----------
+        tables : frozenset[str]
+            Table names present in the database.
+
+        Returns
+        -------
+        frozenset[str]
+            Tables outside the graph layout.
+        """
+        return tables - cls.GRAPH_TABLES
 
     def version(self) -> int:
         """Read the schema version stored in ``PRAGMA user_version``.

@@ -5,7 +5,7 @@
 
 import contextlib
 from collections.abc import Iterator, Mapping
-from sqlite3 import Connection, Error
+from sqlite3 import Connection, Error, OperationalError
 from types import TracebackType
 from typing import Self
 
@@ -16,6 +16,7 @@ from pygrafito.engine.query.results import QueryResult
 from pygrafito.engine.query.semantic import SemanticAnalyzer
 from pygrafito.engine.query.values import QueryValue
 from pygrafito.model import (
+    LockTimeoutError,
     Node,
     Relationship,
     TransactionError,
@@ -23,6 +24,7 @@ from pygrafito.model import (
     Value,
 )
 from pygrafito.storage.codec import PropertyCodec
+from pygrafito.storage.connection import Database
 from pygrafito.storage.nodes import NodeRepository
 from pygrafito.storage.relationships import RelationshipRepository
 
@@ -41,6 +43,9 @@ class Transaction:
     query_executor : QueryExecutor | None, optional
         Executor used by :meth:`query`, by default a new executor on the same
         repositories.
+    database : Database | None, optional
+        Database wrapper that checks handle affinity, by default ``None`` for
+        transactions built directly on a connection.
     """
 
     def __init__(
@@ -49,10 +54,13 @@ class Transaction:
         node_repository: NodeRepository,
         relationship_repository: RelationshipRepository,
         query_executor: QueryExecutor | None = None,
+        *,
+        database: Database | None = None,
     ) -> None:
         self._connection = connection
         self._node_repository = node_repository
         self._relationship_repository = relationship_repository
+        self._database = database
         self._query = (
             QueryExecutor(
                 connection,
@@ -95,7 +103,10 @@ class Transaction:
         TransactionError
             If the transaction is already active, was already used, or SQLite
             cannot start a transaction.
+        LockTimeoutError
+            If the write-lock wait exhausts the busy timeout.
         """
+        self._ensure_affinity()
         if self._finished:
             message = "transaction has already been used"
             raise TransactionError(message)
@@ -107,6 +118,12 @@ class Transaction:
             raise TransactionError(message)
         try:
             self._connection.execute("BEGIN IMMEDIATE")
+        except OperationalError as error:
+            if "locked" in str(error).lower():
+                message = "could not start a graph transaction before the lock wait exhausted"
+                raise LockTimeoutError(message) from error
+            message = "could not start a graph transaction"
+            raise TransactionError(message) from error
         except Error as error:
             message = "could not start a graph transaction"
             raise TransactionError(message) from error
@@ -481,12 +498,27 @@ class Transaction:
 
         Raises
         ------
+        HandleAffinityError
+            If the transaction is used from a thread that does not own its
+            graph handle.
         TransactionError
             If the transaction has not been started or has already finished.
         """
+        self._ensure_affinity()
         if not self._active:
             message = "transaction is not active"
             raise TransactionError(message)
+
+    def _ensure_affinity(self) -> None:
+        """Reject use from a thread that does not own the graph handle.
+
+        Raises
+        ------
+        HandleAffinityError
+            If the owning database belongs to another thread.
+        """
+        if self._database is not None:
+            self._database.ensure_affinity()
 
     @staticmethod
     def _node_id(node: Node | int) -> int:

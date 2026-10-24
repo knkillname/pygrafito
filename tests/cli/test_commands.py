@@ -236,6 +236,7 @@ class TestSchemaCommands:
         Fixtures.seed(path)
         with Graph.open(path) as graph:
             graph.create_node_index("cycles")
+            graph.create_node_uniqueness_constraint("Program", "designation")
         return path
 
     def test_schema(self, seeded: Path) -> None:
@@ -255,6 +256,10 @@ class TestSchemaCommands:
             "  GUARDS            1 relationship",
             "Indexes",
             "  node cycles",
+            "Constraints",
+            "  node Program designation",
+            "Journal mode",
+            "  wal",
         ]
 
     def test_labels(self, seeded: Path) -> None:
@@ -287,13 +292,31 @@ class TestSchemaCommands:
             harness.close()
         assert output.splitlines() == ["  node cycles"]
 
+    def test_constraints(self, seeded: Path) -> None:
+        harness = Harness(seeded)
+        try:
+            _, output, _ = harness.run(".constraints\n")
+        finally:
+            harness.close()
+        assert output.splitlines() == ["  node Program designation"]
+
     def test_empty_schema(self) -> None:
         harness = Harness()
         try:
             _, output, _ = harness.run(".schema\n")
         finally:
             harness.close()
-        assert output.count("(none)") == 3
+        assert output.count("(none)") == 4
+        assert "Journal mode" in output
+        assert "  memory" in output
+
+    def test_empty_constraints(self) -> None:
+        harness = Harness()
+        try:
+            _, output, _ = harness.run(".constraints\n")
+        finally:
+            harness.close()
+        assert output.strip() == "(none)"
 
 
 class TestElementCommands:
@@ -616,3 +639,162 @@ class TestModeDefaults:
             assert harness.session.timer is False
         finally:
             harness.close()
+
+
+class TestImportCommand:
+    """Verify the .import dot-command and its guards."""
+
+    @pytest.fixture
+    def seeded(self, tmp_path: Path) -> Path:
+        path = tmp_path / "grid.db"
+        Fixtures.seed(path)
+        return path
+
+    def test_help_for_import(self) -> None:
+        harness = Harness()
+        try:
+            code, output, _ = harness.run(".help import\n")
+        finally:
+            harness.close()
+        assert code == 0
+        assert "--statement" in output
+
+    def test_import_jsonl(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text(
+            '{"designation": "Kevin Flynn", "cycles": 36}\n'
+            '{"designation": "Quorra", "cycles": 37}\n',
+            encoding="utf-8",
+        )
+        harness = Harness()
+        try:
+            code, output, error = harness.run(
+                f'.import {path} --statement "UNWIND $rows AS row '
+                f"MERGE (n:Program {{designation: row.designation}}) "
+                f'ON CREATE SET n.cycles = row.cycles"\n'
+                "MATCH (n:Program) RETURN n.designation AS name ORDER BY name;\n"
+            )
+        finally:
+            harness.close()
+        assert code == 0, error
+        assert "imported 2 rows in 1 batches" in output
+        assert "Kevin Flynn" in output
+
+    def test_import_csv_with_explicit_format(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.txt"
+        path.write_text("designation,cycles\nTron,40\n", encoding="utf-8")
+        harness = Harness()
+        try:
+            code, output, error = harness.run(
+                f'.import {path} --format csv --statement "UNWIND $rows AS row '
+                f"CREATE (n:Program {{designation: row.designation, "
+                f'cycles: toInteger(row.cycles)}})"\n'
+            )
+        finally:
+            harness.close()
+        assert code == 0, error
+        assert "imported 1 rows in 1 batches" in output
+
+    def test_import_batch_and_atomic_options(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text(
+            '{"designation": "Tron"}\n{"designation": "Clu"}\n',
+            encoding="utf-8",
+        )
+        harness = Harness()
+        try:
+            code, output, error = harness.run(
+                f".import {path} --batch 1 --atomic --statement "
+                f'"UNWIND $rows AS row MERGE (n:Program {{designation: row.designation}})"\n'
+            )
+        finally:
+            harness.close()
+        assert code == 0, error
+        assert "2 batches" in output
+
+    def test_missing_statement_is_a_usage_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text('{"designation": "Tron"}\n', encoding="utf-8")
+        harness = Harness()
+        try:
+            code, _, error = harness.run(f".import {path}\n")
+        finally:
+            harness.close()
+        assert code == 1
+        assert "usage:" in error
+
+    def test_invalid_batch_size(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text('{"designation": "Tron"}\n', encoding="utf-8")
+        harness = Harness()
+        try:
+            code, _, error = harness.run(
+                f'.import {path} --batch 0 --statement "UNWIND $rows AS row CREATE (n:Program)"\n'
+            )
+        finally:
+            harness.close()
+        assert code == 1
+        assert "--batch" in error
+
+    def test_unknown_option(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text('{"designation": "Tron"}\n', encoding="utf-8")
+        harness = Harness()
+        try:
+            code, _, error = harness.run(f".import {path} --bogus\n")
+        finally:
+            harness.close()
+        assert code == 1
+        assert "unknown .import option" in error
+
+    def test_import_during_a_transaction_is_refused(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text('{"designation": "Tron"}\n', encoding="utf-8")
+        harness = Harness()
+        try:
+            code, _, error = harness.run(
+                ".begin\n"
+                f'.import {path} --statement "UNWIND $rows AS row '
+                f'MERGE (n:Program {{designation: row.designation}})"\n'
+                ".rollback\n"
+            )
+        finally:
+            harness.close()
+        assert code == 1
+        assert "transaction" in error
+
+    def test_import_in_read_only_session(self, seeded: Path, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text('{"designation": "Tron"}\n', encoding="utf-8")
+        harness = Harness(seeded, readonly=True)
+        try:
+            code, _, error = harness.run(
+                f'.import {path} --statement "UNWIND $rows AS row '
+                f'MERGE (n:Program {{designation: row.designation}})"\n'
+            )
+        finally:
+            harness.close()
+        assert code == 1
+        assert "read-only" in error
+
+    def test_failure_reports_context_and_keeps_the_session_usable(self, tmp_path: Path) -> None:
+        path = tmp_path / "programs.jsonl"
+        path.write_text(
+            '{"designation": "Tron", "cycles": 40}\n{"designation": "Clu", "cycles": {"bad": 1}}\n',
+            encoding="utf-8",
+        )
+        harness = Harness()
+        try:
+            code, _, error = harness.run(
+                f'.import {path} --statement "UNWIND $rows AS row '
+                f"CREATE (n:Program {{designation: row.designation, "
+                f'cycles: row.cycles}})"\n'
+            )
+            assert code == 1
+            usable, output, _ = harness.run("MATCH (n:Program) RETURN count(*) AS total;\n")
+        finally:
+            harness.close()
+        assert usable == 0
+        assert "while importing" in error
+        assert "row 2" in error
+        assert "0" in output

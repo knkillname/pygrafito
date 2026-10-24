@@ -4,10 +4,20 @@
 """Dot-commands for the graph shell."""
 
 import json
+import shlex
 import typing
 from pathlib import Path
 
-from pygrafito import Direction, Node, Relationship, TransactionError, ValidationError
+from pygrafito import (
+    Constraint,
+    Direction,
+    ImportSummary,
+    InteropSummary,
+    Node,
+    Relationship,
+    TransactionError,
+    ValidationError,
+)
 from pygrafito.cli.formatting import OutputMode, ValueFormatter
 from pygrafito.cli.session import ParameterDecoder, Session
 
@@ -33,6 +43,15 @@ class Commands:
         "open": ("PATH", "open another database"),
         "close": ("", "close the current database"),
         "read": ("PATH", "run a script file in this session"),
+        "import": (
+            "PATH --statement TEXT [--format csv|jsonl] [--batch N] [--atomic]",
+            "import rows from a CSV or JSONL file",
+        ),
+        "export": (
+            "PATH [--format jsonl] [--overwrite]",
+            "export a JSONL snapshot",
+        ),
+        "restore": ("PATH [--replace]", "restore a JSONL snapshot"),
         "mode": ("table|json|jsonl|csv|line", "select the output mode"),
         "headers": ("on|off", "show or hide column names"),
         "timer": ("on|off", "report statement timing"),
@@ -42,10 +61,11 @@ class Commands:
         "begin": ("", "start a transaction"),
         "commit": ("", "commit the active transaction"),
         "rollback": ("", "roll back the active transaction"),
-        "schema": ("", "summarize labels, relationship types, and indexes"),
+        "schema": ("", "summarize labels, types, indexes, constraints, and journal mode"),
         "labels": ("", "list labels and node counts"),
         "reltypes": ("", "list relationship types and counts"),
         "indexes": ("", "list declared indexes"),
+        "constraints": ("", "list declared uniqueness constraints"),
         "node": ("ID", "show one node and its relationships"),
         "rel": ("ID", "show one relationship"),
         "expand": ("ID [DEPTH]", "render a bounded neighborhood tree"),
@@ -58,6 +78,11 @@ class Commands:
     WIDTH: typing.ClassVar[int] = 18
     EXPAND_ARGUMENTS: typing.ClassVar[int] = 2
     PATH_ARGUMENTS: typing.ClassVar[int] = 3
+    IMPORT_USAGE: typing.ClassVar[str] = (
+        ".import PATH --statement TEXT [--format csv|jsonl] [--batch N] [--atomic]"
+    )
+    EXPORT_USAGE: typing.ClassVar[str] = ".export PATH [--format jsonl] [--overwrite]"
+    RESTORE_USAGE: typing.ClassVar[str] = ".restore PATH [--replace]"
 
     def __init__(self, session: Session, shell: Shell) -> None:
         self._session = session
@@ -144,6 +169,395 @@ class Commands:
         self._shell.run_script(text)
         return True
 
+    def _command_import(self, argument: str) -> bool:
+        path, statement, format, batch, atomic = self._import_arguments(argument)
+        self._require_no_transaction(".import")
+        summary = self._session.graph.import_file(
+            path,
+            statement,
+            format=format,
+            batch_size=batch,
+            atomic=atomic,
+        )
+        self._session.emit(self._import_summary(summary))
+        return True
+
+    @classmethod
+    def _import_arguments(cls, argument: str) -> tuple[str, str, str | None, int, bool]:
+        """Parse the ``.import`` argument list.
+
+        Parameters
+        ----------
+        argument : str
+            Raw text after the command name.
+
+        Returns
+        -------
+        tuple[str, str, str | None, int, bool]
+            Path, statement, optional format, batch size, and atomic flag.
+
+        Raises
+        ------
+        ValidationError
+            If the arguments are missing, malformed, or unknown.
+        """
+        parts = cls._import_parts(argument)
+        path = ""
+        statement: str | None = None
+        format: str | None = None
+        batch = 1000
+        atomic = False
+        index = 0
+        while index < len(parts):
+            part = parts[index]
+            if part == "--atomic":
+                atomic = True
+            elif part in {"--statement", "--format", "--batch"}:
+                value, index = cls._import_value(parts, index)
+                if part == "--statement":
+                    statement = value
+                elif part == "--format":
+                    format = cls._import_format(value)
+                else:
+                    batch = cls._import_batch(value)
+            elif part.startswith("--"):
+                message = f"unknown .import option {part!r}"
+                raise ValidationError(message)
+            elif path:
+                message = f"usage: {cls.IMPORT_USAGE}"
+                raise ValidationError(message)
+            else:
+                path = part
+            index += 1
+        if not path or statement is None:
+            message = f"usage: {cls.IMPORT_USAGE}"
+            raise ValidationError(message)
+        return path, statement, format, batch, atomic
+
+    @classmethod
+    def _import_parts(cls, argument: str) -> list[str]:
+        """Split the ``.import`` argument text into quoted parts.
+
+        Parameters
+        ----------
+        argument : str
+            Raw text after the command name.
+
+        Returns
+        -------
+        list[str]
+            Parsed argument parts.
+
+        Raises
+        ------
+        ValidationError
+            If the argument is empty or cannot be split.
+        """
+        if not argument:
+            message = f"usage: {cls.IMPORT_USAGE}"
+            raise ValidationError(message)
+        try:
+            return shlex.split(argument)
+        except ValueError as error:
+            message = f"could not parse .import arguments: {error}"
+            raise ValidationError(message) from error
+
+    @classmethod
+    def _import_value(cls, parts: list[str], index: int) -> tuple[str, int]:
+        """Return the value following one ``.import`` option.
+
+        Parameters
+        ----------
+        parts : list[str]
+            Parsed argument parts.
+        index : int
+            Index of the option name.
+
+        Returns
+        -------
+        tuple[str, int]
+            Option value and the index of that value.
+
+        Raises
+        ------
+        ValidationError
+            If the option has no value.
+        """
+        if index + 1 >= len(parts):
+            message = f"usage: {cls.IMPORT_USAGE}"
+            raise ValidationError(message)
+        return parts[index + 1], index + 1
+
+    @staticmethod
+    def _import_format(value: str) -> str:
+        """Validate one ``--format`` value.
+
+        Parameters
+        ----------
+        value : str
+            Candidate format.
+
+        Returns
+        -------
+        str
+            ``csv`` or ``jsonl``.
+
+        Raises
+        ------
+        ValidationError
+            If the format is not supported.
+        """
+        selected = value.lower()
+        if selected not in {"csv", "jsonl"}:
+            message = "--format must be 'csv' or 'jsonl'"
+            raise ValidationError(message)
+        return selected
+
+    @staticmethod
+    def _import_batch(value: str) -> int:
+        """Parse one ``--batch`` value.
+
+        Parameters
+        ----------
+        value : str
+            Candidate batch size.
+
+        Returns
+        -------
+        int
+            Positive batch size.
+
+        Raises
+        ------
+        ValidationError
+            If the value is not a positive integer.
+        """
+        try:
+            batch = int(value)
+        except ValueError:
+            message = "--batch must be a positive integer"
+            raise ValidationError(message) from None
+        if batch < 1:
+            message = "--batch must be a positive integer"
+            raise ValidationError(message)
+        return batch
+
+    @staticmethod
+    def _import_summary(summary: ImportSummary) -> str:
+        """Format one import summary line.
+
+        Parameters
+        ----------
+        summary : ImportSummary
+            Summary returned by the import.
+
+        Returns
+        -------
+        str
+            Human-readable summary line.
+        """
+        mutations = summary.mutations
+        return (
+            f"imported {summary.rows} rows in {summary.batches} batches; "
+            f"created {mutations.created_nodes} nodes/"
+            f"{mutations.created_relationships} relationships; "
+            f"deleted {mutations.deleted_nodes} nodes/"
+            f"{mutations.deleted_relationships} relationships; "
+            f"{mutations.properties_set} properties set, "
+            f"{mutations.properties_removed} removed, "
+            f"{mutations.labels_added} labels added, "
+            f"{mutations.labels_removed} removed"
+        )
+
+    def _command_export(self, argument: str) -> bool:
+        path, overwrite = self._export_arguments(argument)
+        self._require_no_transaction(".export")
+        summary = self._session.graph.export_jsonl(path, overwrite=overwrite)
+        self._session.emit(self._export_summary(summary, path))
+        return True
+
+    @classmethod
+    def _export_arguments(cls, argument: str) -> tuple[str, bool]:
+        """Parse the ``.export`` argument list.
+
+        Parameters
+        ----------
+        argument : str
+            Raw text after the command name.
+
+        Returns
+        -------
+        tuple[str, bool]
+            Path and overwrite flag.
+
+        Raises
+        ------
+        ValidationError
+            If the path is missing or an option is unknown or malformed.
+        """
+        parts = cls._snapshot_parts(argument, cls.EXPORT_USAGE)
+        path = ""
+        overwrite = False
+        index = 0
+        while index < len(parts):
+            part = parts[index]
+            if part == "--overwrite":
+                overwrite = True
+            elif part == "--format":
+                if index + 1 >= len(parts):
+                    message = f"usage: {cls.EXPORT_USAGE}"
+                    raise ValidationError(message)
+                cls._export_format(parts[index + 1])
+                index += 1
+            elif part.startswith("--"):
+                message = f"unknown .export option {part!r}"
+                raise ValidationError(message)
+            elif path:
+                message = f"usage: {cls.EXPORT_USAGE}"
+                raise ValidationError(message)
+            else:
+                path = part
+            index += 1
+        if not path:
+            message = f"usage: {cls.EXPORT_USAGE}"
+            raise ValidationError(message)
+        return path, overwrite
+
+    @staticmethod
+    def _export_format(value: str) -> None:
+        """Validate one ``.export --format`` value.
+
+        Parameters
+        ----------
+        value : str
+            Candidate format.
+
+        Raises
+        ------
+        ValidationError
+            If the format is not ``jsonl``.
+        """
+        if value.lower() != "jsonl":
+            message = "--format must be 'jsonl'"
+            raise ValidationError(message)
+
+    @staticmethod
+    def _snapshot_parts(argument: str, usage: str) -> list[str]:
+        """Split a snapshot command argument list into quoted parts.
+
+        Parameters
+        ----------
+        argument : str
+            Raw text after the command name.
+        usage : str
+            Usage line used in error messages.
+
+        Returns
+        -------
+        list[str]
+            Parsed argument parts.
+
+        Raises
+        ------
+        ValidationError
+            If the argument is empty or cannot be split.
+        """
+        if not argument:
+            message = f"usage: {usage}"
+            raise ValidationError(message)
+        try:
+            return shlex.split(argument)
+        except ValueError as error:
+            message = f"could not parse arguments: {error}"
+            raise ValidationError(message) from error
+
+    @staticmethod
+    def _export_summary(summary: InteropSummary, path: str) -> str:
+        """Format one export summary line.
+
+        Parameters
+        ----------
+        summary : InteropSummary
+            Summary returned by the export.
+        path : str
+            Destination path.
+
+        Returns
+        -------
+        str
+            Human-readable summary line.
+        """
+        return (
+            f"exported {Commands._count(summary.nodes, 'node')} and "
+            f"{Commands._count(summary.relationships, 'relationship')} to {path}"
+        )
+
+    def _command_restore(self, argument: str) -> bool:
+        path, replace = self._restore_arguments(argument)
+        self._require_no_transaction(".restore")
+        summary = self._session.graph.restore_jsonl(path, replace=replace)
+        self._session.emit(self._restore_summary(summary, path))
+        return True
+
+    @classmethod
+    def _restore_arguments(cls, argument: str) -> tuple[str, bool]:
+        """Parse the ``.restore`` argument list.
+
+        Parameters
+        ----------
+        argument : str
+            Raw text after the command name.
+
+        Returns
+        -------
+        tuple[str, bool]
+            Path and replace flag.
+
+        Raises
+        ------
+        ValidationError
+            If the path is missing or an option is unknown.
+        """
+        parts = cls._snapshot_parts(argument, cls.RESTORE_USAGE)
+        path = ""
+        replace = False
+        for part in parts:
+            if part == "--replace":
+                replace = True
+            elif part.startswith("--"):
+                message = f"unknown .restore option {part!r}"
+                raise ValidationError(message)
+            elif path:
+                message = f"usage: {cls.RESTORE_USAGE}"
+                raise ValidationError(message)
+            else:
+                path = part
+        if not path:
+            message = f"usage: {cls.RESTORE_USAGE}"
+            raise ValidationError(message)
+        return path, replace
+
+    @staticmethod
+    def _restore_summary(summary: InteropSummary, path: str) -> str:
+        """Format one restore summary line.
+
+        Parameters
+        ----------
+        summary : InteropSummary
+            Summary returned by the restore.
+        path : str
+            Source path.
+
+        Returns
+        -------
+        str
+            Human-readable summary line.
+        """
+        return (
+            f"restored {Commands._count(summary.nodes, 'node')} and "
+            f"{Commands._count(summary.relationships, 'relationship')} from {path}"
+        )
+
     def _command_mode(self, argument: str) -> bool:
         mode = OutputMode.from_name(argument or "")
         self._session.set_mode(mode)
@@ -207,6 +621,7 @@ class Commands:
         labels, keys = self._node_inventory()
         types = self._type_inventory()
         indexes = self._session.graph.indexes()
+        constraints = self._session.graph.constraints()
         lines = ["Labels"]
         lines.extend(
             self._schema_label_line(label, labels[label], keys[label]) for label in sorted(labels)
@@ -224,8 +639,18 @@ class Commands:
         lines.extend(f"  {index.kind.value} {index.key}" for index in indexes)
         if not indexes:
             lines.append("  (none)")
+        lines.append("Constraints")
+        lines.extend(self._constraint_line(constraint) for constraint in constraints)
+        if not constraints:
+            lines.append("  (none)")
+        lines.append("Journal mode")
+        lines.append(f"  {self._session.graph.journal_mode}")
         self._session.emit_lines(lines)
         return True
+
+    @staticmethod
+    def _constraint_line(constraint: Constraint) -> str:
+        return f"  {constraint.kind.value} {constraint.scope} {constraint.key}"
 
     def _schema_label_line(self, label: str, count: int, keys: set[str]) -> str:
         properties = ", ".join(sorted(keys)) if keys else "(none)"
@@ -252,6 +677,12 @@ class Commands:
     def _command_indexes(self, _argument: str) -> bool:
         indexes = self._session.graph.indexes()
         lines = [f"  {index.kind.value} {index.key}" for index in indexes]
+        self._session.emit_lines(lines or ["  (none)"])
+        return True
+
+    def _command_constraints(self, _argument: str) -> bool:
+        constraints = self._session.graph.constraints()
+        lines = [self._constraint_line(constraint) for constraint in constraints]
         self._session.emit_lines(lines or ["  (none)"])
         return True
 

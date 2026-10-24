@@ -22,11 +22,21 @@ classifiers = [
 ]
 dependencies = []
 
+[project.optional-dependencies]
+docs = [
+  "sphinx>=9.0",
+  "myst-parser>=4.0",
+  "furo>=2025.9",
+  "sphinx-copybutton>=0.5",
+  "sphinx-design>=0.6",
+  "sphinx-autobuild>=2024.10",
+]
+
 [project.scripts]
 pygrafito = "pygrafito.cli.app:App.main"
 
 [project.urls]
-Documentation = "https://github.com/knkillname/pygrafito#readme"
+Documentation = "https://knkillname.github.io/pygrafito/"
 Issues = "https://github.com/knkillname/pygrafito/issues"
 Source = "https://github.com/knkillname/pygrafito"
 
@@ -40,6 +50,13 @@ extra-dependencies = [
 
 [[tool.hatch.envs.hatch-test.matrix]]
 python = ["3.14"]
+
+[tool.hatch.envs.docs]
+features = ["docs"]
+
+[tool.hatch.envs.docs.scripts]
+build = "sphinx-build -W --keep-going -b html docs docs/_build/html"
+serve = "sphinx-autobuild docs docs/_build/html"
 
 [tool.ruff]
 target-version = "py314"

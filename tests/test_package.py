@@ -14,6 +14,7 @@ import pygrafito.cli.session
 import pygrafito.cli.shell
 import pygrafito.engine
 import pygrafito.engine.graph
+import pygrafito.engine.interop
 import pygrafito.engine.query.ast
 import pygrafito.engine.query.compiler
 import pygrafito.engine.query.executor
@@ -35,6 +36,7 @@ import pygrafito.storage.indexes
 import pygrafito.storage.nodes
 import pygrafito.storage.relationships
 import pygrafito.storage.schema
+import pygrafito.storage.views
 
 
 class TestPackage:
@@ -53,6 +55,7 @@ class TestPackage:
             pygrafito.cli.shell,
             pygrafito.engine,
             pygrafito.engine.graph,
+            pygrafito.engine.interop,
             pygrafito.engine.query.ast,
             pygrafito.engine.query.compiler,
             pygrafito.engine.query.executor,
@@ -74,17 +77,25 @@ class TestPackage:
             pygrafito.storage.nodes,
             pygrafito.storage.relationships,
             pygrafito.storage.schema,
+            pygrafito.storage.views,
         )
         assert all(module.__name__.startswith("pygrafito") for module in modules)
 
     def test_public_exports(self) -> None:
         expected = {
             "ConnectedNodeError",
+            "Constraint",
+            "ConstraintViolationError",
             "Direction",
+            "ElementKind",
             "Graph",
             "GraphClosedError",
+            "HandleAffinityError",
             "Index",
             "IndexKind",
+            "ImportSummary",
+            "InteropSummary",
+            "LockTimeoutError",
             "MutationSummary",
             "Node",
             "NotFoundError",

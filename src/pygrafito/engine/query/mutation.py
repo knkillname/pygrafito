@@ -16,6 +16,8 @@ from collections.abc import Mapping, Sequence
 from pygrafito.engine.query.ast import (
     Create,
     Delete,
+    Merge,
+    PathPattern,
     PropertyEntry,
     Remove,
     Set,
@@ -72,6 +74,180 @@ class MutationTally:
         )
 
 
+class PatternCreator:
+    """Create the elements of one path pattern against one input row.
+
+    Parameters
+    ----------
+    nodes : NodeRepository
+        Repository used for node writes.
+    relationships : RelationshipRepository
+        Repository used for relationship writes.
+    tally : MutationTally
+        Counters updated by each created element.
+    """
+
+    def __init__(
+        self,
+        nodes: NodeRepository,
+        relationships: RelationshipRepository,
+        tally: MutationTally,
+    ) -> None:
+        self._nodes = nodes
+        self._relationships = relationships
+        self._tally = tally
+
+    def create(
+        self,
+        pattern: PathPattern,
+        binding: Mapping[str, QueryValue],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        *,
+        reject_null_properties: bool = False,
+    ) -> Binding:
+        """Create a pattern and return the extended binding.
+
+        Parameters
+        ----------
+        pattern : PathPattern
+            Pattern whose elements are created.
+        binding : Mapping[str, QueryValue]
+            Variables bound before the pattern.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        reject_null_properties : bool, optional
+            Whether a null property value raises instead of being omitted, by
+            default ``False``.
+
+        Returns
+        -------
+        Binding
+            Input variables plus the created and reused elements.
+
+        Raises
+        ------
+        QueryExecutionError
+            If a bound variable is not a node or a merge property is null.
+        """
+        working: Binding = dict(binding)
+        nodes: list[Node] = []
+        for node in pattern.nodes:
+            existing = self._existing_node(node.variable, working)
+            if existing is not None:
+                nodes.append(existing)
+                continue
+            properties = self._properties(
+                node.properties,
+                working,
+                evaluator,
+                parameters,
+                reject_null_properties=reject_null_properties,
+            )
+            created = self._nodes.create(node.labels, properties)
+            self._tally.created_nodes += 1
+            nodes.append(created)
+            if node.variable is not None:
+                working[node.variable] = created
+        for index, relationship in enumerate(pattern.relationships):
+            properties = self._properties(
+                relationship.properties,
+                working,
+                evaluator,
+                parameters,
+                reject_null_properties=reject_null_properties,
+            )
+            created_relationship = self._relationships.create(
+                nodes[index].id,
+                relationship.types[0],
+                nodes[index + 1].id,
+                properties,
+            )
+            self._tally.created_relationships += 1
+            if relationship.variable is not None:
+                working[relationship.variable] = created_relationship
+        return working
+
+    @staticmethod
+    def _existing_node(
+        variable: str | None,
+        binding: Mapping[str, QueryValue],
+    ) -> Node | None:
+        """Return the node already bound to a pattern variable.
+
+        Parameters
+        ----------
+        variable : str | None
+            Pattern variable, or ``None`` for an anonymous node.
+        binding : Mapping[str, QueryValue]
+            Current binding.
+
+        Returns
+        -------
+        Node | None
+            Bound node, or ``None`` when the position creates a node.
+
+        Raises
+        ------
+        QueryExecutionError
+            If the variable is bound to something other than a node.
+        """
+        if variable is None or variable not in binding:
+            return None
+        value = binding[variable]
+        if isinstance(value, Node):
+            return value
+        message = f"variable {variable!r} is not a node"
+        raise QueryExecutionError(message)
+
+    @staticmethod
+    def _properties(
+        entries: Sequence[PropertyEntry],
+        binding: Mapping[str, QueryValue],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        *,
+        reject_null_properties: bool,
+    ) -> dict[str, Value]:
+        """Evaluate a pattern property map for one row.
+
+        Parameters
+        ----------
+        entries : Sequence[PropertyEntry]
+            Property entries to evaluate.
+        binding : Mapping[str, QueryValue]
+            Variables bound so far.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        reject_null_properties : bool
+            Whether a null value raises instead of being omitted.
+
+        Returns
+        -------
+        dict[str, Value]
+            Stored properties.
+
+        Raises
+        ------
+        QueryExecutionError
+            If a null value is rejected.
+        """
+        properties: dict[str, Value] = {}
+        for entry in entries:
+            value = evaluator.evaluate(entry.value, binding, parameters)
+            if value is None:
+                if reject_null_properties:
+                    message = f"MERGE pattern property {entry.key!r} is null"
+                    raise QueryExecutionError(message)
+                continue
+            properties[entry.key] = typing.cast(Value, value)
+        return properties
+
+
 class MutationExecutor:
     """Apply write clauses to a binding sequence.
 
@@ -109,6 +285,7 @@ class MutationExecutor:
         bindings: Sequence[Binding],
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
+        matcher: typing.Callable[[PathPattern, Binding], list[Binding]] | None = None,
     ) -> list[Binding]:
         """Apply every write clause in source order.
 
@@ -122,6 +299,8 @@ class MutationExecutor:
             Scalar expression evaluator.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        matcher : typing.Callable[[PathPattern, Binding], list[Binding]] | None, optional
+            Callback that matches one pattern for a row, by default ``None``.
 
         Returns
         -------
@@ -132,6 +311,8 @@ class MutationExecutor:
         for clause in clauses:
             if isinstance(clause, Create):
                 current = self._create(clause, current, evaluator, parameters)
+            elif isinstance(clause, Merge):
+                current = self._merge(clause, current, evaluator, parameters, matcher)
             elif isinstance(clause, Set):
                 current = self._set(clause, current, evaluator, parameters)
             elif isinstance(clause, Remove):
@@ -165,79 +346,85 @@ class MutationExecutor:
         list[Binding]
             Bindings extended with the created elements.
         """
-        result: list[Binding] = []
-        for binding in bindings:
-            nodes: list[Node] = []
-            created: Binding = {}
-            for node in clause.pattern.nodes:
-                existing = self._reference_node(node.variable, binding)
-                if existing is not None:
-                    nodes.append(existing)
-                    continue
-                properties = self._constant_properties(node.properties, evaluator, parameters)
-                new_node = self._nodes.create(node.labels, properties)
-                self._tally.created_nodes += 1
-                nodes.append(new_node)
-                if node.variable is not None:
-                    created[node.variable] = new_node
-            for index, relationship in enumerate(clause.pattern.relationships):
-                properties = self._constant_properties(
-                    relationship.properties,
-                    evaluator,
-                    parameters,
-                )
-                new_relationship = self._relationships.create(
-                    nodes[index].id,
-                    relationship.types[0],
-                    nodes[index + 1].id,
-                    properties,
-                )
-                self._tally.created_relationships += 1
-                if relationship.variable is not None:
-                    created[relationship.variable] = new_relationship
-            extended = dict(binding)
-            extended.update(created)
-            result.append(extended)
-        return result
+        creator = PatternCreator(self._nodes, self._relationships, self._tally)
+        return [
+            creator.create(clause.pattern, binding, evaluator, parameters) for binding in bindings
+        ]
 
-    @staticmethod
-    def _reference_node(variable: str | None, binding: Mapping[str, QueryValue]) -> Node | None:
-        """Return an already bound node referenced by a create pattern.
+    def _merge(
+        self,
+        clause: Merge,
+        bindings: Sequence[Binding],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        matcher: typing.Callable[[PathPattern, Binding], list[Binding]] | None,
+    ) -> list[Binding]:
+        """Match or create one pattern per input row, in order.
 
         Parameters
         ----------
-        variable : str | None
-            Pattern variable, or ``None`` for an anonymous creation site.
-        binding : Mapping[str, QueryValue]
-            Current binding.
+        clause : Merge
+            Clause to apply.
+        bindings : Sequence[Binding]
+            Input bindings.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        matcher : typing.Callable[[PathPattern, Binding], list[Binding]] | None
+            Callback that matches one pattern against the current database.
 
         Returns
         -------
-        Node | None
-            Bound node, or ``None`` when the pattern creates a node.
-        """
-        if variable is None:
-            return None
-        value = binding.get(variable)
-        if value is None:
-            return None
-        if not isinstance(value, Node):
-            message = f"variable {variable!r} is not a node"
-            raise QueryExecutionError(message)
-        return value
+        list[Binding]
+            One row per match or per created pattern.
 
-    def _constant_properties(
+        Raises
+        ------
+        QueryExecutionError
+            If no matcher is available or a merge property is null.
+        """
+        if matcher is None:
+            message = "MERGE requires a pattern matcher"
+            raise QueryExecutionError(message)
+        creator = PatternCreator(self._nodes, self._relationships, self._tally)
+        results: list[Binding] = []
+        for binding in bindings:
+            matches = matcher(clause.pattern, binding)
+            if matches:
+                for match in matches:
+                    row = {**binding, **match}
+                    if clause.on_match is not None:
+                        row = self._set_row(clause.on_match, row, evaluator, parameters)
+                    results.append(row)
+                continue
+            created = creator.create(
+                clause.pattern,
+                binding,
+                evaluator,
+                parameters,
+                reject_null_properties=True,
+            )
+            if clause.on_create is not None:
+                created = self._set_row(clause.on_create, created, evaluator, parameters)
+            results.append(created)
+        return results
+
+    def _set_row(
         self,
-        entries: Sequence[PropertyEntry],
+        clause: Set,
+        binding: Binding,
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
-    ) -> dict[str, Value]:
-        """Evaluate a create pattern's property map.
+    ) -> Binding:
+        """Apply one ``SET`` clause to one row.
 
         Parameters
         ----------
-        entries : Sequence[PropertyEntry]
-            Pattern property entries.
+        clause : Set
+            Clause to apply.
+        binding : Binding
+            Row to update.
         evaluator : ExpressionEvaluator
             Scalar expression evaluator.
         parameters : Mapping[str, QueryValue]
@@ -245,16 +432,53 @@ class MutationExecutor:
 
         Returns
         -------
-        dict[str, Value]
-            Stored properties; null entries are ignored.
+        Binding
+            The row with refreshed element snapshots.
         """
-        properties: dict[str, Value] = {}
-        for entry in entries:
-            value = evaluator.evaluate(entry.value, {}, parameters)
-            if value is None:
-                continue
-            properties[entry.key] = typing.cast(Value, value)
-        return properties
+        properties: dict[EntityKey, dict[str, Value | None]] = {}
+        labels: dict[int, set[str]] = {}
+        self._collect_set(clause, binding, evaluator, parameters, properties, labels)
+        updates = self._apply_properties(properties)
+        updates.update(self._apply_labels(labels))
+        return self._refresh([binding], updates)[0]
+
+    def _collect_set(
+        self,
+        clause: Set,
+        binding: Binding,
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        properties: dict[EntityKey, dict[str, Value | None]],
+        labels: dict[int, set[str]],
+    ) -> None:
+        """Collect one row's ``SET`` assignments into the clause accumulators.
+
+        Parameters
+        ----------
+        clause : Set
+            Clause to apply.
+        binding : Binding
+            Row to read.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        properties : dict[EntityKey, dict[str, Value | None]]
+            Property assignments keyed by entity.
+        labels : dict[int, set[str]]
+            Label additions keyed by node id.
+        """
+        for assignment in clause.assignments:
+            key, _target = self._target(binding, assignment.variable)
+            value = evaluator.evaluate(assignment.value, binding, parameters)
+            slot = properties.setdefault(key, {})
+            slot[assignment.key] = typing.cast(Value | None, value)
+        for addition in clause.labels:
+            key, target = self._target(binding, addition.variable)
+            if key[0] != NODE or not isinstance(target, Node):
+                message = "labels can only be added to nodes"
+                raise QueryExecutionError(message)
+            labels.setdefault(key[1], set()).update(addition.labels)
 
     def _set(
         self,
@@ -284,17 +508,7 @@ class MutationExecutor:
         properties: dict[EntityKey, dict[str, Value | None]] = {}
         labels: dict[int, set[str]] = {}
         for binding in bindings:
-            for assignment in clause.assignments:
-                key, _target = self._target(binding, assignment.variable)
-                value = evaluator.evaluate(assignment.value, binding, parameters)
-                slot = properties.setdefault(key, {})
-                slot[assignment.key] = typing.cast(Value | None, value)
-            for addition in clause.labels:
-                key, target = self._target(binding, addition.variable)
-                if key[0] != NODE or not isinstance(target, Node):
-                    message = "labels can only be added to nodes"
-                    raise QueryExecutionError(message)
-                labels.setdefault(key[1], set()).update(addition.labels)
+            self._collect_set(clause, binding, evaluator, parameters, properties, labels)
         updates = self._apply_properties(properties)
         updates.update(self._apply_labels(labels))
         return self._refresh(bindings, updates)

@@ -1,4 +1,8 @@
-# Command-line shell
+# CLI reference
+
+This page is the complete reference for the `pygrafito` shell: invocation, input rules, output
+modes, session commands, transactions, introspection, maintenance, and exit codes. For a
+task-first introduction, start with [Use the shell](../guides/shell.md).
 
 `pygrafito` includes a shell for inspecting, querying, and maintaining a graph database without
 writing Python. The `pygrafito` command and `python -m pygrafito` start the same shell.
@@ -175,6 +179,9 @@ A redirection that cannot open its path reports an error and keeps the previous 
 | `.open PATH` | Close the current database and open another. |
 | `.close` | Close the current database; the session stays open. |
 | `.read PATH` | Run a script file in the current session. |
+| `.import PATH --statement TEXT` | Import CSV or JSONL rows with a write statement. |
+| `.export PATH [--format jsonl] [--overwrite]` | Write a JSONL snapshot of the graph. |
+| `.restore PATH [--replace]` | Restore a JSONL snapshot. |
 | `.mode MODE` | Select `table`, `json`, `jsonl`, `csv`, or `line`. |
 | `.headers on\|off` | Show or hide table and CSV headers. |
 | `.timer on\|off` | Report statement timing. |
@@ -182,7 +189,7 @@ A redirection that cannot open its path reports an error and keeps the previous 
 | `.once PATH` | Redirect the next output only. |
 | `.param NAME=JSON` | Bind a parameter; bare `.param` lists them. |
 | `.begin`, `.commit`, `.rollback` | Control an explicit transaction. |
-| `.schema`, `.labels`, `.reltypes`, `.indexes` | Report graph metadata. |
+| `.schema`, `.labels`, `.reltypes`, `.indexes`, `.constraints` | Report graph metadata. |
 | `.node ID`, `.rel ID` | Inspect one element. |
 | `.expand ID [DEPTH]` | Render a neighborhood tree. |
 | `.path START END [DIRECTION]` | Render the shortest path. |
@@ -211,8 +218,8 @@ the session with an open transaction rolls it back and reports that on standard 
 ## Introspection
 
 `.schema` summarizes labels with node counts and property keys, relationship types with
-relationship counts, and declared indexes. `.labels`, `.reltypes`, and `.indexes` report each part
-separately.
+relationship counts, declared indexes, declared uniqueness constraints, and the journal mode in
+effect. `.labels`, `.reltypes`, `.indexes`, and `.constraints` report each part separately.
 
 ```console
 grid.db> .schema
@@ -225,7 +232,19 @@ Relationship types
   GUARDS            1 relationship
 Indexes
   node cycles
+Constraints
+  node Program designation
+Journal mode
+  wal
 ```
+
+```console
+grid.db> .constraints
+  node Program designation
+```
+
+Constraint listing works in a read-only session. Declaring or removing a constraint from the
+shell requires a Python handle; the shell does not expose constraint DDL.
 
 `.node` shows labels, properties, and incident relationships with direction and neighbor. `.rel`
 shows one relationship's type, endpoints, and properties.
@@ -283,6 +302,62 @@ pygrafito 0.6.0 | grid.db (read-only) | type ".help" for commands
 grid.db> CREATE (n:Program {designation: 'Clu'});
 error: graph handle is read-only
 ```
+
+## Import
+
+`.import` reads a CSV or JSONL file, binds each batch to `$rows`, and runs one
+write statement. The statement is quoted as one argument, and shell-style
+quoting applies:
+
+```console
+grid.db> .import programs.jsonl --statement "UNWIND $rows AS row MERGE (n:Program {designation: row.designation})"
+imported 2 rows in 1 batches; created 2 nodes/0 relationships; deleted 0 nodes/0 relationships; 0 properties set, 0 removed, 0 labels added, 0 removed
+```
+
+Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--statement TEXT` | Required write statement that references `$rows`. |
+| `--format csv\|jsonl` | Override the format inferred from the file suffix. |
+| `--batch N` | Rows per statement execution; defaults to 1000. |
+| `--atomic` | Run the whole file in one transaction. |
+
+The command is refused while an explicit transaction is active, and its writes
+are refused in a read-only session. A failure reports the source, row, and batch
+on standard error and leaves the session usable; earlier batches stay committed
+unless `--atomic` was used. See [Importing data](../guides/importing.md) for formats and failure
+details.
+
+## Export and restore
+
+`.export PATH [--format jsonl] [--overwrite]` writes a strict JSONL snapshot. `--format jsonl` is
+the only format. An existing destination is refused unless `--overwrite` is given; the live
+database path and its `-wal`, `-shm`, and `-journal` sidecars are never valid destinations. The
+command works in a read-only session and is refused while an explicit transaction is active.
+
+```console
+grid.db> .export grid.jsonl
+exported 3 nodes and 3 relationships to grid.jsonl
+grid.db> .export grid.jsonl --overwrite
+exported 3 nodes and 3 relationships to grid.jsonl
+```
+
+`.restore PATH [--replace]` loads a snapshot. The target must be empty by default. With
+`--replace`, the current graph is cleared and the snapshot is loaded in one transaction, so a
+failure restores the original graph. The command is refused in a read-only session and while an
+explicit transaction is active.
+
+```console
+grid.db> .restore grid.jsonl
+restored 3 nodes and 3 relationships from grid.jsonl
+grid.db> .restore grid.jsonl --replace
+restored 3 nodes and 3 relationships from grid.jsonl
+```
+
+Both commands print their summary on the command output stream and report failures on standard
+error without ending the session. See [Snapshot format](snapshot-format.md) for the snapshot grammar, value
+rules, id remapping, and view schema.
 
 ## Backup and integrity
 

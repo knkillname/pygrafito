@@ -319,3 +319,94 @@ class TestConformance:
             {"name": "Quorra' OR 1=1 --"},
         )
         assert tuple(tuple(row.values()) for row in result) == (("Quorra' OR 1=1 --",),)
+
+
+class TestIngestionConformance:
+    """Exercise UNWIND and MERGE against a TRON fixture."""
+
+    @pytest.fixture
+    def graph(self) -> Iterator[Graph]:
+        with Graph.open(":memory:") as graph:
+            kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+            quorra = graph.add_node("Program", "ISO", designation="Quorra", cycles=37)
+            tron = graph.add_node("Program", designation="Tron", cycles=40)
+            graph.add_relationship(kevin, "TRUSTS", tron)
+            graph.add_relationship(quorra, "ALLIES_WITH", tron)
+            yield graph
+
+    def test_unwind_literal(self, graph: Graph) -> None:
+        result = graph.query("UNWIND [36, 37, 40] AS cycles RETURN cycles")
+        assert tuple(tuple(row.values()) for row in result) == ((36,), (37,), (40,))
+
+    def test_unwind_mapping_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row RETURN row.name AS name ORDER BY name",
+            {"rows": [{"name": "Tron"}, {"name": "Quorra"}]},
+        )
+        assert tuple(tuple(row.values()) for row in result) == (("Quorra",), ("Tron",))
+
+    def test_unwind_empty_and_null(self, graph: Graph) -> None:
+        assert graph.query("UNWIND [] AS value RETURN value").rows == ()
+        assert graph.query("UNWIND $value AS value RETURN value", {"value": None}).rows == ()
+
+    def test_unwind_feeds_a_match(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row MATCH (n:Program {designation: row.name}) "
+            "RETURN n.designation AS name, n.cycles AS cycles ORDER BY name",
+            {"rows": [{"name": "Quorra"}, {"name": "Tron"}]},
+        )
+        assert tuple(tuple(row.values()) for row in result) == (("Quorra", 37), ("Tron", 40))
+
+    def test_merge_creates_once_for_duplicate_rows(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "MERGE (n:Program {designation: row.designation}) "
+            "ON CREATE SET n.cycles = row.cycles "
+            "RETURN n.designation AS name",
+            {
+                "rows": [
+                    {"designation": "Marvin", "cycles": 1},
+                    {"designation": "Marvin", "cycles": 2},
+                ]
+            },
+        )
+        assert tuple(tuple(row.values()) for row in result) == (("Marvin",), ("Marvin",))
+        assert result.summary.created_nodes == 1
+        marvin = next(iter(graph.find_nodes("Program", designation="Marvin")))
+        assert marvin["cycles"] == 1
+
+    def test_merge_conditional_update(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) "
+            "ON CREATE SET n.cycles = row.cycles "
+            "ON MATCH SET n.cycles = n.cycles + 1 "
+            "RETURN n.designation AS name, n.cycles AS cycles ORDER BY name",
+            {
+                "rows": [
+                    {"designation": "Tron", "cycles": 1},
+                    {"designation": "Marvin", "cycles": 2},
+                ]
+            },
+        )
+        assert tuple(tuple(row.values()) for row in result) == (("Marvin", 2), ("Tron", 41))
+
+    def test_merge_relationship_between_bound_nodes(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Kevin Flynn'}), "
+            "(b:Program {designation: 'Quorra'}) "
+            "MERGE (a)-[r:MONITORS]->(b) RETURN type(r) AS kind"
+        )
+        assert tuple(tuple(row.values()) for row in result) == (("MONITORS",),)
+        assert result.summary.created_relationships == 1
+
+    def test_merge_self_loop(self, graph: Graph) -> None:
+        result = graph.query(
+            "MERGE (a:Program {designation: 'Rinzler'})-[:MONITORS]->(a) "
+            "RETURN a.designation AS name"
+        )
+        assert tuple(tuple(row.values()) for row in result) == (("Rinzler",),)
+        rinzler = next(iter(graph.find_nodes("Program", designation="Rinzler")))
+        relationships = graph.find_relationships("MONITORS")
+        assert [(item.start_id, item.end_id) for item in relationships] == [
+            (rinzler.id, rinzler.id)
+        ]

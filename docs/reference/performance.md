@@ -1,7 +1,8 @@
 # Performance
 
-This page records what that engine costs on a machine, with the exact command that
-produced each row. It is a single-machine baseline, not a guarantee.
+This page records what the engine costs on one machine, with the exact command that produced each
+row. It is a single-machine baseline, not a guarantee. For the task of making a filter faster, see
+[Speed up property filters](../guides/indexes.md).
 
 ## Method
 
@@ -81,6 +82,23 @@ shown above; the `quantified` row is reported in its query table. The indexed ga
 from finding the start nodes by `cycles` instead of scanning the node table. Expansion
 work itself is bounded by the region the start node can reach within two hops, not by
 the size of the database.
+
+### Ingestion
+
+The harness also measures a 10,000-row `UNWIND` + `MERGE` statement and the
+equivalent 10,000-row CSV import on fresh in-memory graphs. The command is the
+same `benchmarks/run.py --nodes 20000 --relationships 60000` run shown above.
+
+| Scenario | Rows per second |
+| --- | ---: |
+| `UNWIND` + `MERGE`, one statement | 530/s |
+| CSV `import_file`, batch size 1000 | 527/s |
+
+The merge path matches and creates one row at a time, and it compiles the
+single-node match for each row. That is the price of sequential visibility: a
+later row must see an earlier row's creation. At roughly 530 rows/s, a
+single-node lookup fast path is needed before this becomes a bulk loader; the
+current numbers favor correctness and a small implementation over throughput.
 
 ## What the numbers do not promise
 

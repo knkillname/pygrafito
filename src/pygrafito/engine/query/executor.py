@@ -5,6 +5,7 @@
 
 import contextlib
 import dataclasses
+import functools
 import sqlite3
 import typing
 from collections.abc import Mapping, Sequence
@@ -41,12 +42,14 @@ from pygrafito.engine.query.semantic import (
     OptionalMatchStage,
     ReturnColumn,
     SortSpec,
+    UnwindStage,
     WithStage,
 )
 from pygrafito.engine.query.values import (
     Aggregates,
     ExpressionEvaluator,
     FunctionCatalog,
+    PatternValueResolver,
     QueryValue,
     ScalarFunctions,
     SnapshotSource,
@@ -55,6 +58,8 @@ from pygrafito.engine.query.values import (
 )
 from pygrafito.model import (
     ConnectedNodeError,
+    Constraint,
+    ConstraintViolationError,
     Node,
     NotFoundError,
     Path,
@@ -67,6 +72,7 @@ from pygrafito.model import (
 )
 from pygrafito.storage.codec import PropertyCodec
 from pygrafito.storage.connection import Database
+from pygrafito.storage.constraints import ConstraintRegistry
 from pygrafito.storage.nodes import NodeRepository
 from pygrafito.storage.relationships import RelationshipRepository
 
@@ -348,24 +354,30 @@ class QueryExecutor:
         analysis.require_parameters(parameters)
         if not plan.stages:
             return ()
+        snapshots = RepositorySnapshots(self._nodes, self._relationships)
+        evaluator = ExpressionEvaluator(ScalarFunctions(snapshots))
+        resolver = PatternValueResolver(evaluator, parameters, lenient=True)
         lines: list[str] = []
         for plan_stage in plan.stages:
-            lines.extend(self._explain_stage(plan_stage.stage, parameters))
+            lines.extend(self._explain_stage(plan_stage.stage, parameters, resolver))
         return tuple(lines)
 
     def _explain_stage(
         self,
-        stage: MatchStage | OptionalMatchStage | WithStage,
+        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage,
         parameters: Mapping[str, QueryValue],
+        resolver: PatternValueResolver,
     ) -> tuple[str, ...]:
         """Return the planned access path of one read stage.
 
         Parameters
         ----------
-        stage : MatchStage | OptionalMatchStage | WithStage
+        stage : MatchStage | OptionalMatchStage | UnwindStage | WithStage
             Read stage to inspect.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        resolver : PatternValueResolver
+            Lenient evaluator for pattern property expressions.
 
         Returns
         -------
@@ -377,12 +389,14 @@ class QueryExecutor:
         QueryExecutionError
             If SQLite cannot plan the stage.
         """
+        if isinstance(stage, UnwindStage):
+            return (f"UNWIND {stage.variable}",)
         if isinstance(stage, WithStage):
             return ()
         if self._is_quantified(stage.patterns):
-            return self._explain_quantified(stage, parameters)
+            return self._explain_quantified(stage, parameters, resolver)
         match = Match(patterns=stage.patterns, where=stage.where)
-        compiled = Compiler(match, self._codec).compile(parameters)
+        compiled = Compiler(match, self._codec).compile(parameters, resolver=resolver)
         try:
             rows = self._connection.execute(
                 f"EXPLAIN QUERY PLAN {compiled.sql}",
@@ -397,6 +411,7 @@ class QueryExecutor:
         self,
         stage: MatchStage | OptionalMatchStage,
         parameters: Mapping[str, QueryValue],
+        resolver: PatternValueResolver,
     ) -> tuple[str, ...]:
         """Explain a stage that expands quantified relationships.
 
@@ -406,6 +421,8 @@ class QueryExecutor:
             Stage run by the pattern engine.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        resolver : PatternValueResolver
+            Lenient evaluator for pattern property expressions.
 
         Returns
         -------
@@ -421,7 +438,7 @@ class QueryExecutor:
                 properties=first.properties,
             )
             match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
-            compiled = Compiler(match, self._codec).compile(parameters)
+            compiled = Compiler(match, self._codec).compile(parameters, resolver=resolver)
             try:
                 rows = self._connection.execute(
                     f"EXPLAIN QUERY PLAN {compiled.sql}",
@@ -482,6 +499,12 @@ class QueryExecutor:
             raise TransactionError(message) from error
         try:
             result = self._execute(plan, parameters)
+        except ConstraintViolationError as error:
+            self._rollback()
+            refreshed = self._refresh_violation(error)
+            if refreshed is error:
+                raise
+            raise refreshed from error
         except QueryError:
             self._rollback()
             raise
@@ -531,6 +554,12 @@ class QueryExecutor:
             self._connection.execute("SAVEPOINT pygrafito_statement")
         try:
             result = self._execute(plan, parameters)
+        except ConstraintViolationError as error:
+            self._release_savepoint(savepoint, rollback=True)
+            refreshed = self._refresh_violation(error)
+            if refreshed is error:
+                raise
+            raise refreshed from error
         except QueryError:
             self._release_savepoint(savepoint, rollback=True)
             raise
@@ -546,6 +575,47 @@ class QueryExecutor:
             raise
         self._release_savepoint(savepoint, rollback=False)
         return result
+
+    def _refresh_violation(
+        self,
+        error: ConstraintViolationError,
+    ) -> ConstraintViolationError:
+        """Recompute the existing holder after a failed statement rolled back.
+
+        The repository translator runs while SQLite has already undone the
+        failing SQL statement but before the graph statement rolls back its
+        earlier statements. A duplicate created by one of those earlier
+        statements therefore looks like a surviving holder until the outer
+        rollback. Recomputing afterwards distinguishes a committed holder from
+        a duplicate removed with the statement.
+
+        Parameters
+        ----------
+        error : ConstraintViolationError
+            Violation raised while the statement was running.
+
+        Returns
+        -------
+        ConstraintViolationError
+            The same error when the holder survived, otherwise a new error with
+            the surviving holder or with none.
+        """
+        if error.value is None:
+            return error
+        constraint = Constraint(error.kind, error.scope, error.key)
+        existing = ConstraintRegistry(self._connection, self._codec).holder(
+            constraint,
+            error.value,
+        )
+        if existing == error.existing:
+            return error
+        return ConstraintViolationError(
+            error.kind,
+            error.scope,
+            error.key,
+            error.value,
+            existing,
+        )
 
     def _release_savepoint(self, savepoint: bool, *, rollback: bool) -> None:
         """Finish the statement savepoint used by an active transaction.
@@ -612,11 +682,17 @@ class QueryExecutor:
             )
         mutations = MutationExecutor(self._nodes, self._relationships)
         if analysis.is_write:
+            matcher = functools.partial(
+                self._match_merge,
+                evaluator=evaluator,
+                parameters=parameters,
+            )
             bindings = mutations.apply(
                 analysis.write_clauses,
                 bindings,
                 evaluator,
                 parameters,
+                matcher,
             )
         if return_clause is None:
             return QueryResult(
@@ -646,7 +722,7 @@ class QueryExecutor:
 
     def _run_stage(
         self,
-        stage: MatchStage | OptionalMatchStage | WithStage,
+        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage,
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         functions: ScalarFunctions,
@@ -676,10 +752,53 @@ class QueryExecutor:
             return self._run_match_stage(stage, bindings, evaluator, parameters)
         if isinstance(stage, OptionalMatchStage):
             return self._run_optional_match_stage(stage, bindings, evaluator, parameters)
+        if isinstance(stage, UnwindStage):
+            return self._run_unwind_stage(stage, bindings, evaluator, parameters)
         if isinstance(stage, WithStage):
             return self._run_with_stage(stage, bindings, evaluator, functions, parameters)
         message = f"unsupported read stage: {type(stage).__name__}"
         raise QueryExecutionError(message)
+
+    def _run_unwind_stage(
+        self,
+        stage: UnwindStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+    ) -> list[dict[str, QueryValue]]:
+        """Expand one list value per input row into output rows.
+
+        Parameters
+        ----------
+        stage : UnwindStage
+            Stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            One output row per expanded element, in list order.
+
+        Raises
+        ------
+        QueryExecutionError
+            If the evaluated value is not a list.
+        """
+        results: list[dict[str, QueryValue]] = []
+        for binding in bindings:
+            value = evaluator.evaluate(stage.expression, binding, parameters)
+            if value is None:
+                continue
+            if isinstance(value, str) or not isinstance(value, Sequence):
+                message = "UNWIND requires a list value"
+                raise QueryExecutionError(message)
+            results.extend({**binding, stage.variable: item} for item in value)
+        return results
 
     def _run_match_stage(
         self,
@@ -925,6 +1044,8 @@ class QueryExecutor:
         self,
         pattern: NodePattern,
         parameters: Mapping[str, QueryValue],
+        evaluator: ExpressionEvaluator,
+        binding: Mapping[str, QueryValue],
     ) -> list[Node]:
         """Return candidate start nodes using the indexed node predicates.
 
@@ -934,6 +1055,10 @@ class QueryExecutor:
             First node pattern of a path.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        binding : Mapping[str, QueryValue]
+            Variables bound before the pattern.
 
         Returns
         -------
@@ -946,10 +1071,11 @@ class QueryExecutor:
             properties=pattern.properties,
         )
         match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
-        compiled = Compiler(match, self._codec).compile(parameters)
+        resolver = PatternValueResolver(evaluator, parameters)
+        compiled = Compiler(match, self._codec).compile(parameters, binding, resolver)
         nodes: list[Node] = []
-        for binding in self._match_bindings(compiled):
-            node = binding.get("__pygrafito_start")
+        for row in self._match_bindings(compiled):
+            node = row.get("__pygrafito_start")
             if isinstance(node, Node):
                 nodes.append(node)
         return nodes
@@ -1021,6 +1147,34 @@ class QueryExecutor:
         """
         return any(name in binding and binding[name] is None for name in names)
 
+    def _match_merge(
+        self,
+        pattern: PathPattern,
+        binding: Mapping[str, QueryValue],
+        *,
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+    ) -> list[dict[str, QueryValue]]:
+        """Match one pattern for a ``MERGE`` input row.
+
+        Parameters
+        ----------
+        pattern : PathPattern
+            Pattern to match as a whole.
+        binding : Mapping[str, QueryValue]
+            Variables bound by earlier stages.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            One binding per match, or an empty list when the pattern is absent.
+        """
+        return self._match_rows([pattern], None, evaluator, parameters, binding)
+
     def _match_rows(
         self,
         patterns: Sequence[PathPattern],
@@ -1050,7 +1204,8 @@ class QueryExecutor:
             Variable bindings in SQL row order.
         """
         match = Match(patterns=tuple(patterns), where=where)
-        compiled = Compiler(match, self._codec).compile(parameters, bound)
+        resolver = PatternValueResolver(evaluator, parameters)
+        compiled = Compiler(match, self._codec).compile(parameters, bound, resolver)
         bindings = self._match_bindings(compiled)
         if compiled.residual is None:
             return bindings

@@ -18,6 +18,7 @@ from pygrafito.engine.query.ast import (
     ListLiteral,
     Literal,
     Match,
+    Merge,
     NodePattern,
     Operators,
     Parameter,
@@ -35,6 +36,7 @@ from pygrafito.engine.query.ast import (
     Star,
     Statement,
     Unary,
+    Unwind,
     Variable,
 )
 from pygrafito.engine.query.tokens import Span
@@ -131,6 +133,18 @@ class TestAstNodes:
         assert returned.distinct
         assert returned.order_by[0].descending
 
+    def test_unwind_and_merge_fields(self) -> None:
+        unwind = Unwind(expression=ListLiteral(items=()), variable="value")
+        merge = Merge(
+            pattern=PathPattern(nodes=(NodePattern(variable="n"),)),
+            on_create=Set(
+                assignments=(PropertyAssignment(variable="n", key="k", value=Literal(value=1)),)
+            ),
+        )
+        assert unwind.variable == "value"
+        assert merge.on_create is not None
+        assert merge.on_match is None
+
     def test_every_node_is_frozen(self) -> None:
         nodes = [
             Literal(value=1),
@@ -165,6 +179,11 @@ class TestAstNodes:
             Delete(variables=("n",)),
             Return(items=(ReturnItem(expression=Literal(value=1)),)),
             Statement(clauses=(Delete(variables=("n",)),)),
+            Unwind(
+                expression=ListLiteral(items=(Literal(value=1),)),
+                variable="value",
+            ),
+            Merge(pattern=PathPattern(nodes=(NodePattern(variable="n"),))),
         ]
         for node in nodes:
             assert not hasattr(node, "__dict__")

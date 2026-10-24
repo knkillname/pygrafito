@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Public graph facade."""
 
+import contextlib
 import os
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
@@ -10,11 +11,13 @@ from pathlib import Path as FilePath
 from types import TracebackType
 from typing import Self
 
+from pygrafito.engine.importing import ImportRunner
+from pygrafito.engine.interop import InteropSummary, SnapshotExporter, SnapshotRestorer
 from pygrafito.engine.query.executor import QueryExecutor
 from pygrafito.engine.query.parser import Parser
 from pygrafito.engine.query.plan import PlanBuilder
 from pygrafito.engine.query.prepared import PreparedQuery
-from pygrafito.engine.query.results import QueryResult
+from pygrafito.engine.query.results import ImportSummary, QueryResult
 from pygrafito.engine.query.semantic import SemanticAnalyzer
 from pygrafito.engine.query.values import QueryValue
 from pygrafito.engine.transaction import Transaction
@@ -27,7 +30,9 @@ from pygrafito.engine.traversal import (
     TraversalSupport,
 )
 from pygrafito.model import (
+    Constraint,
     Direction,
+    ElementKind,
     Index,
     IndexKind,
     Node,
@@ -40,9 +45,11 @@ from pygrafito.model import (
 )
 from pygrafito.storage.codec import PropertyCodec
 from pygrafito.storage.connection import Database
+from pygrafito.storage.constraints import ConstraintRegistry
 from pygrafito.storage.indexes import IndexRegistry
 from pygrafito.storage.nodes import NodeRepository
 from pygrafito.storage.relationships import RelationshipRepository
+from pygrafito.storage.views import Views
 
 
 class Graph:
@@ -66,6 +73,7 @@ class Graph:
             self._codec,
         )
         self._indexes = IndexRegistry(database.connection, self._codec)
+        self._constraints = ConstraintRegistry(database.connection, self._codec)
         self._query = QueryExecutor(
             database.connection,
             self._nodes,
@@ -81,6 +89,7 @@ class Graph:
         *,
         create: bool = True,
         readonly: bool = False,
+        busy_timeout: int | None = None,
     ) -> Self:
         """Open or create a graph database.
 
@@ -94,6 +103,9 @@ class Graph:
             Whether to open an existing file without write access, by default
             ``False``. A read-only open never creates a file and is not
             available for an in-memory database.
+        busy_timeout : int | None, optional
+            Milliseconds a lock wait may take before it fails, by default
+            5000 milliseconds.
 
         Returns
         -------
@@ -105,12 +117,47 @@ class Graph:
         NotFoundError
             If the file does not exist and may not be created.
         ValidationError
-            If a read-only in-memory graph is requested.
+            If a read-only in-memory graph is requested or the busy timeout is
+            invalid.
         UnsupportedSqliteError
-            If the SQLite runtime lacks required features, or a read-only open
-            needs to write the schema.
+            If the SQLite runtime lacks required features, the file belongs to
+            another application, or a read-only open needs to write the schema.
+        LockTimeoutError
+            If opening waits for a lock longer than the busy timeout.
         """
-        return cls(Database(path, create=create, readonly=readonly))
+        return cls(
+            Database(
+                path,
+                create=create,
+                readonly=readonly,
+                busy_timeout=busy_timeout,
+            )
+        )
+
+    @property
+    def journal_mode(self) -> str:
+        """Return the journal mode this handle obtained.
+
+        Returns
+        -------
+        str
+            Lower-case journal mode such as ``wal`` or ``memory``.
+        """
+        self._database.ensure_open()
+        return self._database.journal_mode
+
+    @property
+    def view_version(self) -> int:
+        """Return the published interop view version.
+
+        Returns
+        -------
+        int
+            Published view version, or zero when the views are absent.
+        """
+        self._database.ensure_open()
+        version = Views(self._database.connection).version()
+        return 0 if version is None else version
 
     def close(self) -> None:
         """Close the graph handle. Closing twice is a no-op."""
@@ -164,6 +211,7 @@ class Graph:
             self._nodes,
             self._relationships,
             query_executor=self._query,
+            database=self._database,
         )
 
     def query(
@@ -211,6 +259,205 @@ class Graph:
             text,
             PlanBuilder.build(analysis),
         )
+
+    def import_rows(
+        self,
+        statement: str,
+        rows: Iterable[Mapping[str, object]],
+        *,
+        batch_size: int = 1000,
+        atomic: bool = False,
+    ) -> ImportSummary:
+        """Import in-memory row mappings with one write statement.
+
+        Parameters
+        ----------
+        statement : str
+            Write statement that references ``$rows``.
+        rows : Iterable[Mapping[str, object]]
+            Row mappings to import.
+        batch_size : int, optional
+            Rows per statement execution, by default 1000.
+        atomic : bool, optional
+            Whether the whole import commits in one transaction, by default
+            ``False``.
+
+        Returns
+        -------
+        ImportSummary
+            Rows, batches, and aggregate mutation counts.
+
+        Raises
+        ------
+        ReadOnlyError
+            If the graph is read-only.
+        GraphClosedError
+            If the graph handle is closed.
+        ValidationError
+            If the statement or a row is invalid.
+        """
+        self._database.ensure_open()
+        self._database.ensure_writable()
+        return ImportRunner(self).import_rows(
+            statement,
+            rows,
+            batch_size=batch_size,
+            atomic=atomic,
+        )
+
+    def import_file(
+        self,
+        path: str | FilePath,
+        statement: str,
+        *,
+        format: str | None = None,
+        batch_size: int = 1000,
+        atomic: bool = False,
+    ) -> ImportSummary:
+        """Import a CSV or JSONL file with one write statement.
+
+        Parameters
+        ----------
+        path : str | FilePath
+            File to import.
+        statement : str
+            Write statement that references ``$rows``.
+        format : str | None, optional
+            Explicit ``csv`` or ``jsonl`` format, by default inferred from the
+            file suffix.
+        batch_size : int, optional
+            Rows per statement execution, by default 1000.
+        atomic : bool, optional
+            Whether the whole import commits in one transaction, by default
+            ``False``.
+
+        Returns
+        -------
+        ImportSummary
+            Rows, batches, and aggregate mutation counts.
+
+        Raises
+        ------
+        ReadOnlyError
+            If the graph is read-only.
+        GraphClosedError
+            If the graph handle is closed.
+        ValidationError
+            If the format, statement, or a row is invalid.
+        """
+        self._database.ensure_open()
+        self._database.ensure_writable()
+        return ImportRunner(self).import_file(
+            FilePath(path),
+            statement,
+            format=format,
+            batch_size=batch_size,
+            atomic=atomic,
+        )
+
+    def export_jsonl(
+        self,
+        path: str | FilePath,
+        *,
+        overwrite: bool = False,
+    ) -> InteropSummary:
+        """Write one consistent snapshot of the graph as JSONL.
+
+        The snapshot is written to a sibling temporary file and atomically
+        moved into place, so an interrupted export never leaves a partial file
+        at the destination.
+
+        Parameters
+        ----------
+        path : str | FilePath
+            Destination path.
+        overwrite : bool, optional
+            Whether an existing destination may be replaced, by default
+            ``False``.
+
+        Returns
+        -------
+        InteropSummary
+            Number of nodes and relationships written.
+
+        Raises
+        ------
+        GraphClosedError
+            If the graph handle is closed.
+        TransactionError
+            If an explicit transaction is active.
+        ValidationError
+            If the destination exists and overwrite is false, names the open
+            database or one of its sidecars, or cannot be written.
+        """
+        self._database.ensure_open()
+        if not isinstance(overwrite, bool):
+            message = "overwrite must be a boolean"
+            raise ValidationError(message)
+        if self._database.connection.in_transaction:
+            message = "a graph transaction is active; finish it before an export"
+            raise TransactionError(message)
+        destination = FilePath(path)
+        self._require_export_destination(destination)
+        if destination.exists() and not overwrite:
+            message = f"export destination already exists: {destination}"
+            raise ValidationError(message)
+        with self._read_snapshot():
+            return SnapshotExporter(
+                self._database.connection,
+                self._codec,
+            ).export(destination)
+
+    def restore_jsonl(
+        self,
+        path: str | FilePath,
+        *,
+        replace: bool = False,
+    ) -> InteropSummary:
+        """Restore one JSONL snapshot in a single transaction.
+
+        By default the target must be empty. With ``replace`` enabled, the
+        current relationships and nodes are deleted and the snapshot is loaded
+        in the same transaction, so a failure restores the original graph.
+
+        Parameters
+        ----------
+        path : str | FilePath
+            Snapshot file to read.
+        replace : bool, optional
+            Whether a non-empty target may be replaced, by default ``False``.
+
+        Returns
+        -------
+        InteropSummary
+            Number of nodes and relationships restored.
+
+        Raises
+        ------
+        GraphClosedError
+            If the graph handle is closed.
+        ReadOnlyError
+            If the graph handle was opened read-only.
+        TransactionError
+            If an explicit transaction is active.
+        ValidationError
+            If the target is non-empty, the snapshot is invalid, or its counts
+            do not match.
+        """
+        self._database.ensure_open()
+        self._database.ensure_writable()
+        if not isinstance(replace, bool):
+            message = "replace must be a boolean"
+            raise ValidationError(message)
+        if self._database.connection.in_transaction:
+            message = "a graph transaction is active; finish it before a restore"
+            raise TransactionError(message)
+        return SnapshotRestorer(
+            self,
+            self._database.connection,
+            self._codec,
+            FilePath(path),
+        ).restore(replace=replace)
 
     def explain(
         self,
@@ -318,6 +565,98 @@ class Graph:
         self._database.ensure_open()
         return self._indexes.all()
 
+    def create_node_uniqueness_constraint(self, label: str, key: str) -> Constraint:
+        """Declare that nodes with one label hold distinct values for one key.
+
+        Parameters
+        ----------
+        label : str
+            Label whose nodes the constraint covers.
+        key : str
+            Property key whose values must stay distinct.
+
+        Returns
+        -------
+        Constraint
+            The declared constraint.
+
+        Raises
+        ------
+        ValidationError
+            If the label or key is not a non-empty identifier.
+        ReadOnlyError
+            If the graph handle was opened read-only.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        ConstraintViolationError
+            If nodes that already carry the label duplicate a value.
+        """
+        return self._create_constraint(Constraint(ElementKind.NODE, label, key))
+
+    def create_relationship_uniqueness_constraint(
+        self,
+        rel_type: str,
+        key: str,
+    ) -> Constraint:
+        """Declare that relationships of one type hold distinct property values.
+
+        Parameters
+        ----------
+        rel_type : str
+            Relationship type whose relationships the constraint covers.
+        key : str
+            Property key whose values must stay distinct.
+
+        Returns
+        -------
+        Constraint
+            The declared constraint.
+
+        Raises
+        ------
+        ValidationError
+            If the type or key is not a non-empty identifier.
+        ReadOnlyError
+            If the graph handle was opened read-only.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        ConstraintViolationError
+            If relationships of the type already duplicate a value.
+        """
+        return self._create_constraint(Constraint(ElementKind.RELATIONSHIP, rel_type, key))
+
+    def constraints(self) -> tuple[Constraint, ...]:
+        """Return the declared uniqueness constraints.
+
+        Returns
+        -------
+        tuple[Constraint, ...]
+            Declared constraints ordered by element kind, scope, and key.
+        """
+        self._database.ensure_open()
+        return self._constraints.all()
+
+    def drop_constraint(self, constraint: Constraint) -> None:
+        """Remove one declared uniqueness constraint.
+
+        Parameters
+        ----------
+        constraint : Constraint
+            Constraint returned by ``constraints`` or constructed by the caller.
+
+        Raises
+        ------
+        NotFoundError
+            If the constraint is not declared.
+        ReadOnlyError
+            If the graph handle was opened read-only.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        """
+        self._require_constraint_access()
+        self._constraints.drop(constraint)
+        self._refresh_planner_statistics()
+
     def backup_to(self, path: str | FilePath) -> FilePath:
         """Write a consistent copy of the open database.
 
@@ -385,6 +724,75 @@ class Graph:
             )
         return tuple(problems)
 
+    def _require_export_destination(self, destination: FilePath) -> None:
+        """Reject a destination that would replace the live database.
+
+        Parameters
+        ----------
+        destination : FilePath
+            Requested export path.
+
+        Raises
+        ------
+        ValidationError
+            If the destination names the open database or a journal sidecar.
+        """
+        location = self._database.location
+        if location == Database.MEMORY_PATH:
+            return
+        database = FilePath(location).resolve()
+        target = destination.resolve()
+        reserved = {database}
+        reserved.update(
+            FilePath(f"{database}{suffix}").resolve() for suffix in ("-wal", "-shm", "-journal")
+        )
+        if target in reserved:
+            message = f"export destination is the open database: {destination}"
+            raise ValidationError(message)
+
+    @contextlib.contextmanager
+    def _read_snapshot(self) -> Iterator[None]:
+        """Run a public read against one committed state.
+
+        A deferred transaction is started unless the caller already opened an
+        explicit transaction, in which case its writes stay visible. The
+        transaction closes before this context exits, so no transaction
+        outlives a returned iterator.
+
+        Yields
+        ------
+        None
+            Control while the snapshot is active.
+
+        Raises
+        ------
+        TransactionError
+            If SQLite cannot start or finish the read transaction.
+        """
+        self._database.ensure_open()
+        connection = self._database.connection
+        if connection.in_transaction:
+            yield
+            return
+        try:
+            connection.execute("BEGIN")
+        except sqlite3.Error as error:
+            message = "could not start a graph read"
+            raise TransactionError(message) from error
+        try:
+            yield
+        except BaseException:
+            with contextlib.suppress(sqlite3.Error):
+                connection.execute("ROLLBACK")
+            raise
+        try:
+            connection.execute("COMMIT")
+        except sqlite3.Error as error:
+            with contextlib.suppress(sqlite3.Error):
+                connection.execute("ROLLBACK")
+            message = "could not finish a graph read"
+            raise TransactionError(message) from error
+
     def _create_index(self, index: Index) -> Index:
         """Create one declared index after the access checks.
 
@@ -402,6 +810,39 @@ class Graph:
         self._indexes.create(index)
         self._refresh_planner_statistics()
         return index
+
+    def _create_constraint(self, constraint: Constraint) -> Constraint:
+        """Declare one constraint after the access checks.
+
+        Parameters
+        ----------
+        constraint : Constraint
+            Constraint to declare.
+
+        Returns
+        -------
+        Constraint
+            The declared constraint.
+        """
+        self._require_constraint_access()
+        self._constraints.create(constraint)
+        self._refresh_planner_statistics()
+        return constraint
+
+    def _require_constraint_access(self) -> None:
+        """Reject constraint changes while a transaction is active.
+
+        Raises
+        ------
+        ReadOnlyError
+            If the graph handle was opened read-only.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        """
+        self._database.ensure_writable()
+        if self._database.connection.in_transaction:
+            message = "a graph transaction is active; change constraints outside it"
+            raise TransactionError(message)
 
     def _refresh_planner_statistics(self) -> None:
         """Refresh planning statistics, ignoring failures.
@@ -607,7 +1048,8 @@ class Graph:
             Snapshot of the node.
         """
         self._database.ensure_open()
-        return self._nodes.get(node_id)
+        with self._read_snapshot():
+            return self._nodes.get(node_id)
 
     def relationship(self, relationship_id: int) -> Relationship:
         """Read a relationship.
@@ -645,7 +1087,8 @@ class Graph:
             Matching node snapshots ordered by id.
         """
         self._database.ensure_open()
-        return self._nodes.find(labels, properties)
+        with self._read_snapshot():
+            return self._nodes.find(labels, properties)
 
     def find_relationships(
         self,
@@ -667,7 +1110,8 @@ class Graph:
             Matching relationship snapshots ordered by id.
         """
         self._database.ensure_open()
-        return self._relationships.find(rel_type, properties)
+        with self._read_snapshot():
+            return self._relationships.find(rel_type, properties)
 
     def traverse(
         self,
@@ -700,12 +1144,13 @@ class Graph:
             Each reached node once with its shortest depth.
         """
         self._database.ensure_open()
-        snapshot = TraversalCapture(self._nodes, self._relationships).region(
-            start,
-            max_depth,
-            direction,
-            types,
-        )
+        with self._read_snapshot():
+            snapshot = TraversalCapture(self._nodes, self._relationships).region(
+                start,
+                max_depth,
+                direction,
+                types,
+            )
         evaluator = ReachabilityEvaluator(
             snapshot,
             start,
@@ -747,16 +1192,17 @@ class Graph:
             A shortest path, or ``None`` when none exists.
         """
         self._database.ensure_open()
-        source = DatabaseNeighborhood(self._nodes, self._relationships)
-        evaluator = ShortestPathEvaluator(
-            source,
-            start,
-            end,
-            direction,
-            types,
-            max_depth,
-        )
-        return evaluator.evaluate()
+        with self._read_snapshot():
+            source = DatabaseNeighborhood(self._nodes, self._relationships)
+            evaluator = ShortestPathEvaluator(
+                source,
+                start,
+                end,
+                direction,
+                types,
+                max_depth,
+            )
+            return evaluator.evaluate()
 
     def paths(
         self,
@@ -798,13 +1244,14 @@ class Graph:
         """
         self._database.ensure_open()
         end_id = TraversalSupport.node_id(end)
-        snapshot = TraversalCapture(self._nodes, self._relationships).region(
-            start,
-            max_depth,
-            direction,
-            types,
-            include=(end_id,),
-        )
+        with self._read_snapshot():
+            snapshot = TraversalCapture(self._nodes, self._relationships).region(
+                start,
+                max_depth,
+                direction,
+                types,
+                include=(end_id,),
+            )
         evaluator = TrailEnumerator(
             snapshot,
             start,

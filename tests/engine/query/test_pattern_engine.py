@@ -176,3 +176,50 @@ class TestEngineParity(_PatternGraph):
         )
         assert any("pygrafito_idx_node_" in line for line in plan)
         assert any("QUANTIFIED PATTERN" in line for line in plan)
+
+
+class TestDynamicPatternValues(_PatternGraph):
+    """Verify quantified patterns evaluate property maps against the row."""
+
+    def test_dynamic_start_node_property(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "MATCH (a:Program {designation: row.start})-[:ALLIES_WITH*1..1]->(b) "
+            "RETURN b.designation AS name ORDER BY name",
+            {"rows": [{"start": "Kevin Flynn"}]},
+        )
+        assert self.designations(result) == ["Quorra", "Quorra", "Tron"]
+
+    def test_dynamic_relationship_property(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "MATCH (a {designation: 'Kevin Flynn'})"
+            "-[:ALLIES_WITH*1..1 {since_cycle: row.since}]->(b) "
+            "RETURN b.designation AS name ORDER BY name",
+            {"rows": [{"since": 2020}]},
+        )
+        assert self.designations(result) == ["Quorra", "Tron"]
+
+    def test_null_dynamic_value_matches_nothing(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND $rows AS row "
+            "MATCH (a:Program {designation: row.start})-[:ALLIES_WITH*1..1]->(b) "
+            "RETURN b.designation AS name",
+            {"rows": [{"start": None}]},
+        )
+        assert result.rows == ()
+
+    def test_null_literal_matches_nothing(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: null})-[:ALLIES_WITH*1..1]->(b) "
+            "RETURN b.designation AS name"
+        )
+        assert result.rows == ()
+
+    def test_bound_start_node_still_satisfies_the_pattern(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program {designation: 'Quorra'}) "
+            "MATCH (a {designation: 'Tron'})-[:ALLIES_WITH*1..1]->(b) "
+            "RETURN b.designation AS name"
+        )
+        assert result.rows == ()

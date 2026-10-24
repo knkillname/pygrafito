@@ -10,10 +10,15 @@ import pytest
 
 from pygrafito.model import (
     ConnectedNodeError,
+    Constraint,
+    ConstraintViolationError,
     Direction,
+    ElementKind,
     GraphClosedError,
+    HandleAffinityError,
     Index,
     IndexKind,
+    LockTimeoutError,
     Node,
     NotFoundError,
     Path,
@@ -34,6 +39,75 @@ class TestDirection:
         assert Direction.OUTGOING.value == "outgoing"
         assert Direction.INCOMING.value == "incoming"
         assert Direction.BOTH.value == "both"
+
+
+class TestElementKind:
+    """Verify the shared element-kind enum and its index alias."""
+
+    def test_members(self) -> None:
+        assert ElementKind.NODE.value == "node"
+        assert ElementKind.RELATIONSHIP.value == "relationship"
+
+    def test_index_kind_is_an_alias(self) -> None:
+        assert IndexKind is ElementKind
+
+
+class TestConstraint:
+    """Verify the uniqueness constraint value type."""
+
+    def test_fields_and_immutability(self) -> None:
+        constraint = Constraint(ElementKind.NODE, "Program", "designation")
+        assert constraint == Constraint(ElementKind.NODE, "Program", "designation")
+        assert constraint != Constraint(ElementKind.RELATIONSHIP, "Program", "designation")
+        with pytest.raises(FrozenInstanceError):
+            constraint.key = "cycles"  # type: ignore[misc]
+
+    def test_ordering_key(self) -> None:
+        constraints = [
+            Constraint(ElementKind.RELATIONSHIP, "ALLIES_WITH", "since"),
+            Constraint(ElementKind.NODE, "Program", "designation"),
+            Constraint(ElementKind.NODE, "ISO", "designation"),
+        ]
+        ordered = sorted(constraints, key=lambda item: item.ordering_key)
+        assert ordered == [
+            Constraint(ElementKind.NODE, "ISO", "designation"),
+            Constraint(ElementKind.NODE, "Program", "designation"),
+            Constraint(ElementKind.RELATIONSHIP, "ALLIES_WITH", "since"),
+        ]
+
+    @pytest.mark.parametrize(
+        ("kind", "scope", "key"),
+        [
+            ("node", "Program", "designation"),
+            (ElementKind.NODE, "", "designation"),
+            (ElementKind.NODE, "Program", ""),
+            (ElementKind.NODE, None, "designation"),
+            (ElementKind.RELATIONSHIP, "ALLIES_WITH", 1),
+        ],
+    )
+    def test_invalid_fields_rejected(self, kind: object, scope: object, key: object) -> None:
+        with pytest.raises(ValidationError):
+            Constraint(
+                typing.cast(ElementKind, kind),
+                typing.cast(str, scope),
+                typing.cast(str, key),
+            )
+
+    def test_violation_payload(self) -> None:
+        error = ConstraintViolationError(
+            ElementKind.NODE,
+            "Program",
+            "designation",
+            "Tron",
+            7,
+        )
+        assert error.kind is ElementKind.NODE
+        assert error.scope == "Program"
+        assert error.key == "designation"
+        assert error.value == "Tron"
+        assert error.existing == 7
+        assert "Tron" in str(error)
+        assert "7" in str(error)
 
 
 class TestIndex:
@@ -183,6 +257,9 @@ class TestErrorHierarchy:
             GraphClosedError,
             TransactionError,
             UnsupportedSqliteError,
+            HandleAffinityError,
+            LockTimeoutError,
+            ConstraintViolationError,
         ],
     )
     def test_inheritance(self, error_type: type[PygrafitoError]) -> None:

@@ -6,11 +6,10 @@
 import threading
 import typing
 from pathlib import Path
-from sqlite3 import ProgrammingError
 
 import pytest
 
-from pygrafito import Graph, GraphClosedError, Transaction
+from pygrafito import Graph, GraphClosedError, HandleAffinityError, Transaction
 from pygrafito.model import (
     ConnectedNodeError,
     Node,
@@ -33,6 +32,21 @@ class _CrossThreadReader:
         """Read the node, recording any error."""
         try:
             self._graph.node(self._node_id)
+        except Exception as error:
+            self.error = error
+
+
+class _CrossThreadTransaction:
+    """Begin a transaction from another thread and record the failure."""
+
+    def __init__(self, transaction: Transaction) -> None:
+        self._transaction = transaction
+        self.error: Exception | None = None
+
+    def __call__(self) -> None:
+        """Begin the transaction, recording any error."""
+        try:
+            self._transaction.begin()
         except Exception as error:
             self.error = error
 
@@ -123,7 +137,17 @@ class TestOpenAndClose:
             thread = threading.Thread(target=reader)
             thread.start()
             thread.join()
-            assert isinstance(reader.error, ProgrammingError)
+            assert isinstance(reader.error, HandleAffinityError)
+
+    def test_cross_thread_transaction_rejected(self) -> None:
+        with Graph.open(":memory:") as graph:
+            transaction = graph.transaction()
+            reader = _CrossThreadTransaction(transaction)
+            thread = threading.Thread(target=reader)
+            thread.start()
+            thread.join()
+            assert isinstance(reader.error, HandleAffinityError)
+            assert not graph._database.connection.in_transaction
 
 
 class TestConvenienceWrites:
