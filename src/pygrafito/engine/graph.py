@@ -149,7 +149,7 @@ class Graph:
         text: str,
         parameters: Mapping[str, QueryValue] | None = None,
     ) -> QueryResult:
-        """Parse and execute one read-only query statement.
+        """Parse and execute one statement.
 
         Parameters
         ----------

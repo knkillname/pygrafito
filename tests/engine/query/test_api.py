@@ -123,6 +123,29 @@ class TestPublicApi:
         assert result.rows[0]["n.designation"] == "Quorra"
 
 
+class TestWriteApi:
+    """Verify write statements through the public result and prepared API."""
+
+    @pytest.fixture
+    def graph(self) -> Iterator[Graph]:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+            yield graph
+
+    def test_write_without_return_has_no_columns(self, graph: Graph) -> None:
+        result = graph.query("CREATE (n:Program {designation: 'Sam Flynn'})")
+        assert isinstance(result, QueryResult)
+        assert result.columns == ()
+        assert list(result) == []
+        assert result.summary.created_nodes == 1
+
+    def test_prepared_write_columns_are_empty(self, graph: Graph) -> None:
+        prepared = graph.prepare("CREATE (n:Program {designation: $name})")
+        assert prepared.columns == ()
+        result = prepared.execute({"name": "Sam Flynn"})
+        assert result.summary.created_nodes == 1
+
+
 class TestPackageExports:
     """Verify the query surface is exported from the package root."""
 

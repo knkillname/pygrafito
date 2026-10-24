@@ -5,7 +5,7 @@
 
 from pygrafito.engine.graph import Graph
 from pygrafito.engine.query.prepared import PreparedQuery
-from pygrafito.engine.query.results import QueryResult, Row
+from pygrafito.engine.query.results import MutationSummary, QueryResult, Row
 from pygrafito.engine.transaction import Transaction
 from pygrafito.model import (
     ConnectedNodeError,
@@ -31,6 +31,7 @@ __all__ = [
     "Direction",
     "Graph",
     "GraphClosedError",
+    "MutationSummary",
     "Node",
     "NotFoundError",
     "Path",

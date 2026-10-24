@@ -115,3 +115,41 @@ class TestQueryIntegration:
             assert Schema.VERSION == 1
             version = graph._database.connection.execute("PRAGMA user_version").fetchone()
             assert version == (1,)
+
+
+class TestWriteStatementIntegration:
+    """Verify read and write statements through both public entry points."""
+
+    def test_graph_query_read_and_write(self) -> None:
+        with Graph.open(":memory:") as graph:
+            created = graph.query(
+                "CREATE (n:Program {designation: 'Kevin Flynn', cycles: 36}) "
+                "RETURN n.cycles AS cycles"
+            )
+            assert [row["cycles"] for row in created] == [36]
+            read = graph.query("MATCH (n:Program) RETURN n.designation AS name")
+            assert [row["name"] for row in read] == ["Kevin Flynn"]
+
+    def test_transaction_query_read_and_write(self) -> None:
+        with Graph.open(":memory:") as graph:
+            with graph.transaction() as transaction:
+                transaction.query("CREATE (n:Program {designation: 'Quorra'})")
+                result = transaction.query("MATCH (n:Program) RETURN n.designation AS name")
+                assert [row["name"] for row in result] == ["Quorra"]
+            assert len(list(graph.find_nodes("Program", designation="Quorra"))) == 1
+
+    def test_write_end_to_end_across_reopen(self, tmp_path: Path) -> None:
+        path = tmp_path / "grid.db"
+        with Graph.open(path) as graph:
+            graph.query("CREATE (k:Program {designation: 'Kevin Flynn', cycles: 36})")
+            graph.query("CREATE (q:Program {designation: 'Quorra', cycles: 37})")
+            kevin = next(iter(graph.find_nodes("Program", designation="Kevin Flynn")))
+            quorra = next(iter(graph.find_nodes("Program", designation="Quorra")))
+            graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+            graph.query("MATCH (n:Program {designation: 'Quorra'}) SET n.cycles = 38")
+            graph.query("MATCH (n:Program {designation: 'Kevin Flynn'}) DETACH DELETE n")
+        with Graph.open(path) as graph:
+            quorra = next(iter(graph.find_nodes("Program", designation="Quorra")))
+            assert quorra["cycles"] == 38
+            assert list(graph.find_nodes("Program", designation="Kevin Flynn")) == []
+            assert list(graph.find_relationships("ALLIES_WITH")) == []

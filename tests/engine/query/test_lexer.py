@@ -155,6 +155,13 @@ class TestLexer:
             assert token.kind is TokenKind.KEYWORD
             assert token.value == name
 
+    def test_write_keywords_are_case_insensitive(self) -> None:
+        names = ["CREATE", "SET", "REMOVE", "DELETE", "DETACH", "MERGE"]
+        for name in names:
+            token = Lexer.tokenize(name.lower())[0]
+            assert token.kind is TokenKind.KEYWORD
+            assert token.value == name
+
     @pytest.mark.parametrize(
         ("text", "line", "column", "fragment"),
         [

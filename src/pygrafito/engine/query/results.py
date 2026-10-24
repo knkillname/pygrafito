@@ -82,6 +82,40 @@ class Row(Mapping[str, QueryValue]):
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class MutationSummary:
+    """Counts of the changes applied by one statement.
+
+    Parameters
+    ----------
+    created_nodes : int, optional
+        Nodes created, by default zero.
+    created_relationships : int, optional
+        Relationships created, by default zero.
+    deleted_nodes : int, optional
+        Nodes deleted, by default zero.
+    deleted_relationships : int, optional
+        Relationships deleted, by default zero.
+    properties_set : int, optional
+        Property assignments applied, by default zero.
+    properties_removed : int, optional
+        Property removals applied, by default zero.
+    labels_added : int, optional
+        Label additions applied, by default zero.
+    labels_removed : int, optional
+        Label removals applied, by default zero.
+    """
+
+    created_nodes: int = 0
+    created_relationships: int = 0
+    deleted_nodes: int = 0
+    deleted_relationships: int = 0
+    properties_set: int = 0
+    properties_removed: int = 0
+    labels_added: int = 0
+    labels_removed: int = 0
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class QueryResult:
     """A materialized, immutable query result.
 
@@ -91,10 +125,13 @@ class QueryResult:
         Ordered column names.
     rows : Sequence[Row]
         Result rows in output order.
+    summary : MutationSummary, optional
+        Counts of the changes applied by the statement, by default all zero.
     """
 
     columns: tuple[str, ...]
     rows: tuple[Row, ...]
+    summary: MutationSummary = dataclasses.field(default_factory=MutationSummary)
 
     def __post_init__(self) -> None:
         """Materialize the result columns and rows as tuples."""
@@ -123,6 +160,7 @@ class QueryResult:
 
 
 __all__ = [
+    "MutationSummary",
     "QueryResult",
     "Row",
 ]

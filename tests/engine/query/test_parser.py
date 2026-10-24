@@ -7,13 +7,19 @@ import pytest
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Create,
+    Delete,
     FunctionCall,
     IsNull,
     ListLiteral,
     Literal,
+    Match,
     Operators,
     Parameter,
     Property,
+    Remove,
+    Return,
+    Set,
     Star,
     Unary,
     Variable,
@@ -25,33 +31,70 @@ from pygrafito.model import Direction, QuerySemanticError, QuerySyntaxError
 class TestAcceptedSyntax:
     """Verify accepted statements and their parsed shape."""
 
-    def parse(self, text: str) -> object:
-        return Parser.parse_statement(text)
+    @staticmethod
+    def match(statement: object) -> Match:
+        """Return the MATCH clause of a parsed statement.
+
+        Parameters
+        ----------
+        statement : object
+            Parsed statement.
+
+        Returns
+        -------
+        Match
+            First match clause.
+        """
+        return next(
+            clause
+            for clause in statement.clauses  # type: ignore[attr-defined]
+            if isinstance(clause, Match)
+        )
+
+    @staticmethod
+    def returned(statement: object) -> Return:
+        """Return the RETURN clause of a parsed statement.
+
+        Parameters
+        ----------
+        statement : object
+            Parsed statement.
+
+        Returns
+        -------
+        Return
+            Final return clause.
+        """
+        return next(
+            clause
+            for clause in statement.clauses  # type: ignore[attr-defined]
+            if isinstance(clause, Return)
+        )
 
     def test_minimal_query(self) -> None:
         statement = Parser.parse_statement("MATCH (n:Program) RETURN n.designation AS name")
-        assert len(statement.pattern.nodes) == 1
-        assert statement.pattern.nodes[0].labels == ("Program",)
-        assert statement.return_items[0].alias == "name"
-        assert statement.return_items[0].text == "n.designation"
+        assert len(self.match(statement).pattern.nodes) == 1
+        assert self.match(statement).pattern.nodes[0].labels == ("Program",)
+        assert self.returned(statement).items[0].alias == "name"
+        assert self.returned(statement).items[0].text == "n.designation"
 
     def test_keywords_are_case_insensitive(self) -> None:
         statement = Parser.parse_statement("match (n) where true return n")
-        assert statement.where == Literal(value=True)
+        assert self.match(statement).where == Literal(value=True)
 
     def test_keyword_casing_does_not_change_identifiers(self) -> None:
         statement = Parser.parse_statement("MATCH (n:Program) RETURN n")
-        assert statement.pattern.nodes[0].labels == ("Program",)
+        assert self.match(statement).pattern.nodes[0].labels == ("Program",)
 
     def test_comments_are_ignored(self) -> None:
         statement = Parser.parse_statement("MATCH // line\n (n) /* block */ RETURN n // trailing")
-        assert statement.pattern.nodes[0].variable == "n"
+        assert self.match(statement).pattern.nodes[0].variable == "n"
 
     def test_node_labels_and_properties(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (p:Program:ISO {designation: 'Quorra', cycles: $cycles}) RETURN p"
         )
-        node = statement.pattern.nodes[0]
+        node = self.match(statement).pattern.nodes[0]
         assert node.labels == ("Program", "ISO")
         assert [entry.key for entry in node.properties] == ["designation", "cycles"]
         cycles = node.properties[1].value
@@ -60,29 +103,29 @@ class TestAcceptedSyntax:
 
     def test_anonymous_node_and_relationship(self) -> None:
         statement = Parser.parse_statement("MATCH (:Program)-[]->(:Program) RETURN 1")
-        assert statement.pattern.nodes[0].variable is None
-        assert statement.pattern.relationships[0].variable is None
-        assert statement.pattern.nodes[1].variable is None
+        assert self.match(statement).pattern.nodes[0].variable is None
+        assert self.match(statement).pattern.relationships[0].variable is None
+        assert self.match(statement).pattern.nodes[1].variable is None
 
     def test_path_variable(self) -> None:
         statement = Parser.parse_statement("MATCH p = (a)-[r]->(b) RETURN p")
-        assert statement.pattern.variable == "p"
+        assert self.match(statement).pattern.variable == "p"
 
     def test_relationship_directions(self) -> None:
         outgoing = Parser.parse_statement("MATCH (a)-->(b) RETURN b")
         incoming = Parser.parse_statement("MATCH (a)<--(b) RETURN b")
         both = Parser.parse_statement("MATCH (a)--(b) RETURN b")
         bracketed = Parser.parse_statement("MATCH (a)-[r]-(b) RETURN b")
-        assert outgoing.pattern.relationships[0].direction is Direction.OUTGOING
-        assert incoming.pattern.relationships[0].direction is Direction.INCOMING
-        assert both.pattern.relationships[0].direction is Direction.BOTH
-        assert bracketed.pattern.relationships[0].direction is Direction.BOTH
+        assert self.match(outgoing).pattern.relationships[0].direction is Direction.OUTGOING
+        assert self.match(incoming).pattern.relationships[0].direction is Direction.INCOMING
+        assert self.match(both).pattern.relationships[0].direction is Direction.BOTH
+        assert self.match(bracketed).pattern.relationships[0].direction is Direction.BOTH
 
     def test_relationship_types_and_properties(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (a)-[r:ALLIES_WITH|TRUSTS {since_cycle: 2020}]->(b) RETURN r"
         )
-        relationship = statement.pattern.relationships[0]
+        relationship = self.match(statement).pattern.relationships[0]
         assert relationship.types == ("ALLIES_WITH", "TRUSTS")
         assert relationship.properties[0].key == "since_cycle"
         assert relationship.direction is Direction.OUTGOING
@@ -91,28 +134,28 @@ class TestAcceptedSyntax:
         statement = Parser.parse_statement(
             "MATCH (a:Program)-[:ALLIES_WITH]->(b)-[:TRUSTS]->(c) RETURN c"
         )
-        assert len(statement.pattern.nodes) == 3
-        assert len(statement.pattern.relationships) == 2
+        assert len(self.match(statement).pattern.nodes) == 3
+        assert len(self.match(statement).pattern.relationships) == 2
 
     def test_backtick_identifiers(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (`a.b`:`Grid Node`)-[`r.x`:`GRID LINK` {`a.b`: 1}]->(b) "
             "RETURN `a.b`.`a.b` AS `the value`"
         )
-        node = statement.pattern.nodes[0]
+        node = self.match(statement).pattern.nodes[0]
         assert node.variable == "a.b"
         assert node.labels == ("Grid Node",)
-        relationship = statement.pattern.relationships[0]
+        relationship = self.match(statement).pattern.relationships[0]
         assert relationship.variable == "r.x"
         assert relationship.types == ("GRID LINK",)
         assert relationship.properties[0].key == "a.b"
-        assert statement.return_items[0].alias == "the value"
+        assert self.returned(statement).items[0].alias == "the value"
 
     def test_property_map_with_list_and_negative_number(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (n {tags: ['ISO', 'Program'], offset: -3}) RETURN n"
         )
-        values = [entry.value for entry in statement.pattern.nodes[0].properties]
+        values = [entry.value for entry in self.match(statement).pattern.nodes[0].properties]
         assert isinstance(values[0], ListLiteral)
         assert isinstance(values[1], Unary)
 
@@ -122,27 +165,29 @@ class TestAcceptedSyntax:
             "RETURN DISTINCT n.designation AS name, n.cycles "
             "ORDER BY n.cycles DESC, name ASC SKIP 2 LIMIT 5;"
         )
-        assert isinstance(statement.where, Binary)
-        assert statement.distinct
-        assert statement.order_by[0].descending
-        second_sort = statement.order_by[1].expression
+        assert isinstance(self.match(statement).where, Binary)
+        assert self.returned(statement).distinct
+        assert self.returned(statement).order_by[0].descending
+        second_sort = self.returned(statement).order_by[1].expression
         assert isinstance(second_sort, Variable)
         assert second_sort.name == "name"
-        assert statement.skip == Literal(value=2)
-        assert statement.limit == Literal(value=5)
+        assert self.returned(statement).skip == Literal(value=2)
+        assert self.returned(statement).limit == Literal(value=5)
 
     def test_parameterized_pagination(self) -> None:
         statement = Parser.parse_statement("MATCH (n) RETURN n SKIP $skip LIMIT $limit")
-        assert isinstance(statement.skip, Parameter)
-        assert statement.skip.name == "skip"
-        assert isinstance(statement.limit, Parameter)
-        assert statement.limit.name == "limit"
+        skip = self.returned(statement).skip
+        limit = self.returned(statement).limit
+        assert isinstance(skip, Parameter)
+        assert skip.name == "skip"
+        assert isinstance(limit, Parameter)
+        assert limit.name == "limit"
 
     def test_function_calls(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (n) RETURN count(*), count(DISTINCT n.designation), labels(n)"
         )
-        first, second, third = statement.return_items
+        first, second, third = self.returned(statement).items
         assert isinstance(first.expression, FunctionCall)
         assert isinstance(first.expression.arguments[0], Star)
         assert isinstance(second.expression, FunctionCall)
@@ -152,7 +197,7 @@ class TestAcceptedSyntax:
 
     def test_numeric_and_boolean_literals(self) -> None:
         statement = Parser.parse_statement("MATCH (n) RETURN 36, 36.5, 'text', true, false, null")
-        expressions = [item.expression for item in statement.return_items]
+        expressions = [item.expression for item in self.returned(statement).items]
         assert all(isinstance(expression, Literal) for expression in expressions)
         literals = [
             expression.value for expression in expressions if isinstance(expression, Literal)
@@ -168,13 +213,13 @@ class TestAcceptedSyntax:
 
     def test_list_literal(self) -> None:
         statement = Parser.parse_statement("MATCH (n) RETURN [1, 2, n.cycles]")
-        expression = statement.return_items[0].expression
+        expression = self.returned(statement).items[0].expression
         assert isinstance(expression, ListLiteral)
         assert len(expression.items) == 3
 
     def test_operator_precedence(self) -> None:
         statement = Parser.parse_statement("MATCH (n) RETURN n.cycles + n.cycles * 2")
-        expression = statement.return_items[0].expression
+        expression = self.returned(statement).items[0].expression
         assert isinstance(expression, Binary)
         assert expression.operator == Operators.ADD
         assert isinstance(expression.right, Binary)
@@ -184,7 +229,7 @@ class TestAcceptedSyntax:
         statement = Parser.parse_statement(
             "MATCH (n) WHERE NOT n.active AND n.visible OR n.pinned RETURN n"
         )
-        expression = statement.where
+        expression = self.match(statement).where
         assert isinstance(expression, Binary)
         assert expression.operator == Operators.OR
         assert isinstance(expression.left, Binary)
@@ -193,40 +238,44 @@ class TestAcceptedSyntax:
 
     def test_parentheses_change_grouping(self) -> None:
         statement = Parser.parse_statement("MATCH (n) RETURN (n.cycles + n.cycles) * n.cycles")
-        expression = statement.return_items[0].expression
+        expression = self.returned(statement).items[0].expression
         assert isinstance(expression, Binary)
         assert expression.operator == Operators.MULTIPLY
         assert isinstance(expression.left, Binary)
 
     def test_unary_minus_and_positive(self) -> None:
         statement = Parser.parse_statement("MATCH (n) RETURN -1, +2")
-        assert isinstance(statement.return_items[0].expression, Unary)
-        assert isinstance(statement.return_items[1].expression, Unary)
+        assert isinstance(self.returned(statement).items[0].expression, Unary)
+        assert isinstance(self.returned(statement).items[1].expression, Unary)
 
     def test_comparisons_and_membership(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (n) WHERE n.cycles >= 36 AND n.designation IN ['Quorra', 'Tron'] RETURN n"
         )
-        assert statement.where is not None
-        assert isinstance(statement.where, Binary)
+        assert self.match(statement).where is not None
+        assert isinstance(self.match(statement).where, Binary)
 
     def test_not_equal_spellings_are_normalized(self) -> None:
         first = Parser.parse_statement("MATCH (n) WHERE n.cycles != 36 RETURN n")
         second = Parser.parse_statement("MATCH (n) WHERE n.cycles <> 36 RETURN n")
-        assert isinstance(first.where, Binary)
-        assert isinstance(second.where, Binary)
-        assert first.where.operator == Operators.NOT_EQUAL
-        assert second.where.operator == Operators.NOT_EQUAL
+        first_where = self.match(first).where
+        second_where = self.match(second).where
+        assert isinstance(first_where, Binary)
+        assert isinstance(second_where, Binary)
+        assert first_where.operator == Operators.NOT_EQUAL
+        assert second_where.operator == Operators.NOT_EQUAL
 
     def test_null_tests(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (n) WHERE n.cycles IS NULL OR n.designation IS NOT NULL RETURN n"
         )
-        assert isinstance(statement.where, Binary)
-        assert isinstance(statement.where.left, IsNull)
-        assert not statement.where.left.negated
-        assert isinstance(statement.where.right, IsNull)
-        assert statement.where.right.negated
+        assert isinstance(self.match(statement).where, Binary)
+        where = self.match(statement).where
+        assert isinstance(where, Binary)
+        assert isinstance(where.left, IsNull)
+        assert not where.left.negated
+        assert isinstance(where.right, IsNull)
+        assert where.right.negated
 
     def test_string_predicates(self) -> None:
         statement = Parser.parse_statement(
@@ -234,14 +283,15 @@ class TestAcceptedSyntax:
             "AND n.designation ENDS WITH 'ra' "
             "AND n.designation CONTAINS 'orr' RETURN n"
         )
-        assert isinstance(statement.where, Binary)
-        assert statement.where.operator == Operators.AND
-        assert isinstance(statement.where.left, Binary)
-        assert statement.where.left.operator == Operators.AND
+        where = self.match(statement).where
+        assert isinstance(where, Binary)
+        assert where.operator == Operators.AND
+        assert isinstance(where.left, Binary)
+        assert where.left.operator == Operators.AND
 
     def test_property_access_chain(self) -> None:
         statement = Parser.parse_statement("MATCH (n) RETURN properties(n).cycles")
-        expression = statement.return_items[0].expression
+        expression = self.returned(statement).items[0].expression
         assert isinstance(expression, Property)
         assert isinstance(expression.target, FunctionCall)
         assert expression.target.name == "properties"
@@ -264,6 +314,11 @@ class TestParserErrors:
             ("MATCH (n) RETURN n trailing", 1, 20, "unexpected token"),
             ("MATCH (n) RETURN n ORDER n", 1, 26, "expected BY"),
             ("MATCH (n)-[r RETURN n", 1, 14, "expected ']'"),
+            ("MATCH (a) MATCH (b) RETURN a", 1, 11, "only one MATCH clause"),
+            ("MATCH (a) RETURN a RETURN a", 1, 20, "only one RETURN clause"),
+            ("MATCH (a) RETURN a CREATE (b)", 1, 20, "RETURN must be the final clause"),
+            ("CREATE (a) MATCH (b) RETURN b", 1, 12, "must precede every write clause"),
+            ("MATCH (a) DETACH (b)", 1, 18, "expected DELETE after DETACH"),
         ],
     )
     def test_syntax_error_positions(
@@ -286,18 +341,11 @@ class TestParserErrors:
             ("MATCH (a)-[*]->(b) RETURN b", "variable-length"),
             ("MATCH (a)-[:ALLIES_WITH*]->(b) RETURN b", "variable-length"),
             ("MATCH (a), (b) RETURN a", "multiple path patterns"),
-            ("MATCH (a) MATCH (b) RETURN a", "multiple MATCH"),
             ("OPTIONAL MATCH (a) RETURN a", "OPTIONAL MATCH"),
             ("MATCH (a) OPTIONAL MATCH (b) RETURN a", "OPTIONAL MATCH"),
             ("MATCH (a) WITH a RETURN a", "WITH"),
             ("MATCH (a) UNWIND [1] AS x RETURN a", "UNWIND"),
-            ("CREATE (a) RETURN a", "CREATE"),
-            ("MATCH (a) CREATE (b) RETURN a", "CREATE"),
             ("MATCH (a) MERGE (b) RETURN a", "MERGE"),
-            ("MATCH (a) SET a.x = 1 RETURN a", "SET"),
-            ("MATCH (a) REMOVE a.x RETURN a", "REMOVE"),
-            ("MATCH (a) DELETE a RETURN a", "DELETE"),
-            ("MATCH (a) DETACH DELETE a RETURN a", "DETACH"),
             ("MATCH (a) RETURN CASE WHEN true THEN 1 END", "CASE"),
             ("MATCH (a) RETURN {x: 1}", "map literals"),
             ("MATCH (a) RETURN a.list[0]", "index access"),
@@ -324,3 +372,65 @@ class TestParserErrors:
     def test_star_outside_count_is_rejected_by_semantics(self) -> None:
         with pytest.raises(QuerySyntaxError):
             Parser.parse_statement("MATCH (n) RETURN *")
+
+
+class TestWriteClauses:
+    """Verify the parsed shape of write clauses and their order."""
+
+    def test_write_only_statement(self) -> None:
+        statement = Parser.parse_statement("CREATE (n:Program {designation: 'Quorra'})")
+        assert len(statement.clauses) == 1
+        clause = statement.clauses[0]
+        assert isinstance(clause, Create)
+        assert clause.pattern.nodes[0].labels == ("Program",)
+
+    def test_match_set_without_return(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) SET n.cycles = 1")
+        assert [type(clause) for clause in statement.clauses] == [Match, Set]
+        set_clause = statement.clauses[1]
+        assert isinstance(set_clause, Set)
+        assert set_clause.assignments[0].variable == "n"
+        assert set_clause.assignments[0].key == "cycles"
+
+    def test_create_from_match(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r:TRUSTS]->(b)"
+        )
+        assert [type(clause) for clause in statement.clauses] == [Match, Create]
+        created = statement.clauses[1]
+        assert isinstance(created, Create)
+        assert created.pattern.relationships[0].types == ("TRUSTS",)
+
+    def test_set_labels_and_expressions(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (n:Program) SET n.cycles = n.cycles + 1, n:SystemMonitor"
+        )
+        clause = statement.clauses[1]
+        assert isinstance(clause, Set)
+        assert isinstance(clause.assignments[0].value, Binary)
+        assert clause.labels[0].labels == ("SystemMonitor",)
+
+    def test_remove_properties_and_labels(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) REMOVE n.cycles, n:ISO:Program")
+        clause = statement.clauses[1]
+        assert isinstance(clause, Remove)
+        assert clause.properties[0].key == "cycles"
+        assert clause.labels[0].labels == ("ISO", "Program")
+
+    def test_delete_targets(self) -> None:
+        statement = Parser.parse_statement("MATCH (a)-[r]->(b) DELETE b, r")
+        clause = statement.clauses[1]
+        assert isinstance(clause, Delete)
+        assert clause.variables == ("b", "r")
+        assert not clause.detach
+
+    def test_detach_delete(self) -> None:
+        statement = Parser.parse_statement("MATCH (a) DETACH DELETE a")
+        clause = statement.clauses[1]
+        assert isinstance(clause, Delete)
+        assert clause.variables == ("a",)
+        assert clause.detach
+
+    def test_write_then_return(self) -> None:
+        statement = Parser.parse_statement("CREATE (n:Program) RETURN n.designation AS name")
+        assert [type(clause) for clause in statement.clauses] == [Create, Return]

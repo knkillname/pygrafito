@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
-"""Table-driven conformance suite for the read-only dialect."""
+"""Table-driven conformance suite for the dialect."""
 
 import dataclasses
 from collections.abc import Iterator
@@ -172,6 +172,28 @@ class TestConformance:
     def test_conformance(self, graph: Graph, case: Case) -> None:
         result = graph.query(case.query, case.parameters)
         assert tuple(tuple(row.values()) for row in result) == case.expected
+
+    def test_write_conformance(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Kevin Flynn'}) "
+            "SET n.cycles = 37 RETURN n.cycles AS cycles"
+        )
+        assert tuple(tuple(row.values()) for row in result) == ((37,),)
+        assert result.summary.properties_set == 1
+
+    def test_write_deduplication_conformance(self, graph: Graph) -> None:
+        result = graph.query("MATCH (a)-[:ALLIES_WITH]->(b {designation: 'Clu'}) SET b.cycles = 1")
+        assert result.summary.properties_set == 1
+        clu = next(iter(graph.find_nodes("Program", designation="Clu")))
+        assert clu["cycles"] == 1
+
+    def test_create_conformance(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Kevin Flynn'}) "
+            "CREATE (m:ISO {designation: 'Quorra'}) RETURN m.designation AS name"
+        )
+        assert tuple(tuple(row.values()) for row in result) == (("Quorra",),)
+        assert result.summary.created_nodes == 1
 
     def test_path_conformance(self, graph: Graph) -> None:
         result = graph.query("MATCH p = (a {designation: 'Kevin Flynn'})-[:TRUSTS]->(b) RETURN p")

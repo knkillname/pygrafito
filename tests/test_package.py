@@ -65,6 +65,7 @@ class TestPackage:
             "Direction",
             "Graph",
             "GraphClosedError",
+            "MutationSummary",
             "Node",
             "NotFoundError",
             "Path",

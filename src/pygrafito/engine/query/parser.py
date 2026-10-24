@@ -1,26 +1,37 @@
 # SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
-"""Recursive-descent and Pratt parser for the read-only query language."""
+"""Recursive-descent and Pratt parser for the query language."""
 
 import typing
 from collections.abc import Sequence
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Clause,
+    Create,
+    Delete,
     Expression,
     FunctionCall,
     IsNull,
+    LabelAssignment,
+    LabelRemoval,
     ListLiteral,
     Literal,
+    Match,
     NodePattern,
     Operators,
     Parameter,
     PathPattern,
     Property,
+    PropertyAssignment,
     PropertyEntry,
+    PropertyRemoval,
     RelationshipPattern,
+    Remove,
+    Return,
     ReturnItem,
+    Set,
     SortItem,
     Star,
     Statement,
@@ -28,7 +39,7 @@ from pygrafito.engine.query.ast import (
     Variable,
 )
 from pygrafito.engine.query.lexer import Lexer
-from pygrafito.engine.query.tokens import Keyword, Token, TokenKind
+from pygrafito.engine.query.tokens import Keyword, Span, Token, TokenKind
 from pygrafito.model import Direction, QuerySemanticError, QuerySyntaxError
 
 
@@ -56,12 +67,7 @@ class Parser:
         {
             Keyword.WITH,
             Keyword.UNWIND,
-            Keyword.CREATE,
             Keyword.MERGE,
-            Keyword.SET,
-            Keyword.REMOVE,
-            Keyword.DELETE,
-            Keyword.DETACH,
             Keyword.CASE,
         }
     )
@@ -102,24 +108,343 @@ class Parser:
         QuerySemanticError
             If the statement uses a recognized but unsupported construct.
         """
+        clauses: list[Clause] = []
+        first = self._current()
+        while not self._at_statement_end():
+            clauses.append(self._next_clause(clauses))
+        self._validate_clause_shape(clauses, first)
+        self._match_punctuation(";")
+        if self._current().kind is not TokenKind.EOF:
+            if self._current().kind is TokenKind.KEYWORD:
+                self._reject_unsupported(
+                    self._current(),
+                    "multiple statements are not supported",
+                )
+            self._fail_syntax("unexpected token after the statement", self._current())
+        return Statement(clauses=tuple(clauses))
+
+    def _at_statement_end(self) -> bool:
+        """Report whether the clause loop reached the end of the statement.
+
+        Returns
+        -------
+        bool
+            ``True`` at end of input or at a statement terminator.
+        """
         current = self._current()
-        if current.is_keyword(Keyword.OPTIONAL) and self._peek(1).is_keyword(Keyword.MATCH):
-            self._reject_unsupported(current, "OPTIONAL MATCH is not supported")
-        if current.kind is TokenKind.KEYWORD and Keyword(current.value) in self.UNSUPPORTED_CLAUSES:
-            self._reject_unsupported(current, f"{current.value} is not supported")
-        if current.is_keyword(Keyword.CALL):
-            self._reject_unsupported(current, "subqueries are not supported")
-        if not current.is_keyword(Keyword.MATCH):
-            self._fail_syntax("expected a MATCH clause", current)
-        self._advance()
-        pattern = self._path_pattern()
-        if self._match_punctuation(","):
-            self._reject_unsupported(self._previous(), "multiple path patterns are not supported")
+        return current.kind is TokenKind.EOF or (
+            current.kind is TokenKind.PUNCTUATION and current.value == ";"
+        )
+
+    def _next_clause(self, parsed: Sequence[Clause]) -> Clause:
+        """Parse one clause after checking its position.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed, used for order checks.
+
+        Returns
+        -------
+        Clause
+            Parsed clause.
+        """
+        current = self._current()
+        self._reject_unsupported_clause(current)
+        if current.is_keyword(Keyword.MATCH):
+            self._guard_match_position(parsed, current)
+            self._advance()
+            return self._match_clause()
+        if current.is_keyword(Keyword.CREATE):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            return Create(pattern=self._clause_pattern())
+        if current.is_keyword(Keyword.SET):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            return self._set_clause()
+        if current.is_keyword(Keyword.REMOVE):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            return self._remove_clause()
+        if current.is_keyword(Keyword.DELETE):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            return self._delete_clause(detach=False)
+        if current.is_keyword(Keyword.DETACH):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            self._expect_keyword(Keyword.DELETE, "expected DELETE after DETACH")
+            return self._delete_clause(detach=True)
+        if current.is_keyword(Keyword.RETURN):
+            self._guard_return_position(parsed, current)
+            self._advance()
+            return self._return_clause()
+        self._fail_syntax(f"unexpected token {current.text!r}", current)
+
+    @staticmethod
+    def _has_clause(parsed: Sequence[Clause], kinds: tuple[type[object], ...]) -> bool:
+        """Report whether a clause of one of the given kinds was parsed.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed.
+        kinds : tuple[type[object], ...]
+            Clause classes to look for.
+
+        Returns
+        -------
+        bool
+            ``True`` when a clause of any given kind is present.
+        """
+        return any(isinstance(clause, kinds) for clause in parsed)
+
+    def _guard_match_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a misplaced ``MATCH`` clause.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed.
+        token : Token
+            Offending keyword.
+        """
+        if self._has_clause(parsed, (Match,)):
+            self._fail_syntax("a statement may contain only one MATCH clause", token)
+        if self._has_clause(parsed, (Create, Set, Remove, Delete)):
+            self._fail_syntax("a MATCH clause must precede every write clause", token)
+        if self._has_clause(parsed, (Return,)):
+            self._fail_syntax("RETURN must be the final clause", token)
+
+    def _guard_write_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a write clause that follows ``RETURN``.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed.
+        token : Token
+            Offending keyword.
+        """
+        if self._has_clause(parsed, (Return,)):
+            self._fail_syntax("RETURN must be the final clause", token)
+
+    def _guard_return_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a second ``RETURN`` clause.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed.
+        token : Token
+            Offending keyword.
+        """
+        if self._has_clause(parsed, (Return,)):
+            self._fail_syntax("a statement may contain only one RETURN clause", token)
+
+    def _validate_clause_shape(self, clauses: Sequence[Clause], first: Token) -> None:
+        """Require a read statement to carry both ``MATCH`` and ``RETURN``.
+
+        Parameters
+        ----------
+        clauses : Sequence[Clause]
+            Parsed clauses in source order.
+        first : Token
+            First token of the statement, used for the missing-clause position.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the statement has no clause, or has no write clause and omits
+            ``MATCH`` or ``RETURN``.
+        """
+        if not clauses:
+            self._fail_syntax("expected a MATCH clause", first)
+        is_write = any(isinstance(clause, (Create, Set, Remove, Delete)) for clause in clauses)
+        has_match = any(isinstance(clause, Match) for clause in clauses)
+        has_return = any(isinstance(clause, Return) for clause in clauses)
+        if is_write:
+            return
+        if not has_match:
+            self._fail_syntax("expected a MATCH clause", first)
+        if not has_return:
+            self._fail_syntax("expected a RETURN clause", self._current())
+
+    def _require_not_after_return(self, seen_return: bool, token: Token) -> None:
+        """Reject a clause that follows ``RETURN``.
+
+        Parameters
+        ----------
+        seen_return : bool
+            Whether a ``RETURN`` clause was already parsed.
+        token : Token
+            Offending clause keyword.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If ``RETURN`` was already parsed.
+        """
+        if seen_return:
+            self._fail_syntax("RETURN must be the final clause", token)
+
+    def _reject_unsupported_clause(self, token: Token) -> None:
+        """Reject a recognized clause that this dialect does not support.
+
+        Parameters
+        ----------
+        token : Token
+            Current token.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the token starts an unsupported construct.
+        """
+        if token.is_keyword(Keyword.OPTIONAL) and self._peek(1).is_keyword(Keyword.MATCH):
+            self._reject_unsupported(token, "OPTIONAL MATCH is not supported")
+        if token.is_keyword(Keyword.CALL):
+            self._reject_unsupported(token, "subqueries are not supported")
+        if token.kind is TokenKind.KEYWORD and Keyword(token.value) in self.UNSUPPORTED_CLAUSES:
+            self._reject_unsupported(token, f"{token.value} is not supported")
+
+    def _match_clause(self) -> Match:
+        """Parse the pattern and optional filter of a ``MATCH`` clause.
+
+        Returns
+        -------
+        Match
+            Parsed match clause.
+        """
+        pattern = self._clause_pattern()
         where: Expression | None = None
         if self._match_keyword(Keyword.WHERE):
             where = self._expression()
-        self._reject_trailing_clauses()
-        self._expect_keyword(Keyword.RETURN, "expected a RETURN clause")
+        return Match(pattern=pattern, where=where)
+
+    def _clause_pattern(self) -> PathPattern:
+        """Parse exactly one path pattern for a clause.
+
+        Returns
+        -------
+        PathPattern
+            Parsed path pattern.
+        """
+        pattern = self._path_pattern()
+        if self._check_punctuation(","):
+            self._reject_unsupported(
+                self._current(),
+                "multiple path patterns are not supported",
+            )
+        return pattern
+
+    def _set_clause(self) -> Set:
+        """Parse the assignments of a ``SET`` clause.
+
+        Returns
+        -------
+        Set
+            Parsed set clause.
+        """
+        assignments: list[PropertyAssignment] = []
+        labels: list[LabelAssignment] = []
+        while True:
+            variable, span = self._variable_reference("SET")
+            if self._match_punctuation("."):
+                key = self._property_key()
+                self._expect_operator("=", "expected '=' in a SET assignment")
+                assignments.append(
+                    PropertyAssignment(
+                        variable=variable,
+                        key=key,
+                        value=self._expression(),
+                        span=span,
+                    )
+                )
+            elif self._check_punctuation(":"):
+                labels.append(
+                    LabelAssignment(
+                        variable=variable,
+                        labels=self._label_list("a node label"),
+                        span=span,
+                    )
+                )
+            else:
+                self._fail_syntax(
+                    "expected '.key = value' or ':Label' after a SET target",
+                    self._current(),
+                )
+            if not self._match_punctuation(","):
+                break
+        return Set(assignments=tuple(assignments), labels=tuple(labels))
+
+    def _remove_clause(self) -> Remove:
+        """Parse the removals of a ``REMOVE`` clause.
+
+        Returns
+        -------
+        Remove
+            Parsed remove clause.
+        """
+        properties: list[PropertyRemoval] = []
+        labels: list[LabelRemoval] = []
+        while True:
+            variable, span = self._variable_reference("REMOVE")
+            if self._match_punctuation("."):
+                properties.append(
+                    PropertyRemoval(
+                        variable=variable,
+                        key=self._property_key(),
+                        span=span,
+                    )
+                )
+            elif self._check_punctuation(":"):
+                labels.append(
+                    LabelRemoval(
+                        variable=variable,
+                        labels=self._label_list("a node label"),
+                        span=span,
+                    )
+                )
+            else:
+                self._fail_syntax(
+                    "expected '.key' or ':Label' after a REMOVE target",
+                    self._current(),
+                )
+            if not self._match_punctuation(","):
+                break
+        return Remove(properties=tuple(properties), labels=tuple(labels))
+
+    def _delete_clause(self, *, detach: bool) -> Delete:
+        """Parse the targets of a ``DELETE`` or ``DETACH DELETE`` clause.
+
+        Parameters
+        ----------
+        detach : bool
+            Whether the clause was written as ``DETACH DELETE``.
+
+        Returns
+        -------
+        Delete
+            Parsed delete clause.
+        """
+        variables: list[str] = []
+        while True:
+            name, _span = self._variable_reference("DELETE")
+            variables.append(name)
+            if not self._match_punctuation(","):
+                break
+        return Delete(variables=tuple(variables), detach=detach)
+
+    def _return_clause(self) -> Return:
+        """Parse a ``RETURN`` clause and its pagination.
+
+        Returns
+        -------
+        Return
+            Parsed return clause.
+        """
         distinct = self._match_keyword(Keyword.DISTINCT)
         items = [self._return_item()]
         while self._match_punctuation(","):
@@ -131,42 +456,52 @@ class Parser:
             skip = self._expression()
         if self._match_keyword(Keyword.LIMIT):
             limit = self._expression()
-        self._reject_trailing_clauses()
-        self._match_punctuation(";")
-        if self._current().kind is not TokenKind.EOF:
-            if self._current().kind is TokenKind.KEYWORD:
-                self._reject_unsupported(
-                    self._current(),
-                    "multiple statements are not supported",
-                )
-            self._fail_syntax("unexpected token after the statement", self._current())
-        return Statement(
-            pattern=pattern,
-            return_items=tuple(items),
-            where=where,
+        return Return(
+            items=tuple(items),
             distinct=distinct,
             order_by=order_by,
             skip=skip,
             limit=limit,
         )
 
-    def _reject_trailing_clauses(self) -> None:
-        """Reject unsupported or misplaced clauses at the current position.
+    def _variable_reference(self, clause: str) -> tuple[str, Span | None]:
+        """Parse the variable named by a write clause.
 
-        Raises
-        ------
-        QuerySemanticError
-            If a recognized unsupported clause appears.
+        Parameters
+        ----------
+        clause : str
+            Clause name used in the error message.
+
+        Returns
+        -------
+        tuple[str, Span | None]
+            Variable name and its source span.
         """
-        current = self._current()
-        if current.is_keyword(Keyword.OPTIONAL) and self._peek(1).is_keyword(Keyword.MATCH):
-            self._reject_unsupported(current, "OPTIONAL MATCH is not supported")
-        if current.is_keyword(Keyword.MATCH):
-            self._reject_unsupported(current, "multiple MATCH clauses are not supported")
-        if current.is_keyword(Keyword.CALL):
-            self._reject_unsupported(current, "subqueries are not supported")
-        if current.kind is TokenKind.KEYWORD and Keyword(current.value) in self.UNSUPPORTED_CLAUSES:
-            self._reject_unsupported(current, f"{current.value} is not supported")
+        token = self._current()
+        if not self._is_identifier(token):
+            self._fail_syntax(f"expected a variable after {clause}", token)
+        self._advance()
+        return self._identifier_text(token), token.span
+
+    def _label_list(self, description: str) -> tuple[str, ...]:
+        """Parse one or more ``:Label`` items.
+
+        Parameters
+        ----------
+        description : str
+            Human-readable description used in the error message.
+
+        Returns
+        -------
+        tuple[str, ...]
+            Parsed labels.
+        """
+        labels: list[str] = []
+        while self._match_punctuation(":"):
+            labels.append(self._label(description))
+        if not labels:
+            self._fail_syntax(f"expected {description}", self._current())
+        return tuple(labels)
 
     def _path_pattern(self) -> PathPattern:
         """Parse one path pattern.

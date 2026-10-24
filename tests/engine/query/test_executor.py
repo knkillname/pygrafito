@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
-"""Execution tests for the read-only query language."""
+"""Execution tests for read statements of the query language."""
 
 import dataclasses
 import typing

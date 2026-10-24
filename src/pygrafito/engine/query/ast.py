@@ -316,17 +316,169 @@ class SortItem:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class Statement:
-    """One complete read-only query statement.
+class Match:
+    """A ``MATCH`` clause.
 
     Parameters
     ----------
     pattern : PathPattern
-        Pattern matched by the query.
-    return_items : tuple[ReturnItem, ...]
-        Projected expressions in output order.
+        Pattern matched by the clause.
     where : Expression | None, optional
         Filter predicate, by default ``None``.
+    """
+
+    pattern: PathPattern
+    where: Expression | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Create:
+    """A ``CREATE`` clause.
+
+    Parameters
+    ----------
+    pattern : PathPattern
+        Pattern whose new elements are created.
+    """
+
+    pattern: PathPattern
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PropertyAssignment:
+    """One ``SET variable.key = value`` assignment.
+
+    Parameters
+    ----------
+    variable : str
+        Bound node or relationship variable.
+    key : str
+        Property key to assign.
+    value : Expression
+        Expression supplying the new value.
+    span : Span | None, optional
+        Source position of the assignment, by default ``None``.
+    """
+
+    variable: str
+    key: str
+    value: Expression
+    span: Span | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LabelAssignment:
+    """One ``SET variable:Label`` label addition.
+
+    Parameters
+    ----------
+    variable : str
+        Bound node variable.
+    labels : tuple[str, ...]
+        Labels to add.
+    span : Span | None, optional
+        Source position of the assignment, by default ``None``.
+    """
+
+    variable: str
+    labels: tuple[str, ...]
+    span: Span | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Set:
+    """A ``SET`` clause.
+
+    Parameters
+    ----------
+    assignments : tuple[PropertyAssignment, ...], optional
+        Property assignments, by default none.
+    labels : tuple[LabelAssignment, ...], optional
+        Label additions, by default none.
+    """
+
+    assignments: tuple[PropertyAssignment, ...] = ()
+    labels: tuple[LabelAssignment, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PropertyRemoval:
+    """One ``REMOVE variable.key`` removal.
+
+    Parameters
+    ----------
+    variable : str
+        Bound node or relationship variable.
+    key : str
+        Property key to remove.
+    span : Span | None, optional
+        Source position of the removal, by default ``None``.
+    """
+
+    variable: str
+    key: str
+    span: Span | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LabelRemoval:
+    """One ``REMOVE variable:Label`` removal.
+
+    Parameters
+    ----------
+    variable : str
+        Bound node variable.
+    labels : tuple[str, ...]
+        Labels to remove.
+    span : Span | None, optional
+        Source position of the removal, by default ``None``.
+    """
+
+    variable: str
+    labels: tuple[str, ...]
+    span: Span | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Remove:
+    """A ``REMOVE`` clause.
+
+    Parameters
+    ----------
+    properties : tuple[PropertyRemoval, ...], optional
+        Property removals, by default none.
+    labels : tuple[LabelRemoval, ...], optional
+        Label removals, by default none.
+    """
+
+    properties: tuple[PropertyRemoval, ...] = ()
+    labels: tuple[LabelRemoval, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Delete:
+    """A ``DELETE`` or ``DETACH DELETE`` clause.
+
+    Parameters
+    ----------
+    variables : tuple[str, ...]
+        Bound node or relationship variables to delete.
+    detach : bool, optional
+        Whether incident relationships are removed first, by default ``False``.
+    """
+
+    variables: tuple[str, ...]
+    detach: bool = False
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Return:
+    """A ``RETURN`` clause.
+
+    Parameters
+    ----------
+    items : tuple[ReturnItem, ...]
+        Projected expressions in output order.
     distinct : bool, optional
         Whether ``RETURN DISTINCT`` was requested, by default ``False``.
     order_by : tuple[SortItem, ...], optional
@@ -337,30 +489,55 @@ class Statement:
         Limit expression, by default ``None``.
     """
 
-    pattern: PathPattern
-    return_items: tuple[ReturnItem, ...]
-    where: Expression | None = None
+    items: tuple[ReturnItem, ...]
     distinct: bool = False
     order_by: tuple[SortItem, ...] = ()
     skip: Expression | None = None
     limit: Expression | None = None
 
 
+type Clause = Match | Create | Set | Remove | Delete | Return
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Statement:
+    """One complete statement as an ordered clause sequence.
+
+    Parameters
+    ----------
+    clauses : tuple[Clause, ...]
+        Clauses in source order.
+    """
+
+    clauses: tuple[Clause, ...]
+
+
 __all__ = [
     "Binary",
+    "Clause",
+    "Create",
+    "Delete",
     "Expression",
     "FunctionCall",
     "IsNull",
+    "LabelAssignment",
+    "LabelRemoval",
     "ListLiteral",
     "Literal",
+    "Match",
     "NodePattern",
     "Operators",
     "Parameter",
     "PathPattern",
     "Property",
+    "PropertyAssignment",
     "PropertyEntry",
+    "PropertyRemoval",
     "RelationshipPattern",
+    "Remove",
+    "Return",
     "ReturnItem",
+    "Set",
     "SortItem",
     "Star",
     "Statement",

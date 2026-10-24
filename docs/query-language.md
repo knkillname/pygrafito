@@ -1,14 +1,15 @@
 # Query language
 
-`pygrafito` includes a read-only, pattern-matching query dialect. A query
-describes a fixed-length path pattern, filters the matches, and projects values
-into a materialized result. The dialect is intentionally small: it supports
-reads only, rejects unsupported syntax instead of ignoring it, and runs through
-indexed SQL joins over the existing property-graph schema.
+`pygrafito` includes a pattern-matching query dialect for reading and writing a
+property graph. A statement describes a fixed-length path pattern, filters the
+matches, mutates them, and projects values into a materialized result. The
+dialect is intentionally small: it rejects unsupported syntax instead of
+ignoring it, and runs through indexed SQL joins over the existing property-graph
+schema.
 
-## Read-only query execution
+## Statement execution
 
-One call executes exactly one read-only statement and returns a materialized
+One call executes exactly one statement and returns a materialized
 `QueryResult`:
 
 ```python
@@ -22,26 +23,30 @@ with Graph.open(":memory:") as graph:
 ```
 
 `Graph.prepare` parses, validates, and plans once, then returns a reusable
-`PreparedQuery`. Statements containing a write clause are rejected before any
-SQL runs and never change data.
+`PreparedQuery`. A statement that contains any write clause is classified as a
+write and runs in its own transaction.
 
 ## Core dialect profile
 
-A statement has this shape:
+A statement is a non-empty ordered sequence of clauses:
 
 ```text
-MATCH <path pattern>
+[MATCH <path pattern>]
 [WHERE <expression>]
-RETURN [DISTINCT] <projection> [, <projection> ...]
-[ORDER BY <sort item> [, <sort item> ...]]
-[SKIP <expression>]
-[LIMIT <expression>]
+[{CREATE | SET | REMOVE | DELETE | DETACH DELETE} ...]
+[RETURN [DISTINCT] <projection> [, <projection> ...]
+ [ORDER BY <sort item> [, <sort item> ...]]
+ [SKIP <expression>]
+ [LIMIT <expression>]]
 [;]
 ```
 
-`MATCH` and `RETURN` are required. There is one path pattern with one or more
-node patterns, one `WHERE` clause, and one `RETURN` clause. Multiple statements,
+`MATCH` is optional when the statement contains a write clause, and `RETURN` is
+optional in that case too. A read statement requires both. Each clause carries
+exactly one path pattern; there is at most one `MATCH`, it precedes every write
+clause, and `RETURN` is at most once and always last. Multiple statements,
 multiple `MATCH` clauses, and multiple path patterns are rejected.
+
 
 ## Node patterns
 
@@ -112,6 +117,64 @@ projected rows remain until `DISTINCT` is requested.
 
 Undirected relationships are expanded from each endpoint, but an undirected
 self-loop is produced once for that node rather than twice.
+
+## Write clauses
+
+A write clause operates on the rows produced by `MATCH`, or on a single empty
+row when the statement has no `MATCH`. Write clauses run in source order, and
+each one observes the mutations of the clauses before it.
+
+### CREATE
+
+`CREATE` creates nodes and relationships from one pattern. A node pattern whose
+variable is not yet bound creates a node; a node pattern whose variable is
+already bound refers to that node. A created relationship needs exactly one
+type, the `-->` direction, and both endpoints already bound:
+
+```python
+graph.query(
+    "MATCH (a:Program {designation: 'Kevin Flynn'})-[x:ALLIES_WITH]->(b) "
+    "CREATE (a)-[r:TRUSTS {since_cycle: 2020}]->(b)"
+)
+graph.query("CREATE (n:Program {designation: 'Quorra', cycles: 37})")
+```
+
+`CREATE` never matches an existing element. Property values in a create pattern
+must be literals or parameters, and a null entry is ignored.
+
+### SET and REMOVE
+
+`SET` assigns a property from an expression, adds labels, or both. `REMOVE`
+removes a property or labels:
+
+```python
+graph.query("MATCH (n:Program) SET n.cycles = n.cycles + 1, n:SystemMonitor")
+graph.query("MATCH (n:Program) REMOVE n.cycles, n:ISO")
+```
+
+Assigning null removes the property. Labels can only be added to or removed from
+nodes. Removing a property or label that is absent leaves the element unchanged.
+
+### DELETE and DETACH DELETE
+
+`DELETE` removes relationships and disconnected nodes. A node that still has an
+incident relationship is rejected unless `DETACH DELETE` is used, which removes
+its incident relationships first:
+
+```python
+graph.query("MATCH (a)-[r:TRUSTS]->(b) DELETE r")
+graph.query("MATCH (n:Program {designation: 'Tron'}) DETACH DELETE n")
+```
+
+A `RETURN` clause can still project an element deleted by the same statement.
+
+### Mutation cardinality
+
+Write clauses operate on rows, not entities. When several rows bind the same
+element, the element is written or deleted once per statement. Property
+assignments keep the value computed from the last row, labels are unioned, and
+deletions are deduplicated. This keeps a diamond or a cycle from writing the
+same element twice or raising a missing-element error on the second row.
 
 ## Value equality and comparison
 
@@ -298,6 +361,17 @@ print(dict(row))
 Row order without `ORDER BY` is unspecified. Result values may be null,
 booleans, integers, floats, strings, lists, maps, or entity and path snapshots.
 
+Every result also exposes a `MutationSummary` with counts of the operations the
+statement applied:
+
+```python
+result = graph.query("MATCH (n:Program {designation: 'Quorra'}) SET n.cycles = 38")
+print(result.summary.properties_set)  # 1
+```
+
+A read statement reports zero counts. A write statement without `RETURN` has no
+columns and no rows, and its summary is the whole result.
+
 ## Prepared queries
 
 `Graph.prepare` returns a `PreparedQuery` that parses and validates the
@@ -313,16 +387,31 @@ print(prepared.columns)  # ('name',)
 names = [row["name"] for row in prepared.execute({"minimum": 36})]
 ```
 
-Syntax and semantic errors are raised during preparation, before any query
+A prepared statement may be a write. Its `columns` are empty when it has no
+`RETURN`:
+
+```python
+prepared = graph.prepare("CREATE (n:Program {designation: $name})")
+print(prepared.columns)  # ()
+prepared.execute({"name": "Quorra"})
+```
+
+Syntax and semantic errors are raised during preparation, before any statement
 executes.
 
 ## Transaction and lifecycle integration
 
-`Transaction.query` runs on the active transaction's connection and observes
-its uncommitted writes without starting or finishing a transaction. `Graph.query`
-and `PreparedQuery.execute` raise `TransactionError` while an explicit
-transaction is active; use `Transaction.query` inside that block. `Graph.prepare`
-is allowed during a transaction because it performs no database work.
+A standalone write statement runs in its own `BEGIN IMMEDIATE` transaction: every
+mutation commits together, and any failure rolls all of them back and leaves no
+transaction open. A read statement uses a deferred read transaction instead.
+
+`Transaction.query` runs read and write statements on the active transaction's
+connection and observes its uncommitted writes without starting or finishing a
+transaction. A write statement there runs inside a savepoint, so a failure undoes
+only that statement and leaves the transaction usable. `Graph.query` and
+`PreparedQuery.execute` raise `TransactionError` while an explicit transaction is
+active; use `Transaction.query` inside that block. `Graph.prepare` is allowed
+during a transaction because it performs no database work.
 
 Using a closed graph handle for `Graph.query`, `Graph.prepare`, or
 `PreparedQuery.execute` raises `GraphClosedError`.
@@ -335,15 +424,23 @@ one-based `line` and `column` attributes when a source position is available.
 Raw SQLite exceptions do not escape: execution failures are raised as
 `QueryExecutionError`.
 
+Write failures follow the same rule. A storage failure such as a protected
+deletion, a missing element, or an invalid stored value is raised as
+`QueryExecutionError` rather than as a storage or domain exception.
+
 ## Consistent execution snapshot
 
-A query evaluates against one consistent graph state. `Graph.query` and
-`PreparedQuery.execute` run inside a short deferred read transaction, materialize
-the projected rows, and close the transaction before returning. Later writes do
-not change an already returned result.
+A statement evaluates against one consistent graph state. `Graph.query` and
+`PreparedQuery.execute` materialize the projected rows and close their
+transaction before returning. Later writes do not change an already returned
+result.
 
-A query executed through an active transaction includes that transaction's
-uncommitted writes and excludes writes from other connections.
+Within a write statement, each clause observes the mutations of the clauses
+before it, so `SET ... RETURN ...` projects the new value and `CREATE ... RETURN`
+projects the created element. A `RETURN` after `DELETE` projects the snapshot
+captured before deletion. A write executed through an active transaction
+includes that transaction's uncommitted writes and excludes writes from other
+connections.
 
 ## Identifier casing and quoting
 
@@ -358,9 +455,20 @@ variables.
 ## Grammar summary
 
 ```text
-statement        = match-clause [where-clause] return-clause
-                   [order-clause] [skip-clause] [limit-clause] [";"]
-match-clause     = "MATCH" path-pattern
+statement        = { clause } [";"]
+clause           = match-clause | create-clause | set-clause
+                 | remove-clause | delete-clause | return-clause
+match-clause     = "MATCH" path-pattern [where-clause]
+create-clause    = "CREATE" path-pattern
+set-clause       = "SET" set-item { "," set-item }
+set-item         = identifier "." key "=" expression
+                 | identifier { ":" label }
+remove-clause    = "REMOVE" remove-item { "," remove-item }
+remove-item      = identifier "." key
+                 | identifier { ":" label }
+delete-clause    = ["DETACH"] "DELETE" identifier { "," identifier }
+return-clause    = "RETURN" ["DISTINCT"] return-item { "," return-item }
+                   [order-clause] [skip-clause] [limit-clause]
 path-pattern     = [identifier "="] node-pattern
                    { relationship-pattern node-pattern }
 node-pattern     = "(" [identifier] { ":" label } [property-map] ")"
@@ -370,7 +478,6 @@ relationship     = "-" [ "[" [identifier] [":" type {"|" type}]
                    [property-map] "]" ] "-"
 property-map     = "{" [ key ":" expression { "," key ":" expression } ] "}"
 where-clause     = "WHERE" expression
-return-clause    = "RETURN" ["DISTINCT"] return-item { "," return-item }
 return-item      = expression [ "AS" identifier ]
 order-clause     = "ORDER" "BY" sort-item { "," sort-item }
 sort-item        = expression [ "ASC" | "DESC" ]
@@ -379,7 +486,8 @@ limit-clause     = "LIMIT" expression
 ```
 
 An identifier is a plain name or a backtick-quoted name. A label, type, key, or
-alias may be backtick-quoted. Expression precedence is listed in
+alias may be backtick-quoted. A write clause may omit `MATCH` and `RETURN`, and
+`RETURN` is always the final clause. Expression precedence is listed in
 [Filtering expressions](#filtering-expressions).
 
 ## Unsupported constructs
@@ -391,7 +499,8 @@ The following are recognized and rejected with a query error before execution:
 - `OPTIONAL MATCH`
 - `WITH`, `UNWIND`, and subqueries (`CALL { ... }`, `EXISTS { ... }`)
 - `CASE` expressions and map literals
-- write clauses: `CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE`, `DETACH DELETE`
+- `MERGE` and conditional updates (`ON CREATE`, `ON MATCH`)
+- whole-map assignment (`SET n = {...}`) and merge assignment (`SET n += {...}`)
 - index access such as `n.list[0]`
 
 These boundaries are deliberate. Extending the dialect requires its own

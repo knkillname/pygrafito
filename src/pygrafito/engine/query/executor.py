@@ -29,6 +29,7 @@ from pygrafito.engine.query.compiler import (
     NodeColumn,
     RelationshipColumns,
 )
+from pygrafito.engine.query.mutation import MutationExecutor
 from pygrafito.engine.query.plan import Plan, PlanOperator
 from pygrafito.engine.query.results import QueryResult, Row
 from pygrafito.engine.query.semantic import Analysis, SortSpec
@@ -43,8 +44,11 @@ from pygrafito.engine.query.values import (
     Values,
 )
 from pygrafito.model import (
+    ConnectedNodeError,
     Node,
+    NotFoundError,
     Path,
+    QueryError,
     QueryExecutionError,
     QuerySemanticError,
     Relationship,
@@ -305,12 +309,16 @@ class QueryExecutor:
         self._database = database
 
     def execute_graph(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
-        """Execute a query inside a short deferred read transaction.
+        """Execute a statement inside its own short transaction.
+
+        Read statements use a deferred transaction; write statements use
+        ``BEGIN IMMEDIATE`` so every mutation of the statement commits or rolls
+        back as one unit.
 
         Parameters
         ----------
         plan : Plan
-            Planned query.
+            Planned statement.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
 
@@ -324,7 +332,7 @@ class QueryExecutor:
         TransactionError
             If the graph handle is closed or an explicit transaction is active.
         QueryExecutionError
-            If SQLite fails while executing the query.
+            If storage fails while executing the statement.
         """
         if self._database is None:
             message = "the executor is not attached to a graph database"
@@ -333,13 +341,20 @@ class QueryExecutor:
         if self._connection.in_transaction:
             message = "a graph transaction is active; use Transaction.query"
             raise TransactionError(message)
+        begin = "BEGIN IMMEDIATE" if plan.analysis.is_write else "BEGIN"
         try:
-            self._connection.execute("BEGIN")
+            self._connection.execute(begin)
         except sqlite3.Error as error:
-            message = "could not start a query read transaction"
+            message = "could not start a query transaction"
             raise TransactionError(message) from error
         try:
             result = self._execute(plan, parameters)
+        except QueryError:
+            self._rollback()
+            raise
+        except (ValidationError, NotFoundError, ConnectedNodeError, TransactionError) as error:
+            self._rollback()
+            raise QueryExecutionError(str(error)) from error
         except sqlite3.Error as error:
             self._rollback()
             message = "query execution failed"
@@ -351,17 +366,20 @@ class QueryExecutor:
             self._connection.execute("COMMIT")
         except sqlite3.Error as error:
             self._rollback()
-            message = "could not finish a query read transaction"
+            message = "could not finish a query transaction"
             raise QueryExecutionError(message) from error
         return result
 
     def execute_active(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
-        """Execute a query on the active transaction's connection.
+        """Execute a statement on the active transaction's connection.
+
+        A write statement runs inside a savepoint, so a failure undoes only that
+        statement's mutations while leaving the caller's transaction usable.
 
         Parameters
         ----------
         plan : Plan
-            Planned query.
+            Planned statement.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
 
@@ -373,13 +391,51 @@ class QueryExecutor:
         Raises
         ------
         QueryExecutionError
-            If SQLite fails while executing the query.
+            If storage fails while executing the statement.
         """
+        savepoint = plan.analysis.is_write
+        if savepoint:
+            self._connection.execute("SAVEPOINT pygrafito_statement")
         try:
-            return self._execute(plan, parameters)
+            result = self._execute(plan, parameters)
+        except QueryError:
+            self._release_savepoint(savepoint, rollback=True)
+            raise
+        except (ValidationError, NotFoundError, ConnectedNodeError, TransactionError) as error:
+            self._release_savepoint(savepoint, rollback=True)
+            raise QueryExecutionError(str(error)) from error
         except sqlite3.Error as error:
+            self._release_savepoint(savepoint, rollback=True)
             message = "query execution failed"
             raise QueryExecutionError(message) from error
+        except BaseException:
+            self._release_savepoint(savepoint, rollback=True)
+            raise
+        self._release_savepoint(savepoint, rollback=False)
+        return result
+
+    def _release_savepoint(self, savepoint: bool, *, rollback: bool) -> None:
+        """Finish the statement savepoint used by an active transaction.
+
+        Parameters
+        ----------
+        savepoint : bool
+            Whether a savepoint was opened for this statement.
+        rollback : bool
+            Whether to roll the savepoint back instead of releasing it.
+        """
+        if not savepoint:
+            return
+        statement = (
+            "ROLLBACK TO SAVEPOINT pygrafito_statement"
+            if rollback
+            else "RELEASE SAVEPOINT pygrafito_statement"
+        )
+        with contextlib.suppress(sqlite3.Error):
+            self._connection.execute(statement)
+        if rollback:
+            with contextlib.suppress(sqlite3.Error):
+                self._connection.execute("RELEASE SAVEPOINT pygrafito_statement")
 
     def _execute(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
         """Execute one plan and materialize its result.
@@ -398,20 +454,35 @@ class QueryExecutor:
         """
         analysis = plan.analysis
         analysis.require_parameters(parameters)
-        skip = self._page_value(analysis.statement.skip, parameters, "SKIP")
-        limit = self._page_value(analysis.statement.limit, parameters, "LIMIT")
-        compiled = Compiler(analysis.statement, self._codec).compile(parameters)
-        bindings = self._match_bindings(compiled)
+        return_clause = analysis.return_clause
+        skip = self._page_value(
+            None if return_clause is None else return_clause.skip,
+            parameters,
+            "SKIP",
+        )
+        limit = self._page_value(
+            None if return_clause is None else return_clause.limit,
+            parameters,
+            "LIMIT",
+        )
         snapshots = RepositorySnapshots(self._nodes, self._relationships)
         functions = ScalarFunctions(snapshots)
         evaluator = ExpressionEvaluator(functions)
-        if compiled.residual is not None:
-            residual = compiled.residual
-            bindings = [
-                binding
-                for binding in bindings
-                if evaluator.evaluate(residual, binding, parameters) is True
-            ]
+        bindings = self._initial_bindings(analysis, parameters, evaluator)
+        mutations = MutationExecutor(self._nodes, self._relationships)
+        if analysis.is_write:
+            bindings = mutations.apply(
+                analysis.statement.clauses,
+                bindings,
+                evaluator,
+                parameters,
+            )
+        if return_clause is None:
+            return QueryResult(
+                columns=(),
+                rows=(),
+                summary=mutations.summary,
+            )
         rows = self._project(
             plan,
             bindings,
@@ -429,7 +500,47 @@ class QueryExecutor:
         return QueryResult(
             columns=analysis.columns,
             rows=tuple(Row(columns=analysis.columns, row_values=row.values) for row in selected),
+            summary=mutations.summary,
         )
+
+    def _initial_bindings(
+        self,
+        analysis: Analysis,
+        parameters: Mapping[str, QueryValue],
+        evaluator: ExpressionEvaluator,
+    ) -> list[dict[str, QueryValue]]:
+        """Produce the bindings that write clauses and projection consume.
+
+        A statement without ``MATCH`` starts from one empty binding, so a
+        standalone ``CREATE`` runs exactly once.
+
+        Parameters
+        ----------
+        analysis : Analysis
+            Static analysis of the statement.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            Match bindings, or one empty binding without a match clause.
+        """
+        match = analysis.match_clause
+        if match is None:
+            return [{}]
+        compiled = Compiler(match, self._codec).compile(parameters)
+        bindings = self._match_bindings(compiled)
+        if compiled.residual is None:
+            return bindings
+        residual = compiled.residual
+        return [
+            binding
+            for binding in bindings
+            if evaluator.evaluate(residual, binding, parameters) is True
+        ]
 
     def _match_bindings(self, compiled: CompiledMatch) -> list[dict[str, QueryValue]]:
         """Run the match SQL and build one variable binding per row.

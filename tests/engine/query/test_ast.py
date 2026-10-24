@@ -9,18 +9,28 @@ import pytest
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Create,
+    Delete,
     FunctionCall,
     IsNull,
+    LabelAssignment,
+    LabelRemoval,
     ListLiteral,
     Literal,
+    Match,
     NodePattern,
     Operators,
     Parameter,
     PathPattern,
     Property,
+    PropertyAssignment,
     PropertyEntry,
+    PropertyRemoval,
     RelationshipPattern,
+    Remove,
+    Return,
     ReturnItem,
+    Set,
     SortItem,
     Star,
     Statement,
@@ -102,16 +112,24 @@ class TestAstNodes:
 
     def test_statement(self) -> None:
         statement = Statement(
-            pattern=PathPattern(nodes=(NodePattern(variable="n"),)),
-            return_items=(ReturnItem(expression=Variable(name="n"), text="n"),),
-            where=Literal(value=True),
-            distinct=True,
-            order_by=(SortItem(expression=Variable(name="n"), descending=True),),
-            skip=Literal(value=1),
-            limit=Literal(value=2),
+            clauses=(
+                Match(
+                    pattern=PathPattern(nodes=(NodePattern(variable="n"),)),
+                    where=Literal(value=True),
+                ),
+                Return(
+                    items=(ReturnItem(expression=Variable(name="n"), text="n"),),
+                    distinct=True,
+                    order_by=(SortItem(expression=Variable(name="n"), descending=True),),
+                    skip=Literal(value=1),
+                    limit=Literal(value=2),
+                ),
+            )
         )
-        assert statement.distinct
-        assert statement.order_by[0].descending
+        returned = statement.clauses[1]
+        assert isinstance(returned, Return)
+        assert returned.distinct
+        assert returned.order_by[0].descending
 
     def test_every_node_is_frozen(self) -> None:
         nodes = [
@@ -134,6 +152,19 @@ class TestAstNodes:
             PathPattern(nodes=(NodePattern(),)),
             ReturnItem(expression=Literal(value=1)),
             SortItem(expression=Literal(value=1)),
+            Match(pattern=PathPattern(nodes=(NodePattern(),))),
+            Create(pattern=PathPattern(nodes=(NodePattern(),))),
+            Set(
+                assignments=(PropertyAssignment(variable="n", key="k", value=Literal(value=1)),),
+                labels=(LabelAssignment(variable="n", labels=("Program",)),),
+            ),
+            Remove(
+                properties=(PropertyRemoval(variable="n", key="k"),),
+                labels=(LabelRemoval(variable="n", labels=("Program",)),),
+            ),
+            Delete(variables=("n",)),
+            Return(items=(ReturnItem(expression=Literal(value=1)),)),
+            Statement(clauses=(Delete(variables=("n",)),)),
         ]
         for node in nodes:
             assert not hasattr(node, "__dict__")

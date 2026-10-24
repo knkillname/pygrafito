@@ -250,11 +250,11 @@ are generated lazily, so stopping iteration early stops further computation.
 
 ## Query language
 
-`Graph.query` runs one read-only pattern query and returns a materialized
-`QueryResult` with ordered columns and immutable rows. A query combines a
-fixed-length `MATCH` pattern with an optional `WHERE` filter and a required
-`RETURN` projection. `DISTINCT`, `ORDER BY`, `SKIP`, and `LIMIT` are supported,
-as are `$name` parameters.
+`Graph.query` executes one statement and returns a materialized `QueryResult`
+with ordered columns and immutable rows. A statement combines an optional
+fixed-length `MATCH` pattern with an optional `WHERE` filter, optional write
+clauses, and an optional `RETURN` projection. `DISTINCT`, `ORDER BY`, `SKIP`, and
+`LIMIT` are supported, as are `$name` parameters.
 
 ```python
 from pygrafito import Graph
@@ -314,10 +314,35 @@ with Graph.open(":memory:") as graph:
     print(prepared.execute({"minimum": 36}).rows[0]["total"])  # 2
 ```
 
-Queries are read-only and reject write clauses. See
-[`docs/query-language.md`](docs/query-language.md) for the complete grammar,
-value and null semantics, functions, aggregation, ordering rules, parameters,
-errors, and the supported core profile.
+A statement can also write. `CREATE` adds nodes and relationships, `SET` and
+`REMOVE` change properties and labels, and `DELETE` or `DETACH DELETE` removes
+elements. `RETURN` is optional and a result exposes a `summary` with the counts
+of the changes applied:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+    quorra = graph.add_node("Program", designation="Quorra", cycles=37)
+    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+
+    created = graph.query(
+        "MATCH (a:Program {designation: 'Kevin Flynn'}) "
+        "CREATE (b:Program {designation: 'Tron', cycles: 40}) "
+        "CREATE (a)-[r:TRUSTS]->(b) "
+        "RETURN b.designation AS name"
+    )
+    print([row["name"] for row in created])  # ['Tron']
+    print(created.summary.created_nodes)  # 1
+
+    graph.query("MATCH (n:Program {designation: 'Quorra'}) SET n:SystemMonitor")
+    print(graph.query("MATCH (n:SystemMonitor) RETURN count(*) AS c").rows[0]["c"])  # 1
+```
+
+See [`docs/query-language.md`](docs/query-language.md) for the complete grammar,
+write clauses, mutation cardinality, value and null semantics, functions,
+aggregation, ordering rules, parameters, errors, and the supported core profile.
 
 ## Persistence
 

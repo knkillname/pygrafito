@@ -8,9 +8,11 @@ import pytest
 from pygrafito.engine.query.ast import (
     FunctionCall,
     Literal,
+    Match,
     NodePattern,
     Parameter,
     PathPattern,
+    Return,
     ReturnItem,
     Statement,
     Variable,
@@ -184,15 +186,19 @@ class TestGroupingAndColumns:
 
     def test_generated_text_when_source_text_is_missing(self) -> None:
         statement = Statement(
-            pattern=PathPattern(nodes=(NodePattern(variable="n"),)),
-            return_items=(
-                ReturnItem(
-                    expression=FunctionCall(
-                        name="id",
-                        arguments=(Variable(name="n"),),
+            clauses=(
+                Match(pattern=PathPattern(nodes=(NodePattern(variable="n"),))),
+                Return(
+                    items=(
+                        ReturnItem(
+                            expression=FunctionCall(
+                                name="id",
+                                arguments=(Variable(name="n"),),
+                            )
+                        ),
                     )
                 ),
-            ),
+            )
         )
         analysis = SemanticAnalyzer.analyze(statement)
         assert analysis.columns == ("id(n)",)
@@ -332,17 +338,11 @@ class TestUnsupportedConstructs:
             "MATCH (a)-[r*1..3]->(b) RETURN b",
             "MATCH (a)-[*]->(b) RETURN b",
             "MATCH (a), (b) RETURN a",
-            "MATCH (a) MATCH (b) RETURN a",
             "OPTIONAL MATCH (a) RETURN a",
             "MATCH (a) OPTIONAL MATCH (b) RETURN a",
             "MATCH (a) WITH a RETURN a",
             "MATCH (a) UNWIND [1] AS x RETURN a",
-            "MATCH (a) CREATE (b) RETURN a",
             "MATCH (a) MERGE (b) RETURN a",
-            "MATCH (a) SET a.x = 1 RETURN a",
-            "MATCH (a) REMOVE a.x RETURN a",
-            "MATCH (a) DELETE a RETURN a",
-            "MATCH (a) DETACH DELETE a RETURN a",
             "MATCH (a) RETURN CASE WHEN true THEN 1 END",
             "MATCH (a) RETURN {x: 1}",
             "MATCH (a) RETURN a.list[0]",
@@ -393,9 +393,117 @@ class TestExpressionChecks:
         analysis = self.analyze("MATCH (n) RETURN 1 AS one")
         assert analysis.columns == ("one",)
         assert isinstance(analysis.items[0].expression, Literal)
-        assert isinstance(analysis.statement.return_items[0].expression, Literal)
+        assert analysis.return_clause is not None
+        assert isinstance(analysis.return_clause.items[0].expression, Literal)
         assert isinstance(analysis.items[0].expression, Literal)
 
     def test_parameter_expression_is_preserved(self) -> None:
         analysis = self.analyze("MATCH (n) RETURN $p")
         assert isinstance(analysis.items[0].expression, Parameter)
+
+
+class TestWriteAnalysis:
+    """Verify static analysis of statements that mutate the graph."""
+
+    def analyze(self, text: str) -> Analysis:
+        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    def test_read_statement_is_not_a_write(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) RETURN n.designation AS name")
+        assert not analysis.is_write
+        assert analysis.columns == ("name",)
+
+    def test_write_without_return_has_no_columns(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) SET n.cycles = 1")
+        assert analysis.is_write
+        assert analysis.columns == ()
+        assert analysis.return_clause is None
+
+    def test_write_with_return_has_columns(self) -> None:
+        analysis = self.analyze("CREATE (n:Program) RETURN n.designation AS name")
+        assert analysis.is_write
+        assert analysis.columns == ("name",)
+
+    def test_created_variable_is_in_scope_for_later_clauses(self) -> None:
+        analysis = self.analyze("CREATE (n:Program) SET n.cycles = 1 RETURN n.cycles AS c")
+        assert analysis.variable_kinds["n"] is VariableKind.NODE
+
+    def test_created_relationship_variable_is_in_scope(self) -> None:
+        analysis = self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r:TRUSTS]->(b) RETURN r")
+        assert analysis.variable_kinds["r"] is VariableKind.RELATIONSHIP
+
+    def test_set_on_unbound_variable_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("SET n.cycles = 1")
+        assert "not bound" in caught.value.message
+
+    def test_remove_on_unbound_variable_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("REMOVE n.cycles")
+        assert "not bound" in caught.value.message
+
+    def test_delete_on_unbound_variable_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("DELETE n")
+
+    def test_label_on_relationship_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a)-[r]->(b) SET r:SystemMonitor")
+        assert "nodes" in caught.value.message
+
+    def test_remove_label_from_relationship_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a)-[r]->(b) REMOVE r:SystemMonitor")
+        assert "nodes" in caught.value.message
+
+    def test_delete_path_variable_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH p = (a)-[r]->(b) DELETE p")
+        assert "path variable" in caught.value.message
+
+    def test_create_relationship_requires_bound_endpoints(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("CREATE (a)-[r:ALLIES_WITH]->(b)")
+        assert "already bound" in caught.value.message
+
+    def test_create_relationship_with_one_unbound_endpoint_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r:TRUSTS]->(c)")
+
+    def test_create_relationship_requires_one_type(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r]->(b)")
+        assert "one type" in caught.value.message
+
+    def test_create_relationship_requires_outgoing_direction(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)<-[r:TRUSTS]-(b)")
+        assert "direction" in caught.value.message
+
+    def test_create_path_variable_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("CREATE p = (n:Program)")
+        assert "path variable" in caught.value.message
+
+    def test_create_cannot_change_a_bound_node(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (a) CREATE (a:ISO)")
+        assert "use SET" in caught.value.message
+
+    def test_return_after_write_keeps_aggregate_checks(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("CREATE (n:Program) SET n.cycles = 1 RETURN count(*) + n.cycles")
+
+    def test_return_after_write_projects_created_variable(self) -> None:
+        analysis = self.analyze("CREATE (n:Program) RETURN count(*) AS total")
+        assert analysis.columns == ("total",)
+        assert analysis.has_aggregates
+
+    def test_create_property_map_requires_constant_values(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            self.analyze("MATCH (m) CREATE (n:Program {designation: m.designation})")
+        assert "literals or parameters" in caught.value.message
+
+    def test_create_property_map_accepts_parameters(self) -> None:
+        analysis = self.analyze("CREATE (n:Program {designation: $name})")
+        assert analysis.parameters == {"name"}

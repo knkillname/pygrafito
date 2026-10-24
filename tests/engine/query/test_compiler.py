@@ -5,7 +5,7 @@
 
 import pytest
 
-from pygrafito.engine.query.ast import Binary, Unary
+from pygrafito.engine.query.ast import Binary, Match, Unary
 from pygrafito.engine.query.compiler import CompiledMatch, Compiler
 from pygrafito.engine.query.parser import Parser
 from pygrafito.engine.query.plan import Plan, PlanBuilder, PlanOperator
@@ -26,7 +26,8 @@ class TestNodeCompilation:
         parameters: dict[str, QueryValue] | None = None,
     ) -> CompiledMatch:
         statement = Parser.parse_statement(text)
-        return Compiler(statement).compile(parameters or {})
+        match = next(clause for clause in statement.clauses if isinstance(clause, Match))
+        return Compiler(match).compile(parameters or {})
 
     def test_from_nodes(self) -> None:
         compiled = self.compile("MATCH (n) RETURN n")
@@ -102,7 +103,8 @@ class TestRelationshipCompilation:
         parameters: dict[str, QueryValue] | None = None,
     ) -> CompiledMatch:
         statement = Parser.parse_statement(text)
-        return Compiler(statement).compile(parameters or {})
+        match = next(clause for clause in statement.clauses if isinstance(clause, Match))
+        return Compiler(match).compile(parameters or {})
 
     def test_outgoing_join(self) -> None:
         compiled = self.compile("MATCH (a)-[r:ALLIES_WITH]->(b) RETURN b")
@@ -166,7 +168,8 @@ class TestPushdown:
         parameters: dict[str, QueryValue] | None = None,
     ) -> CompiledMatch:
         statement = Parser.parse_statement(text)
-        return Compiler(statement).compile(parameters or {})
+        match = next(clause for clause in statement.clauses if isinstance(clause, Match))
+        return Compiler(match).compile(parameters or {})
 
     def test_and_of_pushable_predicates(self) -> None:
         compiled = self.compile(
@@ -373,3 +376,28 @@ class TestPlanPipeline:
         )
         assert plan.includes(PlanOperator.ORDER)
         assert not plan.includes(PlanOperator.AGGREGATE)
+
+    def test_create_only_pipeline(self) -> None:
+        plan = self.plan("CREATE (n:Program)")
+        assert plan.operators == (PlanOperator.CREATE,)
+
+    def test_write_pipeline_follows_source_order(self) -> None:
+        plan = self.plan(
+            "MATCH (n:Program) SET n.cycles = 1 REMOVE n.cycles CREATE (m:Program) RETURN n"
+        )
+        assert plan.operators == (
+            PlanOperator.MATCH,
+            PlanOperator.SET,
+            PlanOperator.REMOVE,
+            PlanOperator.CREATE,
+            PlanOperator.PROJECT,
+        )
+
+    def test_delete_pipeline(self) -> None:
+        plan = self.plan("MATCH (n:Program) DETACH DELETE n")
+        assert plan.operators == (PlanOperator.MATCH, PlanOperator.DELETE)
+
+    def test_write_without_return_has_no_projection(self) -> None:
+        plan = self.plan("MATCH (n:Program) SET n.cycles = 1")
+        assert plan.operators == (PlanOperator.MATCH, PlanOperator.SET)
+        assert not plan.includes(PlanOperator.PROJECT)

@@ -13,6 +13,7 @@ from pygrafito.engine.query.ast import (
     IsNull,
     ListLiteral,
     Literal,
+    Match,
     NodePattern,
     Operators,
     Parameter,
@@ -20,7 +21,6 @@ from pygrafito.engine.query.ast import (
     Property,
     PropertyEntry,
     RelationshipPattern,
-    Statement,
     Unary,
     Variable,
 )
@@ -741,22 +741,22 @@ class PushdownAnalyzer:
 
 
 class Compiler:
-    """Compile one statement's pattern match and pushed-down filter.
+    """Compile one match clause and its pushed-down filter.
 
     Parameters
     ----------
-    statement : Statement
-        Parsed statement to compile.
+    match : Match
+        Parsed match clause to compile.
     codec : PropertyCodec, optional
         Codec used to build quoted JSON paths and encode values.
     """
 
     def __init__(
         self,
-        statement: Statement,
+        match: Match,
         codec: PropertyCodec | None = None,
     ) -> None:
-        self._statement = statement
+        self._match = match
         self._codec = PropertyCodec() if codec is None else codec
         self._columns: list[str] = []
         self._arguments: list[object] = []
@@ -777,7 +777,7 @@ class Compiler:
         self._predicates_builder: PredicateCompiler | None = None
 
     def compile(self, parameters: Mapping[str, QueryValue]) -> CompiledMatch:
-        """Compile the statement against one parameter mapping.
+        """Compile the match clause against one parameter mapping.
 
         Parameters
         ----------
@@ -790,7 +790,7 @@ class Compiler:
             SQL text, arguments, and row selections.
         """
         self._reset(parameters)
-        self._compile_pattern(self._statement.pattern)
+        self._compile_pattern(self._match.pattern)
         residual = self._compile_where()
         sql = self._build_sql()
         return CompiledMatch(
@@ -798,7 +798,7 @@ class Compiler:
             arguments=tuple(self._arguments),
             node_columns=tuple(self._node_columns),
             relationship_columns=tuple(self._relationship_columns),
-            paths=self._build_paths(self._statement.pattern),
+            paths=self._build_paths(self._match.pattern),
             residual=residual,
         )
 
@@ -1037,7 +1037,7 @@ class Compiler:
         Expression | None
             Residual filter expression, if any.
         """
-        if self._statement.where is None:
+        if self._match.where is None:
             return None
         builder = self._predicates_builder
         if builder is None:
@@ -1053,7 +1053,7 @@ class Compiler:
             builder,
             ConstantEvaluator(self._parameters),
         )
-        sql, residual = analyzer.split(self._statement.where)
+        sql, residual = analyzer.split(self._match.where)
         if sql is not None:
             self._predicates.append(sql)
         return residual

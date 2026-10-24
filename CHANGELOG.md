@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Write clauses in the query dialect: `CREATE` for nodes and relationships,
+  `SET` and `REMOVE` for properties and labels, and `DELETE` / `DETACH DELETE`
+  for elements.
+- `QueryResult.summary`, a `MutationSummary` with the number of created and
+  deleted elements and the property and label changes applied by a statement.
+- Optional `RETURN` after a write clause, and prepared write statements with
+  empty columns.
+- Deduplicated mutation cardinality: an entity bound by several match rows is
+  written or deleted once per statement.
+- Atomic write statements: a standalone statement runs in its own
+  `BEGIN IMMEDIATE` transaction, and a write inside an explicit transaction runs
+  in a savepoint.
+
+### Changed
+
+- `Graph.query`, `Transaction.query`, and `PreparedQuery.execute` execute read
+  and write statements. Statements containing a write clause no longer raise a
+  read-only query error.
+- A statement is now an ordered clause sequence with optional `MATCH` and
+  `RETURN`, instead of one required `MATCH` and one required `RETURN`.
+- Storage and domain failures raised during a write are surfaced as
+  `QueryExecutionError`.
+
 ## [0.3.0] - 2026-10-23
 
 ### Added

@@ -10,29 +10,36 @@ from types import MappingProxyType
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Create,
+    Delete,
     Expression,
     FunctionCall,
     IsNull,
     ListLiteral,
     Literal,
+    Match,
     Operators,
     Parameter,
     PathPattern,
     Property,
     PropertyEntry,
+    Remove,
+    Return,
     ReturnItem,
+    Set,
     SortItem,
     Star,
     Statement,
     Unary,
     Variable,
 )
+from pygrafito.engine.query.tokens import Span
 from pygrafito.engine.query.values import (
     ArgumentKind,
     FunctionCatalog,
     FunctionSpec,
 )
-from pygrafito.model import QuerySemanticError
+from pygrafito.model import Direction, QuerySemanticError
 
 
 class VariableKind(Enum):
@@ -92,12 +99,18 @@ class Analysis:
     ----------
     statement : Statement
         Parsed statement.
+    match_clause : Match | None
+        Match clause of the statement, if any.
+    return_clause : Return | None
+        Return clause of the statement, if any.
+    is_write : bool
+        Whether the statement contains any write clause.
     columns : tuple[str, ...]
         Final result column names in projection order.
     items : tuple[ReturnColumn, ...]
         Analysed projection columns.
     variable_kinds : Mapping[str, VariableKind]
-        Kind of every variable bound by the pattern.
+        Kind of every variable bound by the statement.
     parameters : frozenset[str]
         Parameter names referenced by the statement.
     has_aggregates : bool
@@ -109,6 +122,9 @@ class Analysis:
     """
 
     statement: Statement
+    match_clause: Match | None
+    return_clause: Return | None
+    is_write: bool
     columns: tuple[str, ...]
     items: tuple[ReturnColumn, ...]
     variable_kinds: Mapping[str, VariableKind]
@@ -176,25 +192,52 @@ class SemanticAnalyzer:
         Analysis
             Output contract and resolved ordering keys.
         """
-        self._bind_pattern(self._statement.pattern)
-        if self._statement.where is not None:
-            self._validate_expression(self._statement.where, aggregates_allowed=False)
-        items = tuple(self._column(item) for item in self._statement.return_items)
-        self._require_unique_columns(items)
+        match_clause: Match | None = None
+        return_clause: Return | None = None
+        is_write = False
+        for clause in self._statement.clauses:
+            if isinstance(clause, Match):
+                self._bind_pattern(clause.pattern)
+                if clause.where is not None:
+                    self._validate_expression(clause.where, aggregates_allowed=False)
+                match_clause = clause
+            elif isinstance(clause, Create):
+                self._bind_create(clause.pattern)
+                is_write = True
+            elif isinstance(clause, Set):
+                self._validate_set(clause)
+                is_write = True
+            elif isinstance(clause, Remove):
+                self._validate_remove(clause)
+                is_write = True
+            elif isinstance(clause, Delete):
+                self._validate_delete(clause)
+                is_write = True
+            elif isinstance(clause, Return):
+                return_clause = clause
+            else:
+                message = f"unsupported clause form: {type(clause).__name__}"
+                raise QuerySemanticError(message)
+        items = self._return_columns(return_clause)
         has_aggregates = any(item.aggregate for item in items)
         grouping = tuple(item.expression for item in items if not item.aggregate)
         if has_aggregates:
             self._validate_grouping(items, grouping)
-        self._validate_pagination(self._statement.skip, "SKIP")
-        self._validate_pagination(self._statement.limit, "LIMIT")
-        sorts = self._resolve_sorts(
-            self._statement.order_by,
-            items,
-            grouping,
-            has_aggregates,
-        )
+        sorts: tuple[SortSpec, ...] = ()
+        if return_clause is not None:
+            self._validate_pagination(return_clause.skip, "SKIP")
+            self._validate_pagination(return_clause.limit, "LIMIT")
+            sorts = self._resolve_sorts(
+                return_clause.order_by,
+                items,
+                grouping,
+                has_aggregates,
+            )
         return Analysis(
             statement=self._statement,
+            match_clause=match_clause,
+            return_clause=return_clause,
+            is_write=is_write,
             columns=tuple(item.name for item in items),
             items=items,
             variable_kinds=MappingProxyType(dict(self._kinds)),
@@ -203,6 +246,183 @@ class SemanticAnalyzer:
             grouping=grouping,
             sorts=sorts,
         )
+
+    def _return_columns(self, clause: Return | None) -> tuple[ReturnColumn, ...]:
+        """Analyse the projection of an optional ``RETURN`` clause.
+
+        Parameters
+        ----------
+        clause : Return | None
+            Return clause, or ``None`` for a write statement without one.
+
+        Returns
+        -------
+        tuple[ReturnColumn, ...]
+            Analysed projection columns, empty without a ``RETURN``.
+        """
+        if clause is None:
+            return ()
+        items = tuple(self._column(item) for item in clause.items)
+        self._require_unique_columns(items)
+        return items
+
+    def _bind_create(self, pattern: PathPattern) -> None:
+        """Register the variables created by a ``CREATE`` pattern.
+
+        Node patterns with a variable already in scope refer to that node;
+        other node patterns create a node. Both endpoints of a created
+        relationship must already be in scope.
+
+        Parameters
+        ----------
+        pattern : PathPattern
+            Pattern of the create clause.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the pattern uses a path variable, redefines a bound node, or
+            creates a relationship with an unbound endpoint.
+        """
+        if pattern.variable is not None:
+            message = "path variables are not supported in CREATE"
+            raise QuerySemanticError(message)
+        bound = frozenset(self._kinds)
+        for index, _relationship in enumerate(pattern.relationships):
+            endpoints = (pattern.nodes[index], pattern.nodes[index + 1])
+            for node in endpoints:
+                if node.variable is None or node.variable not in bound:
+                    message = "both endpoints of a created relationship must be already bound"
+                    raise QuerySemanticError(message)
+        for node in pattern.nodes:
+            self._validate_property_map(node.properties)
+            if node.variable is None:
+                continue
+            if node.variable in bound:
+                self._register(node.variable, VariableKind.NODE)
+                if node.labels or node.properties:
+                    message = (
+                        f"CREATE cannot change bound variable {node.variable!r}; "
+                        "use SET for labels and properties"
+                    )
+                    raise QuerySemanticError(message)
+            else:
+                self._register(node.variable, VariableKind.NODE)
+        for relationship in pattern.relationships:
+            self._validate_property_map(relationship.properties)
+            if len(relationship.types) != 1:
+                message = "a created relationship must have exactly one type"
+                raise QuerySemanticError(message)
+            if relationship.direction is not Direction.OUTGOING:
+                message = "a created relationship must use the '-->' direction"
+                raise QuerySemanticError(message)
+            if relationship.variable is not None:
+                self._register(relationship.variable, VariableKind.RELATIONSHIP)
+
+    def _validate_set(self, clause: Set) -> None:
+        """Validate a ``SET`` clause.
+
+        Parameters
+        ----------
+        clause : Set
+            Clause to validate.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a target is unbound or not a node or relationship, or a label is
+            added to a relationship.
+        """
+        for assignment in clause.assignments:
+            self._require_write_target(assignment.variable, assignment.span, "SET")
+            self._validate_expression(assignment.value, aggregates_allowed=False)
+        for label in clause.labels:
+            kind = self._require_write_target(label.variable, label.span, "SET")
+            if kind is not VariableKind.NODE:
+                message = "labels can only be added to nodes"
+                raise QuerySemanticError(message)
+
+    def _validate_remove(self, clause: Remove) -> None:
+        """Validate a ``REMOVE`` clause.
+
+        Parameters
+        ----------
+        clause : Remove
+            Clause to validate.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a target is unbound or not a node or relationship, or a label is
+            removed from a relationship.
+        """
+        for removal in clause.properties:
+            self._require_write_target(removal.variable, removal.span, "REMOVE")
+        for label in clause.labels:
+            kind = self._require_write_target(label.variable, label.span, "REMOVE")
+            if kind is not VariableKind.NODE:
+                message = "labels can only be removed from nodes"
+                raise QuerySemanticError(message)
+
+    def _validate_delete(self, clause: Delete) -> None:
+        """Validate a ``DELETE`` clause.
+
+        Parameters
+        ----------
+        clause : Delete
+            Clause to validate.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a target is unbound or is a path.
+        """
+        for name in clause.variables:
+            self._require_write_target(name, None, "DELETE")
+
+    def _require_write_target(
+        self,
+        name: str,
+        span: Span | None,
+        clause: str,
+    ) -> VariableKind:
+        """Require a write target to be a bound node or relationship.
+
+        Parameters
+        ----------
+        name : str
+            Variable name.
+        span : Span | None
+            Source position of the reference.
+        clause : str
+            Clause name used in error messages.
+
+        Returns
+        -------
+        VariableKind
+            Kind of the bound variable.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the variable is unbound or is a path.
+        """
+        kind = self._kinds.get(name)
+        if kind is None:
+            message = f"variable {name!r} is not bound"
+            raise QuerySemanticError(
+                message,
+                line=span.line if span else None,
+                column=span.column if span else None,
+            )
+        if kind is VariableKind.PATH:
+            message = f"{clause} cannot target path variable {name!r}"
+            raise QuerySemanticError(
+                message,
+                line=span.line if span else None,
+                column=span.column if span else None,
+            )
+        return kind
 
     def _bind_pattern(self, pattern: PathPattern) -> None:
         """Register every pattern variable and validate property maps.

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
 #
 # SPDX-License-Identifier: MIT
-"""Hand-written lexer for the read-only query language."""
+"""Hand-written lexer for the query language."""
 
 import string
 import typing

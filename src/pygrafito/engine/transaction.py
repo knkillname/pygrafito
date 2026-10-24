@@ -402,11 +402,12 @@ class Transaction:
         text: str,
         parameters: Mapping[str, QueryValue] | None = None,
     ) -> QueryResult:
-        """Execute one read-only query inside the active transaction.
+        """Execute one statement inside the active transaction.
 
-        The query uses the transaction's connection, so it observes the
+        The statement uses the transaction's connection, so it observes the
         transaction's uncommitted writes and does not start or finish a
-        transaction of its own.
+        transaction of its own. A write statement runs inside a savepoint, so a
+        failure undoes only that statement.
 
         Parameters
         ----------
