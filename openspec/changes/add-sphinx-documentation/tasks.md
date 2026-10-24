@@ -106,7 +106,7 @@ workflow only, with no runtime behaviour or public API deltas.
 
 ## 7. GitHub Pages, integration, and verification
 
-- [ ] 7.1 Add `.github/workflows/docs.yml` to build on pull requests and deploy `main` with
+- [x] 7.1 Add `.github/workflows/docs.yml` to build on pull requests and deploy `main` with
       `actions/configure-pages`, `actions/upload-pages-artifact`, and `actions/deploy-pages`; verify
       a pull-request run passes and the uploaded artifact contains `index.html` and `.nojekyll`.
 - [ ] 7.2 Set the repository's Pages source to GitHub Actions and deploy from `main`; verify
