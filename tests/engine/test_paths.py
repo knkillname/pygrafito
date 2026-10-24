@@ -145,6 +145,15 @@ class TestTrailSemantics(_GraphTestCase):
         assert len(paths) == 1
         assert paths[0].length == 0
 
+    def test_unreachable_end_yields_no_paths(self, graph: Graph) -> None:
+        start = graph.add_node("Grid")
+        end = graph.add_node("Outlands")
+        assert list(graph.paths(start, end, max_depth=2)) == []
+
+    def test_end_beyond_depth_bound_yields_no_paths(self, graph: Graph) -> None:
+        nodes = self.build_diamond(graph)
+        assert list(graph.paths(nodes["Grid"], nodes["Portal"], max_depth=1)) == []
+
 
 class TestParallelRelationships(_GraphTestCase):
     """Verify that parallel relationships are distinct trails."""

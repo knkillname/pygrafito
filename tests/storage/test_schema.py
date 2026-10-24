@@ -164,7 +164,12 @@ class TestSchemaBootstrap:
                 "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
             index_names = {str(row[0]) for row in indexes}
-            assert index_names == {"node_labels_by_label", "rel_by_dst", "rel_by_src"}
+            assert index_names == {
+                "node_labels_by_label",
+                "rel_by_dst",
+                "rel_by_src",
+                "rel_by_type",
+            }
         finally:
             database.close()
 
@@ -250,3 +255,52 @@ class TestJsonSupport:
         wrong = typing.cast(Connection, _WrongJsonConnection())
         with pytest.raises(UnsupportedSqliteError):
             Schema.verify_json_support(wrong, (3, 45, 0))
+
+
+class TestStructuralIndexes:
+    """Verify the indexes the schema maintains on its own."""
+
+    def test_relationship_type_index_exists(self) -> None:
+        database = Database(":memory:")
+        try:
+            names = {
+                str(row[0])
+                for row in database.connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index'"
+                )
+            }
+            assert "rel_by_type" in names
+            assert "node_labels_by_label" in names
+            assert "rel_by_src" in names
+            assert "rel_by_dst" in names
+        finally:
+            database.close()
+
+    def test_type_filter_uses_an_index(self) -> None:
+        database = Database(":memory:")
+        try:
+            plan = database.connection.execute(
+                "EXPLAIN QUERY PLAN SELECT id, src, dst FROM relationships WHERE rel_type = ?",
+                ("ALLIES_WITH",),
+            ).fetchall()
+            details = " ".join(str(row[3]) for row in plan)
+            assert "SEARCH relationships USING" in details
+            assert "rel_by_type" in details
+        finally:
+            database.close()
+
+    def test_structural_indexes_survive_reopen(self, tmp_path: Path) -> None:
+        path = tmp_path / "grid.db"
+        first = Database(path)
+        first.close()
+        second = Database(path)
+        try:
+            names = {
+                str(row[0])
+                for row in second.connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'index'"
+                )
+            }
+            assert "rel_by_type" in names
+        finally:
+            second.close()

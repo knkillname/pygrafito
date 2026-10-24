@@ -308,6 +308,48 @@ class QueryExecutor:
         self._codec = codec
         self._database = database
 
+    def explain(
+        self,
+        plan: Plan,
+        parameters: Mapping[str, QueryValue],
+    ) -> tuple[str, ...]:
+        """Return the planned access path for a statement without running it.
+
+        Parameters
+        ----------
+        plan : Plan
+            Planned statement.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One detail line per plan row, in plan order.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a referenced parameter is missing.
+        QueryExecutionError
+            If SQLite cannot plan the statement.
+        """
+        analysis = plan.analysis
+        analysis.require_parameters(parameters)
+        match = analysis.match_clause
+        if match is None:
+            return ()
+        compiled = Compiler(match, self._codec).compile(parameters)
+        try:
+            rows = self._connection.execute(
+                f"EXPLAIN QUERY PLAN {compiled.sql}",
+                compiled.arguments,
+            ).fetchall()
+        except sqlite3.Error as error:
+            message = "query planning failed"
+            raise QueryExecutionError(message) from error
+        return tuple(str(row[3]) for row in rows)
+
     def execute_graph(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
         """Execute a statement inside its own short transaction.
 

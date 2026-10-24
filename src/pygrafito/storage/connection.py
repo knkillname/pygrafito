@@ -80,8 +80,21 @@ class Database:
             return
         if self._connection.in_transaction:
             self._connection.rollback()
+        self._optimize()
         self._connection.close()
         self._closed = True
+
+    def _optimize(self) -> None:
+        """Refresh planner statistics before closing a file database.
+
+        Statistics affect plan choice only, so a failure is ignored.
+        """
+        if self._location == self.MEMORY_PATH:
+            return
+        try:
+            self._connection.execute("PRAGMA optimize")
+        except sqlite3.OperationalError:
+            return
 
     def ensure_open(self) -> None:
         """Reject use of a closed database.

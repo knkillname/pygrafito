@@ -5,9 +5,10 @@
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from sqlite3 import Connection
-from typing import Any
+from typing import Any, ClassVar
 
 from pygrafito.model import (
+    Direction,
     NotFoundError,
     Relationship,
     TransactionError,
@@ -34,6 +35,104 @@ class RelationshipRepository:
     ) -> None:
         self._connection = connection
         self._codec = property_codec
+
+    MAXIMUM_PARAMETERS: ClassVar[int] = 32_766
+
+    def frontier(
+        self,
+        frontier: Sequence[int],
+        direction: Direction,
+        types: frozenset[str] | None = None,
+    ) -> Iterator[tuple[int, Relationship, int]]:
+        """Yield one adjacency level for an ordered frontier.
+
+        Edges are emitted per frontier node in the given order, outgoing
+        before incoming, and by relationship id within each arm. In
+        both-direction mode a self-loop is emitted once.
+
+        Parameters
+        ----------
+        frontier : Sequence[int]
+            Ordered node identifiers whose incident relationships are read.
+        direction : Direction
+            Direction to follow.
+        types : frozenset[str] | None, optional
+            Allowed relationship types, by default all types.
+
+        Yields
+        ------
+        tuple[int, Relationship, int]
+            The frontier node, the relationship, and the node reached when
+            following ``direction`` from it.
+        """
+        ordered = tuple(dict.fromkeys(int(node_id) for node_id in frontier))
+        if not ordered:
+            return
+        type_values = () if types is None else tuple(sorted(types))
+        type_filter = ""
+        if type_values:
+            placeholders = ", ".join("?" for _ in type_values)
+            type_filter = f" AND rel_type IN ({placeholders})"
+        chunk_size = max(1, self.MAXIMUM_PARAMETERS - len(type_values))
+        for offset in range(0, len(ordered), chunk_size):
+            chunk = ordered[offset : offset + chunk_size]
+            yield from self._frontier_chunk(chunk, direction, type_filter, type_values)
+
+    def _frontier_chunk(
+        self,
+        chunk: Sequence[int],
+        direction: Direction,
+        type_filter: str,
+        type_values: tuple[str, ...],
+    ) -> Iterator[tuple[int, Relationship, int]]:
+        """Read and order one frontier chunk.
+
+        Parameters
+        ----------
+        chunk : Sequence[int]
+            Frontier identifiers that fit in one statement.
+        direction : Direction
+            Direction to follow.
+        type_filter : str
+            SQL fragment restricting relationship types, possibly empty.
+        type_values : tuple[str, ...]
+            Values bound to the type filter.
+
+        Yields
+        ------
+        tuple[int, Relationship, int]
+            Ordered frontier edges for this chunk.
+        """
+        placeholders = ", ".join("?" for _ in chunk)
+        outgoing: dict[int, list[tuple[Relationship, int]]] = {}
+        incoming: dict[int, list[tuple[Relationship, int]]] = {}
+        if direction in (Direction.OUTGOING, Direction.BOTH):
+            rows = self._connection.execute(
+                f"SELECT id, src, dst, rel_type, props FROM relationships "
+                f"WHERE src IN ({placeholders}){type_filter} ORDER BY id",
+                (*chunk, *type_values),
+            ).fetchall()
+            for relationship in self._relationships_from_rows(rows):
+                outgoing.setdefault(relationship.start_id, []).append(
+                    (relationship, relationship.end_id)
+                )
+        if direction in (Direction.INCOMING, Direction.BOTH):
+            rows = self._connection.execute(
+                f"SELECT id, src, dst, rel_type, props FROM relationships "
+                f"WHERE dst IN ({placeholders}){type_filter} ORDER BY id",
+                (*chunk, *type_values),
+            ).fetchall()
+            for relationship in self._relationships_from_rows(rows):
+                if direction is Direction.BOTH and relationship.start_id == relationship.end_id:
+                    continue
+                incoming.setdefault(relationship.end_id, []).append(
+                    (relationship, relationship.start_id)
+                )
+        for node_id in chunk:
+            for relationship, target in outgoing.get(node_id, ()):
+                yield node_id, relationship, target
+            for relationship, target in incoming.get(node_id, ()):
+                yield node_id, relationship, target
 
     def create(
         self,
@@ -237,11 +336,11 @@ class RelationshipRepository:
             parameters.append(self._codec.validate_identifier(rel_type, "relationship type"))
         if properties:
             for key, value in properties.items():
-                path = self._codec.json_path(key)
-                clauses.append("json_type(relationships.props, ?) = ?")
-                parameters.extend((path, self._codec.json_type(value)))
-                clauses.append("json_extract(relationships.props, ?) = ?")
-                parameters.extend((path, self._codec.comparison_value(value)))
+                path = self._codec.sql_json_path(key)
+                clauses.append(f"json_type(relationships.props, {path}) = ?")
+                parameters.append(self._codec.json_type(value))
+                clauses.append(f"json_extract(relationships.props, {path}) = ?")
+                parameters.append(self._codec.comparison_value(value))
         query = "SELECT id, src, dst, rel_type, props FROM relationships"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)

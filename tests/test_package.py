@@ -23,6 +23,7 @@ import pygrafito.model
 import pygrafito.storage
 import pygrafito.storage.codec
 import pygrafito.storage.connection
+import pygrafito.storage.indexes
 import pygrafito.storage.nodes
 import pygrafito.storage.relationships
 import pygrafito.storage.schema
@@ -53,6 +54,7 @@ class TestPackage:
             pygrafito.storage,
             pygrafito.storage.codec,
             pygrafito.storage.connection,
+            pygrafito.storage.indexes,
             pygrafito.storage.nodes,
             pygrafito.storage.relationships,
             pygrafito.storage.schema,
@@ -65,6 +67,8 @@ class TestPackage:
             "Direction",
             "Graph",
             "GraphClosedError",
+            "Index",
+            "IndexKind",
             "MutationSummary",
             "Node",
             "NotFoundError",

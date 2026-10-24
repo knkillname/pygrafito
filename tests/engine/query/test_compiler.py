@@ -43,26 +43,24 @@ class TestNodeCompilation:
 
     def test_numeric_property_map_uses_type_guard(self) -> None:
         compiled = self.compile("MATCH (n {cycles: 36}) RETURN n")
-        assert "json_type(n0.props, ?) IN ('integer', 'real')" in compiled.sql
-        assert "json_extract(n0.props, ?) = ?" in compiled.sql
-        assert '$."cycles"' in compiled.arguments
-        assert 36 in compiled.arguments
+        assert "json_type(n0.props, '$.\"cycles\"') IN ('integer', 'real')" in compiled.sql
+        assert "json_extract(n0.props, '$.\"cycles\"') = ?" in compiled.sql
+        assert compiled.arguments == (36,)
 
     def test_boolean_property_map(self) -> None:
         compiled = self.compile("MATCH (n {active: true}) RETURN n")
-        assert "json_type(n0.props, ?) = ?" in compiled.sql
-        assert "true" in compiled.arguments
-        assert 1 in compiled.arguments
+        assert "json_type(n0.props, '$.\"active\"') = ?" in compiled.sql
+        assert compiled.arguments == ("true", 1)
 
     def test_string_property_map(self) -> None:
         compiled = self.compile("MATCH (n {designation: 'Quorra'}) RETURN n")
-        assert "json_type(n0.props, ?) = 'text'" in compiled.sql
-        assert "Quorra" in compiled.arguments
+        assert "json_type(n0.props, '$.\"designation\"') = 'text'" in compiled.sql
+        assert compiled.arguments == ("Quorra",)
 
     def test_list_property_map(self) -> None:
         compiled = self.compile("MATCH (n {tags: ['ISO', 'Program']}) RETURN n")
-        assert "json_type(n0.props, ?) = 'array'" in compiled.sql
-        assert '["ISO","Program"]' in compiled.arguments
+        assert "json_type(n0.props, '$.\"tags\"') = 'array'" in compiled.sql
+        assert compiled.arguments == ('["ISO","Program"]',)
 
     def test_null_property_map_matches_nothing(self) -> None:
         compiled = self.compile("MATCH (n {designation: null}) RETURN n")
@@ -71,7 +69,19 @@ class TestNodeCompilation:
 
     def test_quoted_property_key(self) -> None:
         compiled = self.compile("MATCH (n {`a.b`: 1}) RETURN n")
-        assert '$."a.b"' in compiled.arguments
+        assert "json_extract(n0.props, '$.\"a.b\"') = ?" in compiled.sql
+        assert compiled.arguments == (1,)
+
+    def test_property_path_is_inlined_not_bound(self) -> None:
+        compiled = self.compile("MATCH (n {`a'b`: 1}) RETURN n")
+        assert "json_extract(n0.props, '$.\"a''b\"') = ?" in compiled.sql
+        assert compiled.arguments == (1,)
+        paths = [
+            argument
+            for argument in compiled.arguments
+            if isinstance(argument, str) and argument.startswith('$."')
+        ]
+        assert paths == []
 
     def test_property_map_parameter_is_bound(self) -> None:
         compiled = self.compile(
@@ -130,8 +140,8 @@ class TestRelationshipCompilation:
 
     def test_relationship_properties(self) -> None:
         compiled = self.compile("MATCH (a)-[r {since_cycle: 2020}]->(b) RETURN r")
-        assert '$."since_cycle"' in compiled.arguments
-        assert 2020 in compiled.arguments
+        assert "json_extract(r0.props, '$.\"since_cycle\"') = ?" in compiled.sql
+        assert compiled.arguments == (2020,)
 
     def test_repeated_node_variable_adds_constraint(self) -> None:
         compiled = self.compile("MATCH (a)-[r]->(a) RETURN a")
@@ -176,8 +186,8 @@ class TestPushdown:
             "MATCH (n) WHERE n.cycles > 1 AND n.designation = 'Quorra' RETURN n"
         )
         assert compiled.residual is None
-        assert "json_extract(n0.props, ?) > ?" in compiled.sql
-        assert "json_type(n0.props, ?) = 'text'" in compiled.sql
+        assert "json_extract(n0.props, '$.\"cycles\"') > ?" in compiled.sql
+        assert "json_type(n0.props, '$.\"designation\"') = 'text'" in compiled.sql
 
     def test_or_of_pushable_predicates(self) -> None:
         compiled = self.compile("MATCH (n) WHERE n.cycles > 1 OR n.cycles < 0 RETURN n")
@@ -201,7 +211,7 @@ class TestPushdown:
     def test_and_with_residual_half(self) -> None:
         compiled = self.compile("MATCH (n) WHERE n.cycles > 1 AND abs(n.cycles) > 2 RETURN n")
         assert compiled.residual is not None
-        assert "json_extract(n0.props, ?) > ?" in compiled.sql
+        assert "json_extract(n0.props, '$.\"cycles\"') > ?" in compiled.sql
 
     def test_literal_list_membership_is_pushed_down(self) -> None:
         compiled = self.compile("MATCH (n) WHERE n.designation IN ['Quorra', 'Tron'] RETURN n")
@@ -243,27 +253,27 @@ class TestPushdown:
     def test_null_tests_are_pushed_down(self) -> None:
         compiled = self.compile("MATCH (n) WHERE n.cycles IS NULL RETURN n")
         assert compiled.residual is None
-        assert "json_type(n0.props, ?) IS NULL" in compiled.sql
+        assert "json_type(n0.props, '$.\"cycles\"') IS NULL" in compiled.sql
         compiled = self.compile("MATCH (n) WHERE n.cycles IS NOT NULL RETURN n")
-        assert "json_type(n0.props, ?) IS NOT NULL" in compiled.sql
+        assert "json_type(n0.props, '$.\"cycles\"') IS NOT NULL" in compiled.sql
 
     def test_string_predicates(self) -> None:
         starts = self.compile("MATCH (n) WHERE n.designation STARTS WITH 'Qu' RETURN n")
-        assert "instr(json_extract(n0.props, ?), ?) = 1" in starts.sql
+        assert "instr(json_extract(n0.props, '$.\"designation\"'), ?) = 1" in starts.sql
         ends = self.compile("MATCH (n) WHERE n.designation ENDS WITH 'ra' RETURN n")
-        assert "substr(json_extract(n0.props, ?), -length(?)) = ?" in ends.sql
+        assert "substr(json_extract(n0.props, '$.\"designation\"'), -length(?)) = ?" in ends.sql
         contains = self.compile("MATCH (n) WHERE n.designation CONTAINS 'orr' RETURN n")
-        assert "instr(json_extract(n0.props, ?), ?) > 0" in contains.sql
+        assert "instr(json_extract(n0.props, '$.\"designation\"'), ?) > 0" in contains.sql
 
     def test_empty_ends_with_compiles_to_type_guard(self) -> None:
         compiled = self.compile("MATCH (n) WHERE n.designation ENDS WITH '' RETURN n")
-        assert "json_type(n0.props, ?) = 'text'" in compiled.sql
+        assert "json_type(n0.props, '$.\"designation\"') = 'text'" in compiled.sql
         assert "substr" not in compiled.sql
 
     def test_reversed_comparison_flips_operator(self) -> None:
         compiled = self.compile("MATCH (n) WHERE 1 < n.cycles RETURN n")
         assert compiled.residual is None
-        assert "json_extract(n0.props, ?) > ?" in compiled.sql
+        assert "json_extract(n0.props, '$.\"cycles\"') > ?" in compiled.sql
 
     def test_property_to_property_comparison_is_residual(self) -> None:
         compiled = self.compile("MATCH (a)-[r]->(b) WHERE a.cycles < b.cycles RETURN a")
@@ -283,7 +293,7 @@ class TestPushdown:
     def test_relationship_properties_are_pushable(self) -> None:
         compiled = self.compile("MATCH (a)-[r]->(b) WHERE r.since_cycle >= 2020 RETURN a")
         assert compiled.residual is None
-        assert "json_extract(r0.props, ?) >= ?" in compiled.sql
+        assert "json_extract(r0.props, '$.\"since_cycle\"') >= ?" in compiled.sql
 
     def test_parameter_values_are_never_interpolated(self) -> None:
         value = "Quorra' OR 1=1 --"

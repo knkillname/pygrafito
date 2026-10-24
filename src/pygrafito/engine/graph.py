@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Public graph facade."""
 
+import sqlite3
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path as FilePath
 from types import TracebackType
@@ -17,13 +18,17 @@ from pygrafito.engine.query.semantic import SemanticAnalyzer
 from pygrafito.engine.query.values import QueryValue
 from pygrafito.engine.transaction import Transaction
 from pygrafito.engine.traversal import (
-    AdjacencySnapshot,
+    DatabaseNeighborhood,
     ReachabilityEvaluator,
     ShortestPathEvaluator,
     TrailEnumerator,
+    TraversalCapture,
+    TraversalSupport,
 )
 from pygrafito.model import (
     Direction,
+    Index,
+    IndexKind,
     Node,
     Path,
     Relationship,
@@ -33,6 +38,7 @@ from pygrafito.model import (
 )
 from pygrafito.storage.codec import PropertyCodec
 from pygrafito.storage.connection import Database
+from pygrafito.storage.indexes import IndexRegistry
 from pygrafito.storage.nodes import NodeRepository
 from pygrafito.storage.relationships import RelationshipRepository
 
@@ -57,6 +63,7 @@ class Graph:
             database.connection,
             self._codec,
         )
+        self._indexes = IndexRegistry(database.connection, self._codec)
         self._query = QueryExecutor(
             database.connection,
             self._nodes,
@@ -189,6 +196,154 @@ class Graph:
             text,
             PlanBuilder.build(analysis),
         )
+
+    def explain(
+        self,
+        text: str,
+        parameters: Mapping[str, QueryValue] | None = None,
+    ) -> tuple[str, ...]:
+        """Return the planned access path for one statement without running it.
+
+        Parameters
+        ----------
+        text : str
+            Query source text.
+        parameters : Mapping[str, QueryValue] | None, optional
+            Query parameter values, by default none.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One detail line per plan row, in plan order. A statement without a
+            ``MATCH`` clause returns an empty tuple.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the statement does not parse.
+        QuerySemanticError
+            If the statement is invalid or references a missing parameter.
+        """
+        self._database.ensure_open()
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        plan = PlanBuilder.build(analysis)
+        return self._query.explain(plan, parameters or {})
+
+    def create_node_index(self, key: str) -> Index:
+        """Declare a property index over nodes.
+
+        Parameters
+        ----------
+        key : str
+            Property key whose values are indexed.
+
+        Returns
+        -------
+        Index
+            The declared index.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        """
+        return self._create_index(Index(IndexKind.NODE, key))
+
+    def create_relationship_index(self, key: str) -> Index:
+        """Declare a property index over relationships.
+
+        Parameters
+        ----------
+        key : str
+            Property key whose values are indexed.
+
+        Returns
+        -------
+        Index
+            The declared index.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        """
+        return self._create_index(Index(IndexKind.RELATIONSHIP, key))
+
+    def drop_index(self, index: Index) -> None:
+        """Remove one declared index.
+
+        Parameters
+        ----------
+        index : Index
+            Index returned by ``indexes`` or constructed by the caller.
+
+        Raises
+        ------
+        NotFoundError
+            If the index is not declared.
+        TransactionError
+            If an explicit transaction is active on this graph.
+        """
+        self._require_index_access()
+        self._indexes.drop(index)
+        self._refresh_planner_statistics()
+
+    def indexes(self) -> tuple[Index, ...]:
+        """Return the declared indexes.
+
+        Returns
+        -------
+        tuple[Index, ...]
+            Declared indexes ordered by element kind and key.
+        """
+        self._database.ensure_open()
+        return self._indexes.all()
+
+    def _create_index(self, index: Index) -> Index:
+        """Create one declared index after the access checks.
+
+        Parameters
+        ----------
+        index : Index
+            Index to create.
+
+        Returns
+        -------
+        Index
+            The declared index.
+        """
+        self._require_index_access()
+        self._indexes.create(index)
+        self._refresh_planner_statistics()
+        return index
+
+    def _refresh_planner_statistics(self) -> None:
+        """Refresh planning statistics, ignoring failures.
+
+        Statistics affect plan choice only, so a refresh failure must not fail
+        the index operation that triggered it.
+        """
+        try:
+            self._database.connection.execute("ANALYZE")
+        except sqlite3.OperationalError:
+            return
+
+    def _require_index_access(self) -> None:
+        """Reject index changes while an explicit transaction is active.
+
+        Raises
+        ------
+        TransactionError
+            If an explicit transaction is active on this graph.
+        """
+        self._database.ensure_open()
+        if self._database.connection.in_transaction:
+            message = "a graph transaction is active; declare indexes outside it"
+            raise TransactionError(message)
 
     def add_node(
         self,
@@ -461,7 +616,12 @@ class Graph:
             Each reached node once with its shortest depth.
         """
         self._database.ensure_open()
-        snapshot = self._snapshot()
+        snapshot = TraversalCapture(self._nodes, self._relationships).region(
+            start,
+            max_depth,
+            direction,
+            types,
+        )
         evaluator = ReachabilityEvaluator(
             snapshot,
             start,
@@ -503,9 +663,9 @@ class Graph:
             A shortest path, or ``None`` when none exists.
         """
         self._database.ensure_open()
-        snapshot = self._snapshot()
+        source = DatabaseNeighborhood(self._nodes, self._relationships)
         evaluator = ShortestPathEvaluator(
-            snapshot,
+            source,
             start,
             end,
             direction,
@@ -553,7 +713,14 @@ class Graph:
             Trails within the depth range.
         """
         self._database.ensure_open()
-        snapshot = self._snapshot()
+        end_id = TraversalSupport.node_id(end)
+        snapshot = TraversalCapture(self._nodes, self._relationships).region(
+            start,
+            max_depth,
+            direction,
+            types,
+            include=(end_id,),
+        )
         evaluator = TrailEnumerator(
             snapshot,
             start,
@@ -565,16 +732,3 @@ class Graph:
             limit,
         )
         return iter(evaluator)
-
-    def _snapshot(self) -> AdjacencySnapshot:
-        """Materialize the graph state for one traversal.
-
-        Returns
-        -------
-        AdjacencySnapshot
-            Snapshot fixed at call time.
-        """
-        return AdjacencySnapshot.capture(
-            self._nodes,
-            self._relationships,
-        )

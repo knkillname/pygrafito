@@ -19,6 +19,8 @@ this README is executed by the test suite.
 - [Deletion](#deletion)
 - [Traversal](#traversal)
 - [Query language](#query-language)
+- [Indexes](#indexes)
+- [Performance](#performance)
 - [Persistence](#persistence)
 - [License](#license)
 
@@ -161,7 +163,9 @@ with Graph.open(":memory:") as graph:
 ## Traversal
 
 Traversal reads a consistent snapshot that is materialized when the call is
-made, so writes performed later do not change an in-progress result.
+made, so writes performed later do not change an in-progress result. Only the
+region the depth bound can reach is materialized, so traversal cost tracks the
+size of the answer rather than the size of the database.
 
 `traverse` yields every node reachable within `max_depth` exactly once, together
 with its shortest depth. The start node is not yielded.
@@ -343,6 +347,48 @@ with Graph.open(":memory:") as graph:
 See [`docs/query-language.md`](docs/query-language.md) for the complete grammar,
 write clauses, mutation cardinality, value and null semantics, functions,
 aggregation, ordering rules, parameters, errors, and the supported core profile.
+
+## Indexes
+
+Property filters can use a declared index. An index is key-scoped, persists in the
+database file, and never changes what a query returns; it only changes how much work the
+engine does. See [`docs/indexes.md`](docs/indexes.md) for what indexes accelerate, what
+they cost, and when the planner ignores one.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    graph.add_node("Program", designation="Kevin Flynn", cycles=36)
+    graph.add_node("Program", designation="Quorra", cycles=37)
+
+    index = graph.create_node_index("cycles")
+    print(index.kind.value, index.key)             # node cycles
+    print([item.key for item in graph.indexes()])  # ['cycles']
+
+    result = graph.query(
+        "MATCH (n:Program) WHERE n.cycles = 37 RETURN n.designation AS name"
+    )
+    print([row["name"] for row in result])  # ['Quorra']
+
+    plan = graph.explain("MATCH (n:Program) WHERE n.cycles = 37 RETURN n")
+    print(any("pygrafito_idx_node_" in line for line in plan))  # True
+
+    graph.drop_index(index)
+```
+
+## Performance
+
+A declared index changes the cost profile of a filter. On a 200,000-node in-memory
+graph, a property equality filter measured 77 ms without an index and 2.3 ms with one;
+the same filter takes 7.7 ms at 20,000 nodes, so the unindexed cost tracks the number of
+candidate nodes while the indexed cost stays in the low milliseconds. Maintaining an
+index costs roughly 10 to 15 percent of insert and update throughput.
+
+These are single-machine numbers for one synthetic workload. They are not a comparison
+with another database engine, not a promise, and not file-backed. See
+[`docs/performance.md`](docs/performance.md) for the dataset, the exact command that
+produced each row, and the cases where the planner still scans.
 
 ## Persistence
 

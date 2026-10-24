@@ -25,6 +25,45 @@ class Direction(Enum):
     BOTH = "both"
 
 
+class IndexKind(Enum):
+    """Element kind that a declared property index covers."""
+
+    NODE = "node"
+    RELATIONSHIP = "relationship"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Index:
+    """Immutable description of one declared property index.
+
+    Parameters
+    ----------
+    kind : IndexKind
+        Element kind the index covers.
+    key : str
+        Property key whose values the index accelerates.
+    """
+
+    kind: IndexKind
+    key: str
+
+    def __post_init__(self) -> None:
+        """Validate the kind and key.
+
+        Raises
+        ------
+        ValidationError
+            If the kind is not an ``IndexKind`` or the key is not a non-empty
+            string.
+        """
+        if not isinstance(self.kind, IndexKind):
+            message = "index kind must be an IndexKind value"
+            raise ValidationError(message)
+        if not isinstance(self.key, str) or not self.key:
+            message = "index key must be a non-empty string"
+            raise ValidationError(message)
+
+
 class PygrafitoError(Exception):
     """Base class for every error raised by pygrafito."""
 

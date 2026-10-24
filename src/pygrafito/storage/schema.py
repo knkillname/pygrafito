@@ -47,6 +47,7 @@ class Schema:
         """,
         "CREATE INDEX IF NOT EXISTS rel_by_src ON relationships (src, rel_type, dst)",
         "CREATE INDEX IF NOT EXISTS rel_by_dst ON relationships (dst, rel_type, src)",
+        "CREATE INDEX IF NOT EXISTS rel_by_type ON relationships (rel_type, src, dst)",
     )
 
     def __init__(self, connection: Connection) -> None:

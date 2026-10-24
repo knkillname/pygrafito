@@ -227,6 +227,29 @@ class TestFind(_NodeTestCase):
             list(repository.find(properties={"value": mixed}))
 
 
+class TestFindPredicateShape:
+    """Verify node property predicates embed the JSON path as a literal."""
+
+    def test_property_path_is_inlined(self) -> None:
+        database = Database(":memory:")
+        try:
+            repository = NodeRepository(database.connection, PropertyCodec())
+            node = repository.create(("Program",), {"cycles": 36})
+            statements: list[str] = []
+            database.connection.set_trace_callback(statements.append)
+            try:
+                found = list(repository.find(("Program",), {"cycles": 36}))
+            finally:
+                database.connection.set_trace_callback(None)
+            assert [item.id for item in found] == [node.id]
+            lookup = next(statement for statement in statements if "json_extract" in statement)
+            assert "json_extract(nodes.props, '$.\"cycles\"') = 36" in lookup
+            assert "json_type(nodes.props, '$.\"cycles\"')" in lookup
+            assert "?" not in lookup
+        finally:
+            database.close()
+
+
 class TestCountAndReuse(_NodeTestCase):
     """Verify derived information used by the facade."""
 
@@ -236,3 +259,19 @@ class TestCountAndReuse(_NodeTestCase):
     ) -> None:
         node = repository.create()
         assert not repository.is_connected(node.id)
+
+
+class TestBatchChunking:
+    """Verify wide batches are split without losing nodes."""
+
+    def test_wide_batch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(NodeRepository, "MAXIMUM_PARAMETERS", 3)
+        database = Database(":memory:")
+        try:
+            repository = NodeRepository(database.connection, PropertyCodec())
+            created = [repository.create(("Program",), {"cycles": index}) for index in range(8)]
+            loaded = repository.get_many(node.id for node in created)
+            assert set(loaded) == {node.id for node in created}
+            assert [loaded[node.id]["cycles"] for node in created] == list(range(8))
+        finally:
+            database.close()

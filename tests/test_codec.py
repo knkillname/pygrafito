@@ -4,6 +4,7 @@
 """Tests for strict property validation and canonical JSON encoding."""
 
 import math
+import sqlite3
 
 import pytest
 
@@ -228,6 +229,46 @@ class TestJsonPaths(_CodecTestCase):
     ) -> None:
         with pytest.raises(ValidationError):
             property_codec.json_path(key)  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("key", ["null\x00key", "\x00"])
+    def test_null_character_rejected(
+        self,
+        property_codec: PropertyCodec,
+        key: str,
+    ) -> None:
+        with pytest.raises(ValidationError):
+            property_codec.json_path(key)
+
+    @pytest.mark.parametrize(
+        ("key", "expected"),
+        [
+            ("designation", "'$.\"designation\"'"),
+            ("a.b", "'$.\"a.b\"'"),
+            ("a b", "'$.\"a b\"'"),
+            ('a"b', '\'$."a\\"b"\''),
+            ("a\\b", "'$.\"a\\\\b\"'"),
+            ("a'b", "'$.\"a''b\"'"),
+            ("qu'\"\\x", "'$.\"qu''\\\"\\\\x\"'"),
+            ("ñ✓", "'$.\"ñ✓\"'"),
+            ("'; DROP TABLE nodes; --", "'$.\"''; DROP TABLE nodes; --\"'"),
+        ],
+    )
+    def test_sql_path_literals(
+        self,
+        property_codec: PropertyCodec,
+        key: str,
+        expected: str,
+    ) -> None:
+        assert property_codec.sql_json_path(key) == expected
+
+    def test_sql_path_literal_is_executable(self, property_codec: PropertyCodec) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.execute("CREATE TABLE probes (props TEXT NOT NULL)")
+        connection.execute("INSERT INTO probes VALUES (?)", ('{"a\'b": 7}',))
+        literal = property_codec.sql_json_path("a'b")
+        row = connection.execute(f"SELECT json_extract(props, {literal}) FROM probes").fetchone()
+        assert row == (7,)
+        connection.close()
 
 
 class TestTypeMetadata(_CodecTestCase):

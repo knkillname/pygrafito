@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Explicit, key-scoped property indexes for nodes and relationships:
+  `Graph.create_node_index`, `Graph.create_relationship_index`, `Graph.drop_index`,
+  and `Graph.indexes`. Indexes persist in the database file without a schema version
+  change and accelerate property equality, range, and membership filters.
+- `Graph.explain`, returning the planned access path for a statement without executing
+  it.
+- A structural index on relationship type, so a type filter without a bound endpoint
+  does not read every relationship.
+- Planner statistics refresh after an index is declared or removed, and on close of a
+  file-backed graph.
 - Write clauses in the query dialect: `CREATE` for nodes and relationships,
   `SET` and `REMOVE` for properties and labels, and `DELETE` / `DETACH DELETE`
   for elements.
@@ -24,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `traverse`, `paths`, and `shortest_path` materialize only the region within the
+  caller's depth and direction bounds instead of loading every node and relationship, so
+  traversal cost tracks the explored region rather than the size of the database.
+- Property filters and lookups embed the property key as an escaped JSON path in the
+  statement instead of binding it as a parameter, so SQLite can match an index built over
+  the same path. Statement results, ordering, and value equality are unchanged.
+- Property keys containing null characters are rejected with a validation error, because
+  a JSON path cannot address them.
 - `Graph.query`, `Transaction.query`, and `PreparedQuery.execute` execute read
   and write statements. Statements containing a write clause no longer raise a
   read-only query error.

@@ -232,6 +232,38 @@ class TestFind(_RelationshipTestCase):
             list(relationship_repository.find(""))
 
 
+class TestFindPredicateShape:
+    """Verify relationship property predicates embed the JSON path as a literal."""
+
+    def test_property_path_is_inlined(self) -> None:
+        database = Database(":memory:")
+        try:
+            codec = PropertyCodec()
+            node_repository = NodeRepository(database.connection, codec)
+            relationship_repository = RelationshipRepository(database.connection, codec)
+            first = node_repository.create()
+            second = node_repository.create()
+            relationship = relationship_repository.create(
+                first.id,
+                "ALLIES_WITH",
+                second.id,
+                {"since_cycle": 2020},
+            )
+            statements: list[str] = []
+            database.connection.set_trace_callback(statements.append)
+            try:
+                found = list(relationship_repository.find("ALLIES_WITH", {"since_cycle": 2020}))
+            finally:
+                database.connection.set_trace_callback(None)
+            assert [item.id for item in found] == [relationship.id]
+            lookup = next(statement for statement in statements if "json_extract" in statement)
+            assert "json_extract(relationships.props, '$.\"since_cycle\"') = 2020" in lookup
+            assert "json_type(relationships.props, '$.\"since_cycle\"')" in lookup
+            assert "?" not in lookup
+        finally:
+            database.close()
+
+
 class TestDelete(_RelationshipTestCase):
     """Verify direct relationship deletion."""
 

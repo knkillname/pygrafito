@@ -80,6 +80,9 @@ class PropertyCodec:
         if not isinstance(value, str) or not value:
             message = f"{field} must be a non-empty string"
             raise ValidationError(message)
+        if "\x00" in value:
+            message = f"{field} must not contain null characters"
+            raise ValidationError(message)
         return value
 
     def encode_value(self, value: Value) -> str:
@@ -208,6 +211,33 @@ class PropertyCodec:
         property_key = self.validate_identifier(key, "property key")
         escaped = property_key.replace("\\", "\\\\").replace('"', '\\"')
         return f'$."{escaped}"'
+
+    def sql_json_path(self, key: str) -> str:
+        """Render a property key as an embeddable SQL string literal.
+
+        The literal carries the surrounding single quotes and doubles any
+        single quote inside the path, so a caller can place it directly in a
+        statement. Embedding the path literally is what lets SQLite match an
+        expression index built over the same path.
+
+        Parameters
+        ----------
+        key : str
+            Property key. Dots, spaces, quotes, and backslashes are treated
+            literally.
+
+        Returns
+        -------
+        str
+            A SQL string literal such as ``'$."a.b"'``.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        path = self.json_path(key)
+        return "'" + path.replace("'", "''") + "'"
 
     def json_type(self, value: Value) -> str:
         """Return the SQLite JSON type reported for a property value.

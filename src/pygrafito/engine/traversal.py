@@ -4,8 +4,8 @@
 """Traversal snapshots and evaluators."""
 
 import collections
-from collections.abc import Iterable, Iterator
-from typing import Self
+import typing
+from collections.abc import Iterable, Iterator, Sequence
 
 from pygrafito.model import (
     Direction,
@@ -144,7 +144,85 @@ class TraversalSupport:
             raise ValidationError(message)
 
 
-class AdjacencySnapshot:
+class TraversalSource:
+    """Read-only adjacency that breadth-first traversal can consume.
+
+    A source answers node lookups and expands an ordered frontier. It either
+    holds materialized adjacency or reads it on demand, so evaluators do not
+    depend on how much of the graph was loaded.
+    """
+
+    def contains(self, node_id: int) -> bool:
+        """Report whether the source can serve a node.
+
+        Parameters
+        ----------
+        node_id : int
+            Identifier to check.
+
+        Returns
+        -------
+        bool
+            ``True`` when the node is available.
+        """
+        raise NotImplementedError
+
+    def node(self, node_id: int) -> Node:
+        """Return one node snapshot.
+
+        Parameters
+        ----------
+        node_id : int
+            Identifier of the node.
+
+        Returns
+        -------
+        Node
+            Node snapshot.
+        """
+        raise NotImplementedError
+
+    def nodes(self, node_ids: Iterable[int]) -> dict[int, Node]:
+        """Return several node snapshots at once.
+
+        Parameters
+        ----------
+        node_ids : Iterable[int]
+            Identifiers to read.
+
+        Returns
+        -------
+        dict[int, Node]
+            Snapshots keyed by id, omitting ids that are not available.
+        """
+        raise NotImplementedError
+
+    def frontier_edges(
+        self,
+        frontier: Sequence[int],
+        direction: Direction,
+        rel_types: frozenset[str] | None,
+    ) -> Iterator[tuple[int, Relationship, int]]:
+        """Yield the edges leaving one ordered frontier.
+
+        Parameters
+        ----------
+        frontier : Sequence[int]
+            Ordered node identifiers to expand.
+        direction : Direction
+            Direction to follow.
+        rel_types : frozenset[str] | None
+            Allowed relationship types, or ``None`` for all types.
+
+        Yields
+        ------
+        tuple[int, Relationship, int]
+            The frontier node, the edge, and the node reached through it.
+        """
+        raise NotImplementedError
+
+
+class AdjacencySnapshot(TraversalSource):
     """A materialized, read-only view of nodes and relationships.
 
     Parameters
@@ -170,28 +248,7 @@ class AdjacencySnapshot:
         self._outgoing = {node_id: tuple(values) for node_id, values in outgoing.items()}
         self._incoming = {node_id: tuple(values) for node_id, values in incoming.items()}
 
-    @classmethod
-    def capture(
-        cls,
-        node_repository: NodeRepository,
-        relationship_repository: RelationshipRepository,
-    ) -> Self:
-        """Materialize the committed graph state.
-
-        Parameters
-        ----------
-        node_repository : NodeRepository
-            Repository that supplies node snapshots.
-        relationship_repository : RelationshipRepository
-            Repository that supplies relationship snapshots.
-
-        Returns
-        -------
-        Self
-            A snapshot fixed at capture time.
-        """
-        return cls(node_repository.all(), relationship_repository.all())
-
+    @typing.override
     def contains(self, node_id: int) -> bool:
         """Report whether the snapshot contains a node.
 
@@ -207,6 +264,7 @@ class AdjacencySnapshot:
         """
         return node_id in self._nodes
 
+    @typing.override
     def node(self, node_id: int) -> Node:
         """Return a captured node.
 
@@ -230,6 +288,49 @@ class AdjacencySnapshot:
         except KeyError as error:
             message = f"node {node_id} does not exist"
             raise NotFoundError(message) from error
+
+    @typing.override
+    def nodes(self, node_ids: Iterable[int]) -> dict[int, Node]:
+        """Return several captured nodes at once.
+
+        Parameters
+        ----------
+        node_ids : Iterable[int]
+            Identifiers to read.
+
+        Returns
+        -------
+        dict[int, Node]
+            Snapshots keyed by id, omitting ids outside the snapshot.
+        """
+        return {node_id: self._nodes[node_id] for node_id in node_ids if node_id in self._nodes}
+
+    @typing.override
+    def frontier_edges(
+        self,
+        frontier: Sequence[int],
+        direction: Direction,
+        rel_types: frozenset[str] | None,
+    ) -> Iterator[tuple[int, Relationship, int]]:
+        """Yield edges leaving one ordered frontier.
+
+        Parameters
+        ----------
+        frontier : Sequence[int]
+            Ordered node identifiers to expand.
+        direction : Direction
+            Direction to follow.
+        rel_types : frozenset[str] | None
+            Allowed relationship types, or ``None`` for all types.
+
+        Yields
+        ------
+        tuple[int, Relationship, int]
+            The frontier node, the edge, and the node reached through it.
+        """
+        for node_id in frontier:
+            for relationship, target in self.edges(node_id, direction, rel_types):
+                yield node_id, relationship, target
 
     def edges(
         self,
@@ -306,6 +407,193 @@ class AdjacencySnapshot:
         return distances
 
 
+class DatabaseNeighborhood(TraversalSource):
+    """Read adjacency from the repositories on demand.
+
+    Nothing is materialized, so a search reads only the levels it visits.
+
+    Parameters
+    ----------
+    nodes : NodeRepository
+        Source for node snapshots.
+    relationships : RelationshipRepository
+        Source for frontier reads.
+    """
+
+    def __init__(
+        self,
+        nodes: NodeRepository,
+        relationships: RelationshipRepository,
+    ) -> None:
+        self._nodes = nodes
+        self._relationships = relationships
+
+    @typing.override
+    def contains(self, node_id: int) -> bool:
+        """Report whether the node exists in the database.
+
+        Parameters
+        ----------
+        node_id : int
+            Identifier to check.
+
+        Returns
+        -------
+        bool
+            ``True`` when the node exists.
+        """
+        return self._nodes.exists(node_id)
+
+    @typing.override
+    def node(self, node_id: int) -> Node:
+        """Read one node snapshot.
+
+        Parameters
+        ----------
+        node_id : int
+            Identifier of the node.
+
+        Returns
+        -------
+        Node
+            Node snapshot.
+        """
+        return self._nodes.get(node_id)
+
+    @typing.override
+    def nodes(self, node_ids: Iterable[int]) -> dict[int, Node]:
+        """Read several node snapshots at once.
+
+        Parameters
+        ----------
+        node_ids : Iterable[int]
+            Identifiers to read.
+
+        Returns
+        -------
+        dict[int, Node]
+            Snapshots keyed by id, omitting missing ids.
+        """
+        return self._nodes.get_many(node_ids)
+
+    @typing.override
+    def frontier_edges(
+        self,
+        frontier: Sequence[int],
+        direction: Direction,
+        rel_types: frozenset[str] | None,
+    ) -> Iterator[tuple[int, Relationship, int]]:
+        """Read one ordered adjacency level from the database.
+
+        Parameters
+        ----------
+        frontier : Sequence[int]
+            Ordered node identifiers to expand.
+        direction : Direction
+            Direction to follow.
+        rel_types : frozenset[str] | None
+            Allowed relationship types, or ``None`` for all types.
+
+        Yields
+        ------
+        tuple[int, Relationship, int]
+            The frontier node, the edge, and the node reached through it.
+        """
+        yield from self._relationships.frontier(frontier, direction, rel_types)
+
+
+class TraversalCapture:
+    """Materialize the region a bounded search can reach.
+
+    The region holds every node within the depth bound and every relationship
+    whose tail is within the bound minus one, including edges that return to
+    already visited nodes, because trail enumeration needs them.
+
+    Parameters
+    ----------
+    nodes : NodeRepository
+        Source for node snapshots.
+    relationships : RelationshipRepository
+        Source for level reads.
+    """
+
+    def __init__(
+        self,
+        nodes: NodeRepository,
+        relationships: RelationshipRepository,
+    ) -> None:
+        self._nodes = nodes
+        self._relationships = relationships
+
+    def region(
+        self,
+        start: Node | int,
+        max_depth: int,
+        direction: Direction = Direction.OUTGOING,
+        rel_types: Iterable[str] | None = None,
+        include: Iterable[int] = (),
+    ) -> AdjacencySnapshot:
+        """Capture the bounded region around a start node.
+
+        Parameters
+        ----------
+        start : Node | int
+            Start node or its id.
+        max_depth : int
+            Maximum number of relationships to follow.
+        direction : Direction, optional
+            Direction to follow, by default outgoing.
+        rel_types : Iterable[str] | None, optional
+            Allowed relationship types, by default all types.
+        include : Iterable[int], optional
+            Extra node ids that must be present even when the region cannot
+            reach them, by default none.
+
+        Returns
+        -------
+        AdjacencySnapshot
+            Materialized region fixed at capture time.
+
+        Raises
+        ------
+        ValidationError
+            If the depth or direction is invalid.
+        NotFoundError
+            If the start node or an included node does not exist.
+        """
+        start_id = TraversalSupport.node_id(start)
+        TraversalSupport.validate_depth(max_depth, "max_depth")
+        TraversalSupport.validate_direction(direction)
+        types = TraversalSupport.normalize_types(rel_types)
+        nodes_by_id: dict[int, Node] = {start_id: self._nodes.get(start_id)}
+        relationships: dict[int, Relationship] = {}
+        frontier: tuple[int, ...] = (start_id,)
+        for level in range(1, max_depth + 1):
+            seen = set(nodes_by_id)
+            discovered: list[int] = []
+            for _, relationship, target in self._relationships.frontier(
+                frontier,
+                direction,
+                types,
+            ):
+                relationships.setdefault(relationship.id, relationship)
+                if target not in seen:
+                    seen.add(target)
+                    discovered.append(target)
+            if discovered:
+                nodes_by_id.update(self._nodes.get_many(discovered))
+            if level == max_depth or not discovered:
+                break
+            frontier = tuple(discovered)
+        for node_id in include:
+            if node_id not in nodes_by_id:
+                nodes_by_id[node_id] = self._nodes.get(node_id)
+        return AdjacencySnapshot(
+            nodes_by_id.values(),
+            sorted(relationships.values(), key=lambda relationship: relationship.id),
+        )
+
+
 class ReachabilityEvaluator:
     """Yield distinct reachable nodes at their shortest depth.
 
@@ -377,8 +665,8 @@ class ShortestPathEvaluator:
 
     Parameters
     ----------
-    snapshot : AdjacencySnapshot
-        Graph snapshot to search.
+    source : TraversalSource
+        Adjacency source read one frontier at a time.
     start : Node | int
         Start node or its id.
     end : Node | int
@@ -393,14 +681,14 @@ class ShortestPathEvaluator:
 
     def __init__(
         self,
-        snapshot: AdjacencySnapshot,
+        source: TraversalSource,
         start: Node | int,
         end: Node | int,
         direction: Direction = Direction.OUTGOING,
         rel_types: Iterable[str] | None = None,
         max_depth: int | None = None,
     ) -> None:
-        self._snapshot = snapshot
+        self._source = source
         self._start = TraversalSupport.node_id(start)
         self._end = TraversalSupport.node_id(end)
         TraversalSupport.validate_direction(direction)
@@ -409,10 +697,10 @@ class ShortestPathEvaluator:
         if max_depth is not None:
             TraversalSupport.validate_depth(max_depth, "max_depth")
         self._max_depth = max_depth
-        if not snapshot.contains(self._start):
+        if not source.contains(self._start):
             message = f"node {self._start} does not exist"
             raise NotFoundError(message)
-        if not snapshot.contains(self._end):
+        if not source.contains(self._end):
             message = f"node {self._end} does not exist"
             raise NotFoundError(message)
 
@@ -426,7 +714,7 @@ class ShortestPathEvaluator:
         """
         if self._start == self._end:
             return Path(
-                nodes=(self._snapshot.node(self._start),),
+                nodes=(self._source.node(self._start),),
                 relationships=(),
             )
         if self._max_depth == 0:
@@ -435,8 +723,8 @@ class ShortestPathEvaluator:
         backward_parent: dict[int, tuple[int, Relationship] | None] = {self._end: None}
         forward_depth = {self._start: 0}
         backward_depth = {self._end: 0}
-        forward_frontier = {self._start}
-        backward_frontier = {self._end}
+        forward_frontier = [self._start]
+        backward_frontier = [self._end]
         while forward_frontier and backward_frontier:
             if len(forward_frontier) <= len(backward_frontier):
                 forward_frontier, meeting = self._expand(
@@ -465,19 +753,19 @@ class ShortestPathEvaluator:
 
     def _expand(
         self,
-        frontier: set[int],
+        frontier: list[int],
         own_depth: dict[int, int],
         own_parent: dict[int, tuple[int, Relationship] | None],
         other_parent: dict[int, tuple[int, Relationship] | None],
         other_depth: dict[int, int],
         direction: Direction,
-    ) -> tuple[set[int], int | None]:
+    ) -> tuple[list[int], int | None]:
         """Expand one breadth-first layer and detect an intersection.
 
         Parameters
         ----------
-        frontier : set[int]
-            Nodes at the current depth of this side.
+        frontier : list[int]
+            Nodes at the current depth of this side, in discovery order.
         own_depth : dict[int, int]
             Depth of each visited node on this side.
         own_parent : dict[int, tuple[int, Relationship] | None]
@@ -491,31 +779,27 @@ class ShortestPathEvaluator:
 
         Returns
         -------
-        tuple[set[int], int | None]
+        tuple[list[int], int | None]
             The next frontier and the best meeting node, if any.
         """
-        next_frontier: set[int] = set()
+        next_frontier: list[int] = []
         meeting: int | None = None
         best_length: int | None = None
-        for current in frontier:
+        edges = self._source.frontier_edges(frontier, direction, self._types)
+        for current, relationship, target in edges:
             next_depth = own_depth[current] + 1
             if self._max_depth is not None and next_depth > self._max_depth:
                 continue
-            for relationship, target in self._snapshot.edges(
-                current,
-                direction,
-                self._types,
-            ):
-                if target in own_parent:
-                    continue
-                own_parent[target] = (current, relationship)
-                own_depth[target] = next_depth
-                next_frontier.add(target)
-                if target in other_parent:
-                    total = next_depth + other_depth[target]
-                    if best_length is None or total < best_length:
-                        best_length = total
-                        meeting = target
+            if target in own_parent:
+                continue
+            own_parent[target] = (current, relationship)
+            own_depth[target] = next_depth
+            next_frontier.append(target)
+            if target in other_parent:
+                total = next_depth + other_depth[target]
+                if best_length is None or total < best_length:
+                    best_length = total
+                    meeting = target
         return next_frontier, meeting
 
     def _build_path(
@@ -558,9 +842,10 @@ class ShortestPathEvaluator:
             suffix_nodes.append(following)
             suffix_relationships.append(relationship)
             current = following
-        nodes = tuple(self._snapshot.node(node_id) for node_id in (*prefix_nodes, *suffix_nodes))
+        ordered = (*prefix_nodes, *suffix_nodes)
+        nodes_by_id = self._source.nodes(ordered)
         return Path(
-            nodes=nodes,
+            nodes=tuple(nodes_by_id[node_id] for node_id in ordered),
             relationships=(*prefix_relationships, *suffix_relationships),
         )
 

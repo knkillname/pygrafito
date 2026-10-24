@@ -4,6 +4,7 @@
 """End-to-end persistence and schema-compatibility tests for queries."""
 
 import sqlite3
+import typing
 from pathlib import Path
 
 from pygrafito import Graph
@@ -153,3 +154,52 @@ class TestWriteStatementIntegration:
             assert quorra["cycles"] == 38
             assert list(graph.find_nodes("Program", designation="Kevin Flynn")) == []
             assert list(graph.find_relationships("ALLIES_WITH")) == []
+
+
+class TestKeyInjectionSafety:
+    """Verify SQL-shaped property keys are matched literally."""
+
+    HOSTILE_KEY: typing.ClassVar[str] = "'); DROP TABLE nodes; --"
+    OR_KEY: typing.ClassVar[str] = "x' OR '1'='1"
+
+    def test_query_matches_hostile_key_literally(self) -> None:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", **{self.HOSTILE_KEY: 1})
+            graph.add_node("Program", designation="Quorra")
+            result = graph.query(
+                f"MATCH (n:Program {{`{self.HOSTILE_KEY}`: 1}}) RETURN n.designation AS name"
+            )
+            assert [row["name"] for row in result] == [None]
+
+    def test_query_keeps_the_store_intact(self) -> None:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", **{self.HOSTILE_KEY: 1})
+            graph.add_node("Program", designation="Tron")
+            graph.query(f"MATCH (n {{`{self.HOSTILE_KEY}`: 1}}) RETURN n")
+            assert graph.query("MATCH (n) RETURN count(*) AS total").rows[0]["total"] == 2
+
+    def test_or_shaped_key_does_not_widen_match(self) -> None:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", **{self.OR_KEY: 1})
+            graph.add_node("Program", **{self.OR_KEY: 2})
+            result = graph.query(f"MATCH (n:Program {{`{self.OR_KEY}`: 1}}) RETURN n")
+            assert len(result.rows) == 1
+
+    def test_lookup_matches_hostile_key_literally(self) -> None:
+        with Graph.open(":memory:") as graph:
+            matched = graph.add_node("Program", **{self.HOSTILE_KEY: 7})
+            graph.add_node("Program", **{self.HOSTILE_KEY: 8})
+            found = list(graph.find_nodes("Program", **{self.HOSTILE_KEY: 7}))
+            assert [node.id for node in found] == [matched.id]
+            assert graph.query("MATCH (n) RETURN count(*) AS total").rows[0]["total"] == 2
+
+    def test_relationship_query_matches_hostile_key_literally(self) -> None:
+        with Graph.open(":memory:") as graph:
+            kevin = graph.add_node("Program", designation="Kevin Flynn")
+            quorra = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(kevin, "ALLIES_WITH", quorra, **{self.HOSTILE_KEY: 2020})
+            result = graph.query(
+                f"MATCH (a)-[r:ALLIES_WITH {{`{self.HOSTILE_KEY}`: 2020}}]->(b) "
+                f"RETURN b.designation AS name"
+            )
+            assert [row["name"] for row in result] == ["Quorra"]

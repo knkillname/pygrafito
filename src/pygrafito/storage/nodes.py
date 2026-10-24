@@ -5,7 +5,7 @@
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from sqlite3 import Connection
-from typing import Any
+from typing import Any, ClassVar
 
 from pygrafito.model import (
     ConnectedNodeError,
@@ -35,6 +35,8 @@ class NodeRepository:
     ) -> None:
         self._connection = connection
         self._codec = property_codec
+
+    MAXIMUM_PARAMETERS: ClassVar[int] = 32_766
 
     def create(
         self,
@@ -141,11 +143,16 @@ class NodeRepository:
         unique_ids = tuple(dict.fromkeys(int(node_id) for node_id in node_ids))
         if not unique_ids:
             return {}
-        placeholders = ", ".join("?" for _ in unique_ids)
-        rows = self._connection.execute(
-            f"SELECT id, props FROM nodes WHERE id IN ({placeholders})",
-            list(unique_ids),
-        ).fetchall()
+        rows: list[tuple[Any, ...]] = []
+        for offset in range(0, len(unique_ids), self.MAXIMUM_PARAMETERS):
+            chunk = unique_ids[offset : offset + self.MAXIMUM_PARAMETERS]
+            placeholders = ", ".join("?" for _ in chunk)
+            rows.extend(
+                self._connection.execute(
+                    f"SELECT id, props FROM nodes WHERE id IN ({placeholders})",
+                    list(chunk),
+                ).fetchall()
+            )
         labels_by_node = self._labels_for([int(row[0]) for row in rows])
         return {
             int(row[0]): self._node_from_payload(
@@ -326,11 +333,11 @@ class NodeRepository:
             parameters.append(label)
         if properties:
             for key, value in properties.items():
-                path = self._codec.json_path(key)
-                clauses.append("json_type(nodes.props, ?) = ?")
-                parameters.extend((path, self._codec.json_type(value)))
-                clauses.append("json_extract(nodes.props, ?) = ?")
-                parameters.extend((path, self._codec.comparison_value(value)))
+                path = self._codec.sql_json_path(key)
+                clauses.append(f"json_type(nodes.props, {path}) = ?")
+                parameters.append(self._codec.json_type(value))
+                clauses.append(f"json_extract(nodes.props, {path}) = ?")
+                parameters.append(self._codec.comparison_value(value))
         query = "SELECT nodes.id, nodes.props FROM nodes"
         if clauses:
             query += " WHERE " + " AND ".join(clauses)

@@ -71,6 +71,16 @@ class TestDiamond(_GraphTestCase):
         }
         assert [step.node.id for step in steps].count(nodes["Portal"].id) == 1
 
+    def test_breadth_first_sequence_and_depths(self, graph: Graph) -> None:
+        nodes = self.build_diamond(graph)
+        names = {node.id: name for name, node in nodes.items()}
+        steps = list(graph.traverse(nodes["Grid"], max_depth=2))
+        assert [(names[step.node.id], step.depth) for step in steps] == [
+            ("Safehouse", 1),
+            ("Outlands", 1),
+            ("Portal", 2),
+        ]
+
     def test_depth_bound_excludes_far_nodes(self, graph: Graph) -> None:
         nodes = self.build_diamond(graph)
         steps = list(graph.traverse(nodes["Grid"], max_depth=1))
@@ -97,7 +107,8 @@ class TestCycle(_GraphTestCase):
         graph.add_relationship(third, "GRID_LINK", second)
         steps = list(graph.traverse(first, max_depth=10))
         assert {step.node.id for step in steps} == {second.id, third.id}
-        assert len(steps) == 2
+        assert [step.node.id for step in steps] == [second.id, third.id]
+        assert [step.depth for step in steps] == [1, 2]
 
     def test_self_loop_does_not_yield_start(self, graph: Graph) -> None:
         node = graph.add_node()

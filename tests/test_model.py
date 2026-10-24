@@ -12,6 +12,8 @@ from pygrafito.model import (
     ConnectedNodeError,
     Direction,
     GraphClosedError,
+    Index,
+    IndexKind,
     Node,
     NotFoundError,
     Path,
@@ -32,6 +34,30 @@ class TestDirection:
         assert Direction.OUTGOING.value == "outgoing"
         assert Direction.INCOMING.value == "incoming"
         assert Direction.BOTH.value == "both"
+
+
+class TestIndex:
+    """Verify the declared index value type."""
+
+    def test_members(self) -> None:
+        assert IndexKind.NODE.value == "node"
+        assert IndexKind.RELATIONSHIP.value == "relationship"
+
+    def test_value_equality_and_immutability(self) -> None:
+        index = Index(IndexKind.NODE, "cycles")
+        assert index == Index(IndexKind.NODE, "cycles")
+        assert index != Index(IndexKind.RELATIONSHIP, "cycles")
+        with pytest.raises(FrozenInstanceError):
+            index.key = "designation"  # type: ignore[misc]
+
+    @pytest.mark.parametrize("key", ["", None, 1])
+    def test_invalid_key_rejected(self, key: object) -> None:
+        with pytest.raises(ValidationError):
+            Index(IndexKind.NODE, key)  # type: ignore[arg-type]
+
+    def test_invalid_kind_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            Index(typing.cast(IndexKind, "node"), "cycles")
 
 
 class TestNode:
