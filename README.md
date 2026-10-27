@@ -1,7 +1,7 @@
 # pygrafito
 
-[![PyPI - Version](https://img.shields.io/pypi/v/pygrafito.svg)](https://pypi.org/project/pygrafito)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pygrafito.svg)](https://pypi.org/project/pygrafito)
+[![PyPI - Version](https://img.shields.io/pypi/v/pygrafito)](https://pypi.org/project/pygrafito)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/pygrafito)](https://pypi.org/project/pygrafito)
 
 `pygrafito` is an embedded property graph for Python, persisted in a single SQLite database. It has
 no runtime dependencies outside the standard library: nodes carry labels and strict typed
