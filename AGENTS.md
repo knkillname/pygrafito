@@ -8,6 +8,7 @@
 - Durable specs live in `openspec/specs/` and are authoritative.
 - Implement through `/opsx-apply`; planning and exploration must not write code.
 - Every `/opsx-apply` run MUST update the Sphinx documentation under `docs/` (see [Documentation](#documentation)).
+- After every successful archive operation, create a Git commit.
 
 ## Commands
 
