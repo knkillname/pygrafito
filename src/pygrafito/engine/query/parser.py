@@ -20,6 +20,8 @@ from pygrafito.engine.query.ast import (
     Filter,
     Finish,
     FunctionCall,
+    GroupedPathTerm,
+    HopRange,
     IsNull,
     LabelAnd,
     LabelAssignment,
@@ -39,6 +41,7 @@ from pygrafito.engine.query.ast import (
     MapEntry,
     MapLiteral,
     Match,
+    MatchMode,
     Merge,
     Next,
     NodePattern,
@@ -47,6 +50,8 @@ from pygrafito.engine.query.ast import (
     Parameter,
     PathMode,
     PathPattern,
+    PathSearch,
+    PathSearchKind,
     Property,
     PropertyAssignment,
     PropertyEntry,
@@ -57,6 +62,7 @@ from pygrafito.engine.query.ast import (
     ReturnItem,
     Set,
     SetOperation,
+    SimplePathTerm,
     SortItem,
     Star,
     Statement,
@@ -69,7 +75,6 @@ from pygrafito.engine.query.ast import (
     Yield,
     YieldItem,
 )
-from pygrafito.engine.query.gated import Gated
 from pygrafito.engine.query.labels import LabelExpressions
 from pygrafito.engine.query.lexer import Lexer
 from pygrafito.engine.query.tokens import Keyword, Span, Token, TokenKind
@@ -709,14 +714,42 @@ class Parser:
         Match
             Parsed match clause.
         """
+        match_mode = self._match_mode()
         mode = self._path_mode()
-        patterns = [self._path_pattern(allow_mode=True)]
+        patterns = [self._path_pattern(allow_mode=True, allow_search=True)]
         while self._match_punctuation(","):
-            patterns.append(self._path_pattern(allow_mode=True))
+            patterns.append(self._path_pattern(allow_mode=True, allow_search=True))
         where: Expression | None = None
         if self._match_keyword(Keyword.WHERE):
             where = self._expression()
-        return Match(patterns=tuple(patterns), where=where, optional=optional, mode=mode)
+        return Match(
+            patterns=tuple(patterns),
+            where=where,
+            optional=optional,
+            mode=mode,
+            match_mode=match_mode,
+        )
+
+    def _match_mode(self) -> MatchMode:
+        """Consume an optional clause match mode.
+
+        Returns
+        -------
+        MatchMode
+            Parsed match mode, or the repeatable default when none is named.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If ``EDGES`` or ``ELEMENTS`` is missing after its first word.
+        """
+        if self._match_keyword(Keyword.DIFFERENT):
+            self._expect_keyword(Keyword.EDGES, "expected EDGES after DIFFERENT")
+            return MatchMode.DIFFERENT_EDGES
+        if self._match_keyword(Keyword.REPEATABLE):
+            self._expect_keyword(Keyword.ELEMENTS, "expected ELEMENTS after REPEATABLE")
+            return MatchMode.REPEATABLE_ELEMENTS
+        return MatchMode.REPEATABLE_ELEMENTS
 
     def _clause_pattern(self) -> PathPattern:
         """Parse exactly one path pattern for a clause.
@@ -726,7 +759,7 @@ class Parser:
         PathPattern
             Parsed path pattern.
         """
-        pattern = self._path_pattern()
+        pattern = self._path_pattern(allow_group=False)
         if self._check_punctuation(","):
             self._reject_unsupported(
                 self._current(),
@@ -1171,7 +1204,13 @@ class Parser:
             self._fail_syntax(f"expected {description}", self._current())
         return tuple(labels)
 
-    def _path_pattern(self, *, allow_mode: bool = False) -> PathPattern:
+    def _path_pattern(
+        self,
+        *,
+        allow_mode: bool = False,
+        allow_search: bool = False,
+        allow_group: bool = True,
+    ) -> PathPattern:
         """Parse one path pattern.
 
         Parameters
@@ -1179,27 +1218,193 @@ class Parser:
         allow_mode : bool, optional
             Whether a per-path mode keyword may precede the pattern, by
             default ``False``.
+        allow_search : bool, optional
+            Whether a path-search prefix may follow the path variable, by
+            default ``False``.
+        allow_group : bool, optional
+            Whether grouped and juxtaposed terms are accepted, by default
+            ``True``.
 
         Returns
         -------
         PathPattern
             Parsed path pattern.
         """
+        variable = self._pattern_variable()
+        search = self._path_search() if allow_search else None
         mode = self._path_mode() if allow_mode else None
-        variable: str | None = None
-        if self._is_identifier(self._current()) and self._peek_is_operator("="):
-            variable = self._identifier_text(self._advance())
-            self._advance()
+        if variable is None and search is None and mode is not None:
+            variable = self._pattern_variable()
+        terms: list[SimplePathTerm | GroupedPathTerm] = [
+            self._path_term() if allow_group else self._simple_term()
+        ]
+        if allow_group:
+            while self._check_punctuation("("):
+                terms.append(self._path_term())
+        return PathPattern(
+            terms=tuple(terms),
+            variable=variable,
+            mode=mode,
+            search=search,
+        )
+
+    def _path_term(self) -> SimplePathTerm | GroupedPathTerm:
+        """Parse one simple or grouped path term.
+
+        Returns
+        -------
+        SimplePathTerm | GroupedPathTerm
+            Parsed term.
+        """
+        if self._starts_group():
+            return self._grouped_term()
+        return self._simple_term()
+
+    def _starts_group(self) -> bool:
+        """Report whether the current parenthesis starts a grouped term.
+
+        Returns
+        -------
+        bool
+            ``True`` for a nested term, a group path variable, or an inner
+            path mode.
+        """
+        if not self._check_punctuation("("):
+            return False
+        next_token = self._peek(1)
+        if next_token.kind is TokenKind.PUNCTUATION and next_token.value == "(":
+            return True
+        if next_token.kind is TokenKind.KEYWORD and Keyword(next_token.value) in {
+            Keyword.WALK,
+            Keyword.TRAIL,
+            Keyword.SIMPLE,
+            Keyword.ACYCLIC,
+        }:
+            return True
+        return self._is_identifier(next_token) and self._peek_is_operator_at(2, "=")
+
+    def _simple_term(self) -> SimplePathTerm:
+        """Parse a node pattern and its relationship-node pairs.
+
+        Returns
+        -------
+        SimplePathTerm
+            Parsed simple term.
+        """
         nodes = [self._node_pattern()]
         relationships: list[RelationshipPattern] = []
         while self._is_relationship_start():
             relationships.append(self._relationship_pattern())
             nodes.append(self._node_pattern())
-        return PathPattern(
-            nodes=tuple(nodes),
-            relationships=tuple(relationships),
+        return SimplePathTerm(nodes=tuple(nodes), relationships=tuple(relationships))
+
+    def _grouped_term(self) -> GroupedPathTerm:
+        """Parse a parenthesized path pattern and its quantifier.
+
+        Returns
+        -------
+        GroupedPathTerm
+            Parsed grouped term.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the closing parenthesis, inner path, or quantifier is missing.
+        """
+        self._expect_punctuation("(", "expected '(' to start a grouped path pattern")
+        variable = self._pattern_variable()
+        mode = self._path_mode()
+        pattern = self._path_pattern()
+        self._expect_punctuation(")", "expected ')' to close a grouped path pattern")
+        quantifier = self._group_quantifier()
+        return GroupedPathTerm(
+            pattern=pattern,
+            quantifier=quantifier,
             variable=variable,
             mode=mode,
+        )
+
+    def _group_quantifier(self) -> HopRange:
+        """Parse the quantifier of a grouped path term.
+
+        Returns
+        -------
+        HopRange
+            Parsed repetition bounds.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the quantifier is missing or uses the legacy ``*n..m`` form.
+        """
+        if self._match_operator("*"):
+            token = self._previous()
+            if self._current().kind is TokenKind.INTEGER or (
+                self._current().kind is TokenKind.OPERATOR and self._current().value in {"-", "."}
+            ):
+                self._fail_syntax(
+                    "the legacy *n..m spelling is not allowed on a grouped path",
+                    token,
+                )
+            return HopRange(0, None)
+        if self._match_operator("+"):
+            return HopRange(1, None)
+        if self._check_punctuation("{") and self._starts_quantifier():
+            lower, upper, _ = self._canonical_quantifier()
+            return HopRange(0 if lower is None else lower, upper)
+        self._fail_syntax(
+            "expected a quantifier after a grouped path pattern",
+            self._current(),
+        )
+
+    def _pattern_variable(self) -> str | None:
+        """Consume an optional ``identifier =`` path-variable prefix.
+
+        Returns
+        -------
+        str | None
+            Path variable, or ``None`` when the next token is not a variable
+            assignment.
+        """
+        if self._is_identifier(self._current()) and self._peek_is_operator("="):
+            variable = self._identifier_text(self._advance())
+            self._advance()
+            return variable
+        return None
+
+    def _path_search(self) -> PathSearch | None:
+        """Consume an optional path-search prefix.
+
+        Returns
+        -------
+        PathSearch | None
+            Parsed prefix, or ``None`` when the current token starts no search.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If a prefix is incomplete or ``SHORTEST`` has no integer literal.
+        """
+        token = self._current()
+        if self._match_keyword(Keyword.ANY):
+            if self._match_keyword(Keyword.SHORTEST):
+                return PathSearch(PathSearchKind.ANY_SHORTEST, span=token.span)
+            return PathSearch(PathSearchKind.ANY, span=token.span)
+        if self._match_keyword(Keyword.ALL):
+            self._expect_keyword(Keyword.SHORTEST, "expected SHORTEST after ALL")
+            return PathSearch(PathSearchKind.ALL_SHORTEST, span=token.span)
+        if not self._match_keyword(Keyword.SHORTEST):
+            return None
+        negative = self._match_operator("-")
+        value = self._current()
+        if value.kind is not TokenKind.INTEGER:
+            self._fail_syntax("expected an integer literal after SHORTEST", value)
+        self._advance()
+        number = int(value.value)
+        return PathSearch(
+            PathSearchKind.SHORTEST,
+            -number if negative else number,
+            span=token.span,
         )
 
     def _path_mode(self) -> PathMode | None:
@@ -1234,6 +1439,15 @@ class Parser:
             Parsed node pattern.
         """
         self._expect_punctuation("(", "expected '(' to start a node pattern")
+        if self._current().kind is TokenKind.KEYWORD and Keyword(self._current().value) in {
+            Keyword.ANY,
+            Keyword.ALL,
+            Keyword.SHORTEST,
+        }:
+            self._fail_syntax(
+                "a path-search prefix is not allowed inside a node pattern",
+                self._current(),
+            )
         variable: str | None = None
         properties: tuple[PropertyEntry, ...] = ()
         where: Expression | None = None
@@ -1384,26 +1598,6 @@ class Parser:
             "<->",
         }
 
-    def _reject_deferred(self, construct: str) -> typing.Never:
-        """Reject an open-ended quantifier with its follow-up change.
-
-        Parameters
-        ----------
-        construct : str
-            Name of the rejected form.
-
-        Raises
-        ------
-        QuerySemanticError
-            Always.
-        """
-        _, change = Gated.ENTRIES[Gated.OPEN_BOUND]
-        message = (
-            f"{construct} is part of the target GQL profile but is not implemented "
-            f"in this release; it lands with {change}"
-        )
-        self._reject_unsupported(self._current(), message)
-
     def _relationship_detail(
         self,
     ) -> tuple[
@@ -1448,21 +1642,19 @@ bool, LabelExpression | None, Expression | None]
         Returns
         -------
         tuple[int | None, int | None, bool]
-            Lower and upper hop bounds and whether the canonical ``{n,m}``
-            spelling was used. Both bounds are ``None`` for an ordinary
-            relationship.
+            Lower and upper hop bounds and whether the canonical spelling was
+            used. Both bounds are ``None`` for an ordinary relationship, and a
+            missing upper bound means the quantifier is open-ended.
 
         Raises
         ------
         QuerySyntaxError
             If a bound is not an integer or the range separator is malformed.
-        QuerySemanticError
-            If an open-ended quantifier is written.
         """
         if self._match_operator("*"):
             return self._legacy_quantifier()
         if self._match_operator("+"):
-            self._reject_deferred("the '+' quantifier")
+            return 1, None, True
         if self._check_punctuation("{") and self._starts_quantifier():
             return self._canonical_quantifier()
         return None, None, False
@@ -1473,15 +1665,14 @@ bool, LabelExpression | None, Expression | None]
         Returns
         -------
         tuple[int | None, int | None, bool]
-            Lower and upper bounds, and ``False`` because the spelling is not
-            canonical.
+            Lower and upper bounds, and whether the spelling is canonical. A
+            bare ``*`` is the canonical zero-or-more form; the legacy
+            ``*n..`` spelling keeps ``False`` and an open upper bound.
 
         Raises
         ------
         QuerySyntaxError
             If a bound is not an integer or the range separator is malformed.
-        QuerySemanticError
-            If the upper bound is missing.
         """
         lower: int | None = None
         if self._current().kind is TokenKind.FLOAT:
@@ -1494,34 +1685,34 @@ bool, LabelExpression | None, Expression | None]
         elif self._current().kind is TokenKind.INTEGER:
             lower = self._integer_bound()
         if self._match_punctuation("."):
+            opening = self._current()
             self._expect_punctuation(".", "expected '..' in a variable-length pattern")
             upper: int | None = None
             if self._match_operator("-"):
                 upper = -self._integer_bound()
             elif self._current().kind is TokenKind.INTEGER:
                 upper = self._integer_bound()
-            if upper is None:
-                self._reject_deferred("an open-ended quantifier")
+            if lower is None and upper is None:
+                self._fail_syntax("expected a hop count in a variable-length pattern", opening)
             return (1 if lower is None else lower), upper, False
         if lower is None:
-            self._reject_deferred("an open-ended quantifier")
+            return 0, None, True
         return lower, lower, False
 
     def _canonical_quantifier(self) -> tuple[int | None, int | None, bool]:
-        """Parse the body of a canonical ``{n}``, ``{m,n}``, or ``{,n}`` form.
+        """Parse the body of a canonical ``{n}``, ``{m,n}``, ``{,n}``, or ``{m,}`` form.
 
         Returns
         -------
         tuple[int | None, int | None, bool]
             Lower and upper bounds, and ``True`` because the spelling is
-            canonical.
+            canonical. A missing upper bound means the quantifier is
+            open-ended.
 
         Raises
         ------
         QuerySyntaxError
             If the braces or hop counts are malformed.
-        QuerySemanticError
-            If the upper bound is missing.
         """
         opening = self._current()
         self._expect_punctuation("{", "expected '{' to start a canonical quantifier")
@@ -1533,8 +1724,8 @@ bool, LabelExpression | None, Expression | None]
             if self._current().kind is TokenKind.INTEGER:
                 upper = self._integer_bound()
             self._expect_punctuation("}", "expected '}' to close a canonical quantifier")
-            if upper is None:
-                self._reject_deferred("an open-ended quantifier")
+            if lower is None and upper is None:
+                self._fail_syntax("expected a hop count in the canonical quantifier", opening)
             return 0 if lower is None else lower, upper, True
         if lower is None:
             self._fail_syntax("expected a hop count in the canonical quantifier", opening)
@@ -2500,7 +2691,24 @@ bool, LabelExpression | None, Expression | None]
         bool
             ``True`` when the next token is that operator.
         """
-        token = self._peek(1)
+        return self._peek_is_operator_at(1, text)
+
+    def _peek_is_operator_at(self, distance: int, text: str) -> bool:
+        """Report whether an upcoming token is an operator.
+
+        Parameters
+        ----------
+        distance : int
+            Positive offset from the current position.
+        text : str
+            Operator to test.
+
+        Returns
+        -------
+        bool
+            ``True`` when the upcoming token is that operator.
+        """
+        token = self._peek(distance)
         return token.kind is TokenKind.OPERATOR and token.value == text
 
     def _peek_is_punctuation(self, text: str) -> bool:

@@ -48,6 +48,42 @@ class TestExplain(_ExplainTestCase):
         plan = graph.explain("MATCH (n:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b) RETURN b")
         assert any("QUANTIFIED PATTERN max_hops=2" in line for line in plan)
 
+    def test_match_mode_is_reported(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH DIFFERENT EDGES (a:Program)-[:ALLIES_WITH]->(b) RETURN b")
+        assert "MATCH DIFFERENT EDGES" in plan
+
+    def test_default_match_mode_is_omitted(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH REPEATABLE ELEMENTS (a:Program)-[:ALLIES_WITH]->(b) RETURN b")
+        assert all("DIFFERENT EDGES" not in line for line in plan)
+
+    def test_optional_match_mode_is_reported(self, graph: Graph) -> None:
+        plan = graph.explain(
+            "OPTIONAL MATCH DIFFERENT EDGES (a:Program)-[:ALLIES_WITH]->(b) RETURN b"
+        )
+        assert "OPTIONAL MATCH DIFFERENT EDGES" in plan
+
+    def test_quantified_match_mode_is_reported(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH DIFFERENT EDGES (a:Program)-[:ALLIES_WITH*1..2]->(b) RETURN b")
+        assert "MATCH DIFFERENT EDGES" in plan
+        assert any("QUANTIFIED PATTERN" in line for line in plan)
+
+    def test_path_search_prefix_is_reported(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH p = ANY (a:Program)-[:ALLIES_WITH]->(b) RETURN p")
+        assert plan[0] == "PATH SEARCH ANY"
+
+    def test_shortest_count_is_reported(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH p = SHORTEST 2 (a:Program)-[:ALLIES_WITH]->(b) RETURN p")
+        assert "PATH SEARCH SHORTEST 2" in plan
+
+    def test_open_search_reports_the_open_marker(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH p = ANY SHORTEST (a:Program)-[:ALLIES_WITH{1,}]->(b) RETURN p")
+        assert plan[0] == "PATH SEARCH ANY SHORTEST"
+        assert any("MATCH QUANTIFIED OPEN" in line for line in plan)
+
+    def test_plain_pattern_has_no_search_marker(self, graph: Graph) -> None:
+        plan = graph.explain("MATCH (a:Program)-[:ALLIES_WITH]->(b) RETURN b")
+        assert all("PATH SEARCH" not in line for line in plan)
+
     def test_write_statement_changes_nothing(self, graph: Graph) -> None:
         before = graph.query("MATCH (n) RETURN count(*) AS total").rows[0]["total"]
         plan = graph.explain("CREATE (n:Program {designation: 'Tron', cycles: 40})")

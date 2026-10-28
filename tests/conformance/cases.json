@@ -2466,6 +2466,467 @@
       "tags": [
         "canonical"
       ]
+    },
+    {
+      "name": "open-star",
+      "feature": "open-ended-quantifiers",
+      "fixture": "tron-cycle",
+      "query": "MATCH TRAIL (a {designation: 'Quorra'})-[:TRUSTS*]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "open-plus",
+      "feature": "open-ended-quantifiers",
+      "fixture": "tron-cycle",
+      "query": "MATCH TRAIL (a {designation: 'Quorra'})-[:TRUSTS+]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "open-canonical-tail",
+      "feature": "open-ended-quantifiers",
+      "fixture": "tron-cycle",
+      "query": "MATCH TRAIL (a {designation: 'Kevin Flynn'})-[:TRUSTS{1,}]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "open-legacy-tail",
+      "feature": "open-ended-quantifiers",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS*1..]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "compatibility"
+      ]
+    },
+    {
+      "name": "unbounded-walk-limit",
+      "feature": "open-ended-quantifiers",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS+]->(b) RETURN b.designation AS name LIMIT 5",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          },
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "unbounded-trail-cycle",
+      "feature": "open-ended-quantifiers",
+      "fixture": "tron-cycle",
+      "query": "MATCH TRAIL (a {designation: 'Kevin Flynn'})-[:TRUSTS+]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "unbounded-zero-hop",
+      "feature": "open-ended-quantifiers",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[r:TRUSTS*]->(b) RETURN a.designation AS name, b.designation AS target, size(r) AS hops LIMIT 1",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn",
+            "target": "Kevin Flynn",
+            "hops": 0
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "different-edges-shared-edge",
+      "feature": "different-edges",
+      "fixture": "tron-parallel",
+      "query": "MATCH DIFFERENT EDGES (a)-[r:TRUSTS]->(b), (c)-[s:TRUSTS]->(d) FILTER id(r) = id(s) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 0
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "repeatable-elements-shared-edge",
+      "feature": "repeatable-elements",
+      "fixture": "tron-parallel",
+      "query": "MATCH REPEATABLE ELEMENTS (a)-[r:TRUSTS]->(b), (c)-[s:TRUSTS]->(d) FILTER id(r) = id(s) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "different-edges-quantified",
+      "feature": "different-edges",
+      "fixture": "tron-cycle",
+      "query": "MATCH DIFFERENT EDGES (a)-[r:TRUSTS*1..2]->(b), (c)-[s:TRUSTS*1..2]->(d) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 12
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "different-edges-two-patterns",
+      "feature": "different-edges",
+      "fixture": "tron-cycle",
+      "query": "MATCH DIFFERENT EDGES (a)-[r:TRUSTS]->(b), (c)-[s:TRUSTS]->(d) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 6
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "different-edges-parallel",
+      "feature": "different-edges",
+      "fixture": "tron-parallel",
+      "query": "MATCH DIFFERENT EDGES (a)-[r]->(b), (c)-[s]->(d) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "any-per-partition",
+      "feature": "path-search-prefixes",
+      "fixture": "tron-cycle",
+      "query": "MATCH p = ANY (a:Program)-[:TRUSTS{1,}]->(b:Program) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 4
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "any-shortest-diamond",
+      "feature": "path-search-prefixes",
+      "fixture": "tron-diamond",
+      "query": "MATCH p = ANY SHORTEST (a:User {designation: 'Kevin Flynn'})-[:PARENT_OF|TRUSTS*1..3]->(b:User {designation: 'Alan Bradley'}) RETURN length(p) AS n, [x IN nodes(p) | x.designation] AS names",
+      "expect": {
+        "rows": [
+          {
+            "n": 2,
+            "names": [
+              "Kevin Flynn",
+              "Sam Flynn",
+              "Alan Bradley"
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "all-shortest-diamond",
+      "feature": "path-search-prefixes",
+      "fixture": "tron-diamond",
+      "query": "MATCH p = ALL SHORTEST (a:User {designation: 'Kevin Flynn'})-[:PARENT_OF|TRUSTS*1..3]->(b:User {designation: 'Alan Bradley'}) RETURN length(p) AS n, [x IN nodes(p) | x.designation] AS names",
+      "expect": {
+        "rows": [
+          {
+            "n": 2,
+            "names": [
+              "Kevin Flynn",
+              "Sam Flynn",
+              "Alan Bradley"
+            ]
+          },
+          {
+            "n": 2,
+            "names": [
+              "Kevin Flynn",
+              "Quorra",
+              "Alan Bradley"
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "shortest-k-parallel",
+      "feature": "path-search-prefixes",
+      "fixture": "tron-parallel",
+      "query": "MATCH p = SHORTEST 2 (a)-[:TRUSTS|ALLIES_WITH]->(b) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "shortest-k-zero",
+      "feature": "path-search-prefixes",
+      "fixture": "tron-diamond",
+      "query": "MATCH p = SHORTEST 0 (a:User)-[:PARENT_OF|TRUSTS*1..2]->(b:User) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 0
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "shortest-self-loop",
+      "feature": "path-search-prefixes",
+      "fixture": "tron-self-loop",
+      "query": "MATCH p = ALL SHORTEST (a:Program {designation: 'Tron'})-[:MONITORS]->(b:Program {designation: 'Tron'}) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "grouped-fixed-repetition",
+      "feature": "grouped-quantified-paths",
+      "fixture": "tron-cycle",
+      "query": "MATCH ((a)-[r:TRUSTS]->(b)){2} RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 3
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "grouped-bounded-diamond",
+      "feature": "grouped-quantified-paths",
+      "fixture": "tron-diamond",
+      "query": "MATCH (a:User {designation: 'Kevin Flynn'}) ((m)-[:PARENT_OF|TRUSTS]->(n)){2} (b:User {designation: 'Alan Bradley'}) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "grouped-list-bindings",
+      "feature": "grouped-quantified-paths",
+      "fixture": "tron-cycle",
+      "query": "MATCH ((a)-[r:TRUSTS]->(b)){2} RETURN [x IN a | x.designation] AS names, [x IN r | id(x)] AS rels ORDER BY names LIMIT 1",
+      "expect": {
+        "rows": [
+          {
+            "names": [
+              "Kevin Flynn",
+              "Quorra"
+            ],
+            "rels": [
+              1,
+              2
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "grouped-zero-iterations",
+      "feature": "grouped-quantified-paths",
+      "fixture": "tron-parallel",
+      "query": "MATCH (a:User {designation: 'Kevin Flynn'}) ((b)-[:TRUSTS]->(c)){0,1}(d)-[:ALLIES_WITH]->(e) RETURN [x IN b | id(x)] AS nodes",
+      "expect": {
+        "rows": [
+          {
+            "nodes": []
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "grouped-nested",
+      "feature": "grouped-quantified-paths",
+      "fixture": "tron-cycle",
+      "query": "MATCH (((a)-[r:TRUSTS]->(b)){2}){2} RETURN [x IN r | id(x)] AS rels ORDER BY rels LIMIT 1",
+      "expect": {
+        "rows": [
+          {
+            "rels": [
+              1,
+              2,
+              3,
+              1
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "grouped-inner-mode",
+      "feature": "grouped-quantified-paths",
+      "fixture": "tron-cycle",
+      "query": "MATCH WALK (ACYCLIC (a)-[:TRUSTS]->(b)){1,3} RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 6
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
     }
   ]
 }

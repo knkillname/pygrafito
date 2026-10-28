@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Queries can now repeat a whole path shape with grouped terms such as
+  `((a)-[r:TRUSTS]->(b)){2}`. Variables introduced inside a group bind ordered lists, nested groups
+  flatten in traversal order, zero iterations bind empty lists, and a group can carry its own path
+  variable and inner path mode.
+- Queries can now select routes with `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, and `SHORTEST k`.
+  Selection happens per start and end node, returns routes in deterministic length and path order,
+  and stops expanding once each pair has enough routes. Use `SHORTEST 0` to return no route.
+- Queries can now choose how relationships are shared across a `MATCH` clause with
+  `DIFFERENT EDGES` or `REPEATABLE ELEMENTS`. `DIFFERENT EDGES` lets each relationship satisfy at
+  most one pattern in the clause; `REPEATABLE ELEMENTS` is the default and keeps today's results.
+- Queries can now follow relationships without a depth limit with `*`, `+`, `{m,}`, and the
+  legacy `*n..` form. A bare `*` includes zero-hop matches, so use `+` or `{1,}` when at least one
+  relationship is required. A final `LIMIT` stops an open walk as soon as the requested rows
+  exist, and an open walk without one stops at the query budget instead of returning a truncated
+  result.
 - Queries can now use `CASE`, map literals, list indexing, slicing, and comprehensions,
   `||` string concatenation, path functions, and the extended scalar functions.
 - Queries can now use read-only `EXISTS { ... }` and `COUNT { ... }` subqueries, including
@@ -20,12 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set-operation, and path surfaces, and distinguishes what works today, what is planned for 1.0,
   and what is intentionally unsupported. The profile also defines the 1.0 completion gate and the
   policy for changing it after release.
+- The GQL profile now explains how path modes, match modes, repetition counts, and shortest-path
+  selection work together, including what each form binds when it matches nothing, which
+  combinations are rejected, and how to migrate a query when the planned path features arrive.
 
 ### Changed
 
 - **BREAKING:** `WHEN`, `THEN`, `ELSE`, `END`, `UNION`, `INTERSECT`, and `EXCEPT` are now reserved
   keywords. If an existing query uses one of these words as a variable or alias, wrap it in
   backticks; for example, `when` becomes `` `when` ``.
+- **BREAKING:** `DIFFERENT`, `EDGES`, `REPEATABLE`, and `ELEMENTS` are now reserved keywords. Wrap an
+  existing variable or alias that uses one of these words in backticks; for example, `edges`
+  becomes `` `edges` ``.
+- **BREAKING:** `ANY` and `SHORTEST` are now reserved keywords. Wrap an existing variable or alias
+  that uses one of these words in backticks; for example, `any` becomes `` `any` ``.
 
 ## [0.9.0] - 2026-10-27
 

@@ -197,6 +197,30 @@ class TraversalSource:
         """
         raise NotImplementedError
 
+    def edges(
+        self,
+        node_id: int,
+        direction: Direction,
+        labels: frozenset[str] | None,
+    ) -> Iterator[tuple[Relationship, int]]:
+        """Iterate over relationships and the node they lead to.
+
+        Parameters
+        ----------
+        node_id : int
+            Current node.
+        direction : Direction
+            Direction to follow.
+        labels : frozenset[str] | None
+            Allowed relationship labels, or ``None`` for all labels.
+
+        Yields
+        ------
+        tuple[Relationship, int]
+            Each followable relationship and the node reached through it.
+        """
+        raise NotImplementedError
+
     def frontier_edges(
         self,
         frontier: Sequence[int],
@@ -338,6 +362,7 @@ class AdjacencySnapshot(TraversalSource):
             for relationship, target in self.edges(node_id, direction, labels):
                 yield node_id, relationship, target
 
+    @typing.override
     def edges(
         self,
         node_id: int,
@@ -510,6 +535,36 @@ class DatabaseNeighborhood(TraversalSource):
             Snapshots keyed by id, omitting missing ids.
         """
         return self._nodes.get_many(node_ids)
+
+    @typing.override
+    def edges(
+        self,
+        node_id: int,
+        direction: Direction,
+        labels: frozenset[str] | None,
+    ) -> Iterator[tuple[Relationship, int]]:
+        """Read the incident relationships of one node on demand.
+
+        Parameters
+        ----------
+        node_id : int
+            Current node.
+        direction : Direction
+            Direction to follow.
+        labels : frozenset[str] | None
+            Allowed relationship labels, or ``None`` for all labels.
+
+        Yields
+        ------
+        tuple[Relationship, int]
+            Each followable relationship and the node reached through it.
+        """
+        for _, relationship, target in self._relationships.frontier(
+            (node_id,),
+            direction,
+            labels,
+        ):
+            yield relationship, target
 
     @typing.override
     def frontier_edges(

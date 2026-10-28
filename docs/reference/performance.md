@@ -95,6 +95,38 @@ from finding the start nodes by `cycles` instead of scanning the node table. Exp
 work itself is bounded by the region the start node can reach within two hops, not by
 the size of the database.
 
+### Path search
+
+A searched pattern always runs in the pattern engine, including a pattern whose relationships are
+all fixed. Start nodes still come from the indexed node predicates, but the fixed path loses the
+SQL cross-product plan and expands through the same live adjacency source as an open walk. Search
+expands in nondecreasing length order: each candidate relationship examined counts once against
+the expansion budget, while selecting or deduplicating a completed path adds no expansion.
+
+Per partition, the evaluator keeps at most the selection limit plus one arrival for each state key.
+`ANY` and `ANY SHORTEST` keep one result; `SHORTEST k` keeps up to `k`; `ALL SHORTEST` keeps the
+arrivals at the minimum length. State keys include the start and current node, pattern position,
+mode memory, and element bindings, so a longer arrival to the same key is discarded before it can
+expand. This bound, the expansion budget, and a final `LIMIT` keep a cyclic open `WALK` search
+finite. A fixed searched path trades index pushdown for one selection implementation; measure it
+with the same harness when a fixed route query is latency-sensitive.
+
+### Grouped path patterns
+
+A pattern with a grouped or juxtaposed term always runs in the pattern engine. Opening a group
+does not add SQL pushdown, even when every bound is closed, because the group repeats a whole term
+and produces list bindings. Start nodes still come from the indexed node predicates; iterations
+then expand through the same live adjacency source as an open walk. Each relationship examined
+counts once against the expansion budget, and a group iteration adds no separate counter because
+the progress rule guarantees at least one relationship per iteration.
+
+Group variables grow with the number of iterations and with the number of distinct elements
+bound. For a bounded group the memory is proportional to the selected path and the iteration
+count; for an open `WALK` group, use `LIMIT`, `TRAIL`, or a search prefix so the budget stops the
+walk before list accumulation becomes large. Nested groups flatten their lists in traversal order,
+so their memory is the sum of the nested iteration counts. Keep grouped fixtures small in the guide
+and tour; the fixed grouped cases are not an index-pushdown benchmark.
+
 ### Path modes
 
 The harness measures the same fixed two-hop pattern under `WALK` and `TRAIL`. `WALK` adds no
@@ -117,6 +149,34 @@ exists for cyclic and dense graphs that the synthetic workload does not model.
 The command is the same `python -m benchmarks.run --nodes 20000 --relationships 60000` run shown
 above; the `walk path` and `trail path` rows are reported in its query table. The 200,000-node
 figures come from `python -m benchmarks.run --nodes 200000 --relationships 400000`.
+
+### Open-ended traversal
+
+The harness also seeds a dedicated directed cycle of 1,000 programs and measures the open forms
+in memory and in a temporary file-backed database. The cycle keeps the number of expansion steps
+equal to the number of produced rows, so the rates describe traversal and row delivery rather
+than a particular dataset's fan-out. The command is the same
+`python -m benchmarks.run --nodes 20000 --relationships 60000` run shown above; the
+`open walk` table is reported after ingestion.
+
+| Scenario | Rows | Memory | File-backed | Memory rows/s | File-backed rows/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Open `WALK`, `LIMIT 100` | 100 | 8.20 ms | 8.18 ms | 12,199 | 12,230 |
+| Open `WALK`, `LIMIT 1000` | 1,000 | 93.22 ms | 97.26 ms | 10,727 | 10,281 |
+| Open `TRAIL`, `ORDER BY` | 999 | 110.81 ms | 109.20 ms | 9,016 | 9,148 |
+| Open `TRAIL`, aggregation | 999 | 101.65 ms | 100.30 ms | 9,828 | 9,960 |
+
+`LIMIT` is the important lever. The 100-row walk does one tenth of the expansion work of the
+1,000-row walk and returns in roughly one tenth of the time, because the evaluator closes the
+stream once the demand is met. The rows-per-second rate is stable across the two sizes, which is
+the shape to expect from a per-hop walk.
+
+The `TRAIL` rows are full-evaluation shapes. The 1,000-program cycle has 999 relationship-unique
+trails from the start node, and both `ORDER BY` and aggregation consume all of them before
+returning. Sorting adds about 9 ms over aggregation at this size. A file-backed database is
+close to the in-memory figure here because the measured cycle fits in the page cache; a cold
+file still pays the first-read and write-ahead-log costs described under "What the numbers do
+not promise".
 
 ### Ingestion
 

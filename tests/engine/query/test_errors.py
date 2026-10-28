@@ -71,7 +71,7 @@ class TestComposedQueryErrors:
     @pytest.mark.parametrize(
         "text",
         [
-            "MATCH (a)-[*]->(b) RETURN b",
+            "MATCH (a)-[*1..-2]->(b) RETURN b",
             "MATCH (a)-[*3..1]->(b) RETURN b",
             "MATCH (a)-[r*1..2]->(b) RETURN type(r)",
             "MATCH (a:Program) WITH a.cycles + 1 RETURN a",

@@ -67,6 +67,62 @@ class TestLookups(_NeighborhoodTestCase):
         assert loaded == {quorra.id: quorra, tron.id: tron}
 
 
+class TestEdges(_NeighborhoodTestCase):
+    """Verify single-node adjacency reads for open walks."""
+
+    def test_outgoing_edges(self, repositories: Repositories) -> None:
+        nodes, relationships = repositories
+        neighborhood = DatabaseNeighborhood(nodes, relationships)
+        kevin = nodes.create(("Program",), {"designation": "Kevin Flynn"})
+        quorra = nodes.create(("Program",), {"designation": "Quorra"})
+        edge = relationships.create(kevin.id, "TRUSTS", quorra.id)
+        edges = list(neighborhood.edges(kevin.id, Direction.OUTGOING, None))
+        assert [(item.id, target) for item, target in edges] == [(edge.id, quorra.id)]
+
+    def test_incoming_direction(self, repositories: Repositories) -> None:
+        nodes, relationships = repositories
+        neighborhood = DatabaseNeighborhood(nodes, relationships)
+        kevin = nodes.create(("Program",), {"designation": "Kevin Flynn"})
+        quorra = nodes.create(("Program",), {"designation": "Quorra"})
+        edge = relationships.create(kevin.id, "TRUSTS", quorra.id)
+        edges = list(neighborhood.edges(quorra.id, Direction.INCOMING, None))
+        assert [(item.id, target) for item, target in edges] == [(edge.id, kevin.id)]
+
+    def test_label_filter(self, repositories: Repositories) -> None:
+        nodes, relationships = repositories
+        neighborhood = DatabaseNeighborhood(nodes, relationships)
+        quorra = nodes.create(("Program",), {"designation": "Quorra"})
+        tron = nodes.create(("Program",), {"designation": "Tron"})
+        allies = relationships.create(quorra.id, "ALLIES_WITH", tron.id)
+        relationships.create(quorra.id, "TRANSMISSION", tron.id)
+        edges = list(neighborhood.edges(quorra.id, Direction.OUTGOING, frozenset({"ALLIES_WITH"})))
+        assert [(item.id, target) for item, target in edges] == [(allies.id, tron.id)]
+
+    def test_undirected_edge_is_followed_from_both_ends(self, repositories: Repositories) -> None:
+        nodes, relationships = repositories
+        neighborhood = DatabaseNeighborhood(nodes, relationships)
+        kevin = nodes.create(("Program",), {"designation": "Kevin Flynn"})
+        quorra = nodes.create(("Program",), {"designation": "Quorra"})
+        edge = relationships.create(kevin.id, "ALLIES_WITH", quorra.id, directed=False)
+        forward = list(neighborhood.edges(kevin.id, Direction.BOTH, None))
+        backward = list(neighborhood.edges(quorra.id, Direction.BOTH, None))
+        assert [(item.id, target) for item, target in forward] == [(edge.id, quorra.id)]
+        assert [(item.id, target) for item, target in backward] == [(edge.id, kevin.id)]
+
+    def test_self_loop_is_emitted_once(self, repositories: Repositories) -> None:
+        nodes, relationships = repositories
+        neighborhood = DatabaseNeighborhood(nodes, relationships)
+        tron = nodes.create(("Program",), {"designation": "Tron"})
+        loop = relationships.create(tron.id, "MONITORS", tron.id)
+        edges = list(neighborhood.edges(tron.id, Direction.BOTH, None))
+        assert [(item.id, target) for item, target in edges] == [(loop.id, tron.id)]
+
+    def test_missing_node_has_no_edges(self, repositories: Repositories) -> None:
+        nodes, relationships = repositories
+        neighborhood = DatabaseNeighborhood(nodes, relationships)
+        assert list(neighborhood.edges(999, Direction.BOTH, None)) == []
+
+
 class TestFrontier(_NeighborhoodTestCase):
     """Verify frontier reads keep database ordering and self-loop rules."""
 

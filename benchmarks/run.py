@@ -136,6 +136,82 @@ class Scenarios:
         )
 
 
+class OpenWalks:
+    """Measure open walks on a dedicated directed cycle.
+
+    Parameters
+    ----------
+    size : int
+        Number of programs in the cycle.
+    """
+
+    def __init__(self, size: int) -> None:
+        self._size = size
+
+    def seed(self, graph: Graph) -> None:
+        """Create one directed cycle of programs.
+
+        Parameters
+        ----------
+        graph : Graph
+            Empty graph to populate.
+        """
+        nodes = [
+            graph.add_node("Program", designation=f"Node {index}") for index in range(self._size)
+        ]
+        for index, node in enumerate(nodes):
+            graph.add_relationship(node, "TRUSTS", nodes[(index + 1) % self._size])
+
+    def scenarios(self) -> dict[str, Callable[[Graph], object]]:
+        """Return the measured open-walk statements.
+
+        Returns
+        -------
+        dict[str, Callable[[Graph], object]]
+            Scenario name to statement.
+        """
+        return {
+            "walk limit 100": functools.partial(
+                self.query,
+                "MATCH (a:Program {designation: 'Node 0'})-[:TRUSTS+]->(b) "
+                "RETURN b.designation AS name LIMIT 100",
+            ),
+            "walk limit 1000": functools.partial(
+                self.query,
+                "MATCH (a:Program {designation: 'Node 0'})-[:TRUSTS+]->(b) "
+                "RETURN b.designation AS name LIMIT 1000",
+            ),
+            "trail order by": functools.partial(
+                self.query,
+                "MATCH TRAIL (a:Program {designation: 'Node 0'})-[:TRUSTS+]->(b) "
+                "RETURN b.designation AS name ORDER BY name",
+            ),
+            "trail aggregate": functools.partial(
+                self.query,
+                "MATCH TRAIL (a:Program {designation: 'Node 0'})-[:TRUSTS+]->(b) "
+                "RETURN count(*) AS total",
+            ),
+        }
+
+    @staticmethod
+    def query(statement: str, graph: Graph) -> object:
+        """Run one statement against the cycle.
+
+        Parameters
+        ----------
+        statement : str
+            Statement text.
+        graph : Graph
+            Populated graph.
+
+        Returns
+        -------
+        object
+            Query result.
+        """
+        return graph.query(statement)
+
+
 class Runner:
     """Run the benchmark and print its tables.
 
@@ -186,6 +262,7 @@ class Runner:
             graph.close()
         self._report_writes()
         self._report_ingestion()
+        self._report_open_walks()
 
     def _measure_queries(self, graph: Graph) -> dict[str, float]:
         """Time every query scenario in the current index state.
@@ -492,6 +569,51 @@ class Runner:
         update_indexed = self._update_rate(indexed=True)
         print(f"{'insert':<16}{insert_plain:>12.0f}/s{insert_indexed:>12.0f}/s")
         print(f"{'update':<16}{update_plain:>12.0f}/s{update_indexed:>12.0f}/s")
+
+    def _report_open_walks(self) -> None:
+        """Print open-walk costs on memory and file-backed cycles."""
+        size = max(2, min(self._options.nodes, 1_000))
+        walks = OpenWalks(size)
+        scenarios = walks.scenarios()
+        memory: dict[str, float] = {}
+        with Graph.open(":memory:") as graph:
+            walks.seed(graph)
+            memory = {
+                name: Timer.measure(functools.partial(scenario, graph), self._options.repeats)
+                for name, scenario in scenarios.items()
+            }
+        file_backed: dict[str, float] = {}
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "open-walk.db"
+            with Graph.open(str(path)) as graph:
+                walks.seed(graph)
+                file_backed = {
+                    name: Timer.measure(
+                        functools.partial(scenario, graph),
+                        self._options.repeats,
+                    )
+                    for name, scenario in scenarios.items()
+                }
+        rows = {
+            "walk limit 100": 100,
+            "walk limit 1000": 1_000,
+            "trail order by": size - 1,
+            "trail aggregate": size - 1,
+        }
+        print()
+        print(
+            f"{'open walk':<20}{'rows':>6}{'memory':>14}{'file':>14}"
+            f"{'mem rows/s':>14}{'file rows/s':>14}"
+        )
+        for name, elapsed in memory.items():
+            stored = file_backed[name]
+            count = rows[name]
+            memory_rate = count / (elapsed / 1000) if elapsed else float("inf")
+            file_rate = count / (stored / 1000) if stored else float("inf")
+            print(
+                f"{name:<20}{count:>6}{elapsed:>12.2f}ms{stored:>12.2f}ms"
+                f"{memory_rate:>14.0f}{file_rate:>14.0f}"
+            )
 
     def _report_ingestion(self) -> None:
         """Print merge and CSV import throughput."""

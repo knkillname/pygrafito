@@ -34,6 +34,7 @@ The system SHALL execute exactly one statement per call and return a materialize
 
 - **WHEN** a caller passes an `INSERT` statement to `Graph.query`
 - **THEN** the statement is classified as a write and runs in its own transaction
+
 ### Requirement: Core dialect profile
 
 A linear statement SHALL be an ordered sequence of one or more segments separated by `NEXT`. A compound query SHALL combine two or more linear statements with a set operator. Each linear segment SHALL contain an ordered sequence of read stages, optional write clauses, and a result clause, and every write clause SHALL follow every read stage within its segment.
@@ -80,8 +81,13 @@ A linear statement SHALL be an ordered sequence of one or more segments separate
 
 #### Scenario: Unsupported pattern form
 
-- **WHEN** a caller submits `MATCH (a)-[*]->(b) RETURN b` or `MATCH (a)-[*1..]->(b) RETURN b`
-- **THEN** the system raises a semantic query error before execution because the upper bound is missing
+- **WHEN** a caller submits `MATCH (a)-[:TRUSTS{-1,2}]->(b) RETURN b`
+- **THEN** the system raises a semantic query error before execution because a bound is negative
+
+#### Scenario: Open-ended pattern form
+
+- **WHEN** a caller submits `MATCH (a)-[*]->(b) RETURN b` or `MATCH (a)-[:TRUSTS{1,}]->(b) RETURN b`
+- **THEN** the statement is accepted and the open-ended pattern is matched under its resolved path mode
 
 #### Scenario: Unsupported clause
 
@@ -167,6 +173,7 @@ A linear statement SHALL be an ordered sequence of one or more segments separate
 
 - **WHEN** a caller submits `MATCH (n:Program) NEXT RETURN n`
 - **THEN** the system raises a query error because the first read segment has no `RETURN` or `FINISH`
+
 ### Requirement: NEXT and segment results
 
 `NEXT` SHALL carry the preceding segment's `RETURN` table into the next segment. An optional `YIELD`
@@ -188,6 +195,7 @@ A non-final `RETURN` SHALL act as a projection and scope reset, and only the fin
 
 - **WHEN** a caller submits `MATCH (n:Program) FINISH NEXT MATCH (m:Program) RETURN m`
 - **THEN** the system raises a query error before execution
+
 ### Requirement: Statement row sources and result requirements
 
 A read segment SHALL end with `RETURN` or `FINISH`; a write segment MAY omit the result clause. A
@@ -208,6 +216,7 @@ statement MAY end with a write clause. Unsupported forms SHALL be rejected, neve
 
 - **WHEN** a caller submits a statement using `CALL { ... }`, `exists(n.prop)`, whole-map assignment, or a regex predicate
 - **THEN** the system raises a query error before execution
+
 ### Requirement: Node patterns
 
 A node pattern SHALL bind an optional variable, a label expression, an optional property map, and an optional inline `WHERE` predicate. A label expression SHALL support `&` conjunction, `|` disjunction, `!` negation, and `%` wildcard. `IS` SHALL be accepted as the explicit label form in place of `:`. Property map entries SHALL match stored values using the dialect's equality semantics.
@@ -246,6 +255,7 @@ A node pattern SHALL bind an optional variable, a label expression, an optional 
 
 - **WHEN** a caller omits the variable from a node pattern
 - **THEN** the node participates in the path but is not available for projection
+
 ### Requirement: Relationship patterns
 
 A relationship pattern SHALL bind an optional variable, a label expression, a direction, an optional property map, and an optional inline `WHERE` predicate. The canonical direction forms SHALL be `->`, `<-`, `-`, `~`, `<->`, `<~`, and `~>`. `-->` and `<--` SHALL be accepted as aliases for `->` and `<-`, and `--` SHALL NOT be an arrow. A relationship label filter SHALL match a relationship carrying that label.
@@ -334,9 +344,10 @@ A relationship pattern SHALL bind an optional variable, a label expression, a di
 
 - **WHEN** a caller matches `(a)<->(b)`, `(a)<~(b)`, or `(a)~>(b)` without a relationship detail
 - **THEN** the statement is accepted and each form matches as its detailed counterpart does
-### Requirement: Variable-length relationship patterns
 
-A relationship pattern MAY carry a quantifier. The canonical closed forms SHALL be `{n}` for exactly `n` hops, `{m,n}` for a bounded range, and `{,n}` for at most `n` hops. The legacy forms `*n`, `*n..m`, and `*0..m` SHALL remain a compatibility construct. Every hop SHALL apply the pattern's labels, direction, property map, and predicate. Bounds SHALL be non-negative integers with a lower bound not greater than the upper bound.
+### Requirement: Relationship quantifiers
+
+A relationship pattern MAY carry a quantifier. Closed forms SHALL be `{n}`, `{m,n}`, and `{,n}`. Open forms SHALL be `{m,}`, `*` (zero or more), and `+` (one or more). The legacy forms `*n`, `*n..m`, `*0..m`, and `*n..` SHALL remain compatible. Every hop SHALL apply the pattern's labels, direction, properties, and predicate. Bounds SHALL be non-negative, a lower bound SHALL NOT exceed a present upper bound, and no upper bound SHALL mean unbounded.
 
 #### Scenario: Exact length
 
@@ -373,20 +384,40 @@ A relationship pattern MAY carry a quantifier. The canonical closed forms SHALL 
 - **WHEN** continuing a legacy quantified path would reuse an undirected relationship already in that path
 - **THEN** that extension is not returned
 
-#### Scenario: Unbounded quantifier is rejected
+#### Scenario: Canonical open quantifiers
 
-- **WHEN** a caller writes `MATCH (a)-[*]->(b) RETURN b`, `MATCH (a)-[*1..]->(b) RETURN b`, or `MATCH (a)-[:ALLIES_WITH{1,}]->(b) RETURN b`
-- **THEN** the system raises a deferred-construct error naming the change that implements unbounded traversal, and executes nothing
+- **WHEN** a caller writes `MATCH (a)-[:TRUSTS*]->(b) RETURN b`, `MATCH (a)-[:TRUSTS+]->(b) RETURN b`, or `MATCH (a)-[:TRUSTS{1,}]->(b) RETURN b`
+- **THEN** the statement is accepted and each form means an unbounded upper bound
 
-#### Scenario: Invalid bounds are rejected
+#### Scenario: Bare star includes zero hops
 
-- **WHEN** a caller writes a negative bound or a lower bound greater than the upper bound
+- **WHEN** a caller matches `(a)-[:TRUSTS*]->(b)`
+- **THEN** a zero-hop match where `a` and `b` are the same node is included
+
+#### Scenario: Plus requires at least one hop
+
+- **WHEN** a caller matches `(a)-[:TRUSTS+]->(b)`
+- **THEN** the zero-hop match is not included
+
+#### Scenario: Legacy open form keeps trail
+
+- **WHEN** a caller writes `MATCH (a)-[:TRUSTS*1..]->(b) RETURN b`
+- **THEN** the form is accepted as a legacy quantifier and the path is matched under `TRAIL` unless a mode is explicit
+
+#### Scenario: Canonical open lower bound
+
+- **WHEN** a caller matches `(a)-[:TRUSTS{2,}]->(b)`
+- **THEN** nodes at depth two or more are bound
+
+#### Scenario: Negative bound is rejected
+
+- **WHEN** a caller writes `MATCH (a)-[:TRUSTS{-1,2}]->(b) RETURN b`
 - **THEN** the system raises a query error before execution
 
-#### Scenario: Canonical quantifier is gated
+#### Scenario: Inverted bounds are rejected
 
-- **WHEN** a caller writes `MATCH (a)-[:ALLIES_WITH{1,3}]->(b) RETURN b`
-- **THEN** the closed canonical form is accepted and traversed under its resolved path mode; only the open-ended canonical form `{1,}` remains gated as deferred
+- **WHEN** a caller writes `MATCH (a)-[:TRUSTS{3,1}]->(b) RETURN b`
+- **THEN** the system raises a query error before execution
 
 #### Scenario: Canonical exact length
 
@@ -407,6 +438,36 @@ A relationship pattern MAY carry a quantifier. The canonical closed forms SHALL 
 
 - **WHEN** a caller writes `MATCH (a)-[:ALLIES_WITH{1,3}]->(b) RETURN b`
 - **THEN** the quantifier is interpreted as the canonical form and its default path mode is resolved by the path-mode rule, not by the legacy `TRAIL` default
+
+### Requirement: Open-ended traversal
+
+An open-ended quantifier SHALL enumerate matches lazily under the effective path mode. `TRAIL`, `SIMPLE`, and `ACYCLIC` SHALL bound the walk by the graph's elements. An open `WALK` MAY be unbounded, SHALL NOT buffer the whole reachable region, and SHALL stop when downstream demand is satisfied. Without a demand bound it SHALL run until the budget raises `QueryBudgetExceededError`, with no partial result.
+
+#### Scenario: Open walk follows the cycle
+
+- **WHEN** a three-node directed cycle is matched with `WALK (a)-[:TRUSTS+]->(b)`
+- **THEN** the walk may revisit nodes and relationships
+
+#### Scenario: Open trail stops at the element bound
+
+- **WHEN** the same cycle is matched with `TRAIL (a)-[:TRUSTS+]->(b)`
+- **THEN** every produced path uses each relationship at most once and enumeration ends
+
+#### Scenario: Demand stops an open walk
+
+- **WHEN** a caller submits `MATCH (a)-[:TRUSTS+]->(b) RETURN b LIMIT 5` on a dense graph
+- **THEN** at most five rows are returned and traversal stops before exhausting the walk
+
+#### Scenario: No demand fails safely
+
+- **WHEN** a caller submits an open `WALK` with no `LIMIT`
+- **THEN** the call raises `QueryBudgetExceededError` and returns no rows or partial result
+
+#### Scenario: Optional match keeps unmatched rows
+
+- **WHEN** an `OPTIONAL MATCH` with an open quantifier finds no match for an input row
+- **THEN** the row is preserved with the pattern variables null
+
 ### Requirement: Pattern variables and paths
 
 A variable used more than once in a pattern SHALL refer to the same node or relationship. A path variable SHALL expose the matched nodes and relationships in traversal order, with nodes ordered from the path start to the path end even when relationships are traversed against their stored direction or are undirected.
@@ -430,6 +491,7 @@ A variable used more than once in a pattern SHALL refer to the same node or rela
 
 - **WHEN** a path includes an undirected relationship
 - **THEN** its node sequence still runs from the path start to the path end
+
 ### Requirement: Variable-length bindings and trails
 
 Traversal SHALL be unique according to the effective path mode: `TRAIL` forbids reusing a relationship but allows repeated nodes, and `WALK` allows both. A variable-length relationship variable SHALL bind the ordered list of traversed relationships, and a path variable SHALL include every expanded relationship in traversal order. A variable-length relationship variable SHALL NOT be used where a single relationship is required.
@@ -468,11 +530,13 @@ Traversal SHALL be unique according to the effective path mode: `TRAIL` forbids 
 
 - **WHEN** a `WALK` path offers a route that reuses a relationship
 - **THEN** the route is produced
+
 ### Requirement: Pattern match row semantics
 
-`MATCH` SHALL produce one row per distinct match of the pattern. Parallel relationships,
-self-loops, diamonds, and cycles SHALL produce the matches implied by the graph, and duplicate
-projected rows SHALL be removed only when `DISTINCT` is requested.
+`MATCH` SHALL produce one row per distinct match of the pattern, unless a path pattern carries a
+path-search prefix, in which case it SHALL produce only the paths that prefix selects. Parallel
+relationships, self-loops, diamonds, and cycles SHALL produce the matches implied by the graph, and
+duplicate projected rows SHALL be removed only when `DISTINCT` is requested.
 
 #### Scenario: Diamond produces two rows
 
@@ -493,6 +557,328 @@ projected rows SHALL be removed only when `DISTINCT` is requested.
 
 - **WHEN** the projected values of two matched rows are equal and `DISTINCT` is requested
 - **THEN** only one of those rows is returned
+
+#### Scenario: Path search reduces rows
+
+- **WHEN** a path pattern carries a path-search prefix and matches several paths for one endpoint pair
+- **THEN** only the selected paths become rows
+
+### Requirement: Path search syntax
+
+A path pattern MAY carry at most one path-search prefix: `ANY`, `ANY SHORTEST`, `ALL SHORTEST`,
+or `SHORTEST k`. The prefix SHALL follow the optional path variable and precede any path mode.
+`k` SHALL be a non-negative integer literal; parameters and expressions SHALL be rejected. A
+path variable SHALL bind the selected path.
+
+#### Scenario: Path variable binds the selection
+
+- **WHEN** a caller writes `MATCH p = ANY SHORTEST (a)-[:TRUSTS]->(b) RETURN p`
+- **THEN** `p` is the selected path
+
+#### Scenario: Non-literal k is rejected
+
+- **WHEN** a caller writes `SHORTEST $k` or `SHORTEST 1 + 1`
+- **THEN** the system raises a semantic query error before execution
+
+#### Scenario: Negative k is rejected
+
+- **WHEN** a caller writes `SHORTEST -1`
+- **THEN** the system raises a query error before execution
+
+### Requirement: Path search selection
+
+Path search SHALL partition matches by the path's first and last node within each input row. It
+SHALL select `ANY` one path, `ANY SHORTEST` one minimum-length path, `ALL SHORTEST` every
+minimum-length path, and `SHORTEST k` up to `k` paths in increasing length. `k = 0` SHALL select
+no path.
+
+#### Scenario: Any selects one path per pair
+
+- **WHEN** two distinct routes connect the same endpoint pair and the pattern uses `ANY`
+- **THEN** one row is produced for that pair
+
+#### Scenario: Any shortest selects a minimum path
+
+- **WHEN** routes of length two and three connect the same endpoint pair and the pattern uses
+  `ANY SHORTEST`
+- **THEN** the selected path has length two
+
+#### Scenario: All shortest selects every minimum path
+
+- **WHEN** two two-hop routes and one three-hop route connect the same endpoint pair and the
+  pattern uses `ALL SHORTEST`
+- **THEN** two rows are produced
+
+#### Scenario: Shortest k returns increasing lengths
+
+- **WHEN** a pattern uses `SHORTEST 2` and the partition has paths of length two and three
+- **THEN** both selected paths are returned, shortest first
+
+#### Scenario: Zero k selects nothing
+
+- **WHEN** a path pattern uses `SHORTEST 0`
+- **THEN** the pattern produces no rows
+
+#### Scenario: Unreachable pair is absent
+
+- **WHEN** no path connects a candidate endpoint pair
+- **THEN** the partition produces no row
+
+### Requirement: Path identity and ordering
+
+Two paths SHALL be identical when their node and orientation-aware relationship sequences match;
+parallel relationships SHALL be distinct paths. `ALL SHORTEST` SHALL return distinct paths. Ties
+SHALL break by the lexicographically smaller relationship sequence, then node sequence. Rows SHALL
+be ordered by partition and selection order unless the statement has an `ORDER BY`.
+
+#### Scenario: Parallel relationships are distinct paths
+
+- **WHEN** two parallel relationships connect the same nodes and the pattern uses `ALL SHORTEST`
+- **THEN** both paths are returned
+
+#### Scenario: Duplicate path is not repeated
+
+- **WHEN** the same node and relationship sequence would be produced twice by the evaluator
+- **THEN** only one row is produced
+
+#### Scenario: Tie-break is deterministic
+
+- **WHEN** two shortest paths have the same length and different relationship identifiers
+- **THEN** the same path is selected on every run and on every storage plan
+
+#### Scenario: Output order is stable
+
+- **WHEN** two partitions produce selected paths and the statement has no `ORDER BY`
+- **THEN** rows appear in ascending start and end node identifier order
+
+### Requirement: Path search mode interaction
+
+Path search SHALL evaluate only paths accepted by the effective path mode and match mode. A
+`DIFFERENT EDGES` clause SHALL apply its edge rule before selection. Path search SHALL apply to
+whole paths only.
+
+#### Scenario: Different edges narrows the search
+
+- **WHEN** a `DIFFERENT EDGES` clause and a path-search prefix produce an edge-sharing candidate
+- **THEN** that candidate is not selected
+
+#### Scenario: Path mode applies before selection
+
+- **WHEN** a `TRAIL` path and an `ALL SHORTEST` prefix find an edge-reusing candidate
+- **THEN** that candidate is not selected
+
+### Requirement: Path search termination and budget
+
+Path search SHALL evaluate in nondecreasing length order and SHALL stop a partition once its
+selection is complete. `ANY SHORTEST` and `ALL SHORTEST` SHALL stop at the shortest layer.
+`SHORTEST k` SHALL stop at its k-th path. Search SHALL terminate for open `WALK` patterns by
+pruning states that cannot improve a selection. A final `LIMIT` MAY stop the search. Every
+expansion SHALL count against the budget, and a budget failure SHALL raise with no partial result.
+
+#### Scenario: Any shortest does not enumerate longer paths
+
+- **WHEN** `ANY SHORTEST` finds a path at length two for a partition with longer routes
+- **THEN** it does not enumerate the longer routes
+
+#### Scenario: Shortest k stops at k
+
+- **WHEN** `SHORTEST 2` finds two paths for a partition and more paths exist
+- **THEN** it stops expanding that partition
+
+#### Scenario: Open walk search terminates
+
+- **WHEN** `ANY SHORTEST` or `ALL SHORTEST` runs over an open `WALK` pattern on a cyclic graph
+- **THEN** the query completes with the shortest paths
+
+#### Scenario: Limit stops the search
+
+- **WHEN** a path-search query has a final `LIMIT` and enough partitions are discovered
+- **THEN** expansion stops when the limit is satisfied
+
+#### Scenario: Budget failure returns nothing
+
+- **WHEN** a path-search query exceeds the expansion budget
+- **THEN** the call raises `QueryBudgetExceededError` and returns no rows
+
+### Requirement: Path terms
+
+A path pattern SHALL be a juxtaposition of one or more path terms. A term SHALL be a node pattern
+followed by relationship-node pairs, or a parenthesized path pattern followed by a quantifier.
+Adjacent terms SHALL share their boundary node: the last node of one term and the first node of the
+next SHALL be the same node. A group SHALL contain a relationship position, directly or through a
+nested group.
+
+#### Scenario: Juxtaposition shares a boundary
+
+- **WHEN** a caller writes `MATCH (a:User)((b:Program)-[r:TRUSTS]->(c:Program)){2}(d:Program) RETURN a, d`
+- **THEN** `a` is the same node as `b`, and `c` of the last iteration is the same node as `d`
+
+#### Scenario: Group without a relationship is rejected
+
+- **WHEN** a caller writes `MATCH ((a:Program)){2} RETURN a`
+- **THEN** the system raises a semantic query error before execution
+
+### Requirement: Group syntax
+
+A group quantifier SHALL be `{n}`, `{m,n}`, `{,n}`, `{m,}`, `*`, or `+`, with the same bounds as a
+relationship quantifier. The legacy `*n..m` spelling SHALL be rejected on a group. A group MAY
+carry a path variable and an inner path mode, and SHALL NOT carry a path-search prefix.
+
+#### Scenario: Fixed repetition
+
+- **WHEN** a caller writes `MATCH ((a)-[r:TRUSTS]->(b)){2} RETURN a, b`
+- **THEN** the group matches two consecutive copies and the boundary node of the first copy is the
+  start node of the second
+
+#### Scenario: Bounded repetition matches the unrolled form
+
+- **WHEN** a caller matches `((a)-[r:TRUSTS]->(b)){2}` and the equivalent unrolled two-copy pattern
+- **THEN** both return the same rows and bindings
+
+#### Scenario: Open group
+
+- **WHEN** a caller writes `MATCH ((a)-[r:TRUSTS]->(b)){1,} RETURN a, b` under `TRAIL`
+- **THEN** the group repeats until no further iteration is allowed
+
+#### Scenario: Legacy group quantifier is rejected
+
+- **WHEN** a caller writes `MATCH ((a)-[r:TRUSTS]->(b))*1..2 RETURN a`
+- **THEN** the system raises a query error before execution
+
+#### Scenario: Search prefix inside a group is rejected
+
+- **WHEN** a caller writes `MATCH ((ANY (a)-[r:TRUSTS]->(b))){2} RETURN a`
+- **THEN** the system raises a semantic query error before execution
+
+### Requirement: Group variable scope
+
+A variable first introduced inside a group SHALL be a group variable. It SHALL occur at most once
+in its group and SHALL NOT shadow a variable bound outside. A nested group SHALL NOT reference an
+enclosing group's local variables. A variable bound before the group SHALL act as an equality
+constraint inside it.
+
+#### Scenario: Outer variable is an equality constraint
+
+- **WHEN** a variable bound by an earlier clause appears inside a group
+- **THEN** every position using it binds the same element and the variable keeps its single value
+
+#### Scenario: Duplicate group variable is rejected
+
+- **WHEN** the same new variable occurs twice inside one group
+- **THEN** the system raises a semantic query error before execution
+
+#### Scenario: Shadowing is rejected
+
+- **WHEN** a group introduces a variable with the same name as a variable bound before it
+- **THEN** the system raises a semantic query error before execution
+
+### Requirement: Group variable kinds
+
+Outside a group, a node group variable SHALL bind one node per iteration and a relationship group
+variable SHALL bind one relationship per iteration; nested groups SHALL flatten in traversal order.
+A group path variable SHALL bind one `Path` and SHALL require a positive lower bound. Property
+access on a group variable and `type()` on a group relationship variable SHALL be rejected.
+
+#### Scenario: Node group variable binds a list
+
+- **WHEN** a caller writes `MATCH ((a)-[r:TRUSTS]->(b)){2} RETURN a`
+- **THEN** `a` is a list of two nodes
+
+#### Scenario: Relationship group variable binds a list
+
+- **WHEN** a caller writes `MATCH ((a)-[r:TRUSTS]->(b)){2} RETURN r`
+- **THEN** `r` is a list of two relationships
+
+#### Scenario: Nested groups flatten
+
+- **WHEN** an inner and an outer group both introduce a relationship variable over two iterations
+- **THEN** the variable binds one flat list in traversal order
+
+#### Scenario: Zero iterations bind empty lists
+
+- **WHEN** a group with a lower bound of zero takes no iteration and the rest of the path matches
+- **THEN** every group variable binds an empty list and the boundary nodes coincide
+
+#### Scenario: Group path variable
+
+- **WHEN** a caller writes `MATCH (p = (a)-[r:TRUSTS]->(b)){2} RETURN p`
+- **THEN** `p` is one path containing both iterations in traversal order
+
+#### Scenario: Group path variable needs a positive lower bound
+
+- **WHEN** a group path variable is combined with a quantifier whose lower bound is zero
+- **THEN** the system raises a semantic query error before execution
+
+#### Scenario: Property access on a group variable is rejected
+
+- **WHEN** a caller writes `RETURN a.designation` where `a` is a node group variable
+- **THEN** the system raises a semantic query error before execution
+
+### Requirement: Grouped mode composition
+
+The outer path mode SHALL apply to the whole path, including every grouped iteration. An inner
+path mode SHALL apply to the group's own repetitions. Both SHALL be enforced and the stricter
+constraint SHALL win. The clause match mode SHALL span group iterations. Path search SHALL apply to
+whole paths.
+
+#### Scenario: Outer mode covers the whole path
+
+- **WHEN** `ACYCLIC` is the outer mode and two group iterations would revisit a node
+- **THEN** the match is not produced
+
+#### Scenario: Inner mode is stricter
+
+- **WHEN** the outer mode is `WALK` and the inner mode is `TRAIL`
+- **THEN** a relationship may not repeat in any iteration
+
+#### Scenario: Inner and outer path modes
+
+- **WHEN** a caller writes `MATCH WALK (ACYCLIC (a)-[r:TRUSTS]->(b)){1,3} RETURN a, b`
+- **THEN** the inner `ACYCLIC` rule and the outer `WALK` rule both apply, so no node repeats
+
+#### Scenario: Match mode spans group iterations
+
+- **WHEN** a `DIFFERENT EDGES` clause repeats a group and an edge would be used twice
+- **THEN** that match is not produced
+
+#### Scenario: Search selects whole paths
+
+- **WHEN** a grouped path carries `ANY SHORTEST`
+- **THEN** one shortest complete path is selected per endpoint pair
+
+### Requirement: Grouped restrictions and budget
+
+A grouped path pattern SHALL contain at least one relationship position whose effective minimum
+hop count is at least one, so every iteration charges the expansion counter. A path pattern that is
+only a group with a zero lower bound SHALL be rejected. The statement budget SHALL count every
+expanded relationship and produced binding, and a budget failure SHALL return no partial result.
+
+#### Scenario: Non-progressing group is rejected
+
+- **WHEN** every relationship inside a group has a lower bound of zero
+- **THEN** the system raises a semantic query error before execution
+
+#### Scenario: Lone zero-lower group is rejected
+
+- **WHEN** a path pattern consists only of a group with a zero lower bound
+- **THEN** the system raises a semantic query error before execution
+
+#### Scenario: Budget stops an open group
+
+- **WHEN** an open grouped `WALK` exceeds the expansion budget
+- **THEN** the call raises `QueryBudgetExceededError` and returns no partial result
+
+#### Scenario: Path order and length include every iteration
+
+- **WHEN** a grouped path is returned and `length(p)` is projected
+- **THEN** the length counts every relationship of every iteration and the nodes run from the
+  start of the first iteration to the end of the last
+
+#### Scenario: Optional match with a group
+
+- **WHEN** an `OPTIONAL MATCH` with a grouped pattern finds no match for an input row
+- **THEN** the row is preserved with the group variables null
+
 ### Requirement: Multiple patterns and match stages
 
 A `MATCH` clause MAY contain several comma-separated path patterns, and a statement MAY contain several `MATCH` clauses. Each clause SHALL be a read stage over the rows produced by earlier stages. Variables shared by patterns SHALL bind the same element; patterns with no shared variable SHALL produce a cartesian product. A later `MATCH` MAY constrain earlier variables, introduce new ones, or both. An input row with no match SHALL be removed.
@@ -526,6 +912,7 @@ A `MATCH` clause MAY contain several comma-separated path patterns, and a statem
 
 - **WHEN** a caller binds the same path variable to two patterns
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: Optional match
 
 An `OPTIONAL MATCH` clause SHALL be a read stage with left-join semantics. When a pattern matches for an input row, it SHALL produce one row per match. When it does not, the input row SHALL survive with variables introduced by the optional stage bound to null and variables bound earlier unchanged. The stage's `WHERE` SHALL be part of the optional match, and a null value SHALL never satisfy a downstream filter.
@@ -559,6 +946,7 @@ An `OPTIONAL MATCH` clause SHALL be a read stage with left-join semantics. When 
 
 - **WHEN** a statement starts with `OPTIONAL MATCH (n:Program) RETURN n`
 - **THEN** the statement is accepted and returns every match or one null row when none exists
+
 ### Requirement: UNWIND clause
 
 `FOR` SHALL expand a list-valued expression into one row per element and bind each element to a variable. `UNWIND <expression> AS <variable>` SHALL be accepted as an alias for `FOR <variable> IN <expression>`, including the ordinality suffix. A null value or an empty list SHALL produce no rows, and a value that is not a list SHALL raise a query error.
@@ -637,6 +1025,7 @@ An `OPTIONAL MATCH` clause SHALL be a read stage with left-join semantics. When 
 
 - **WHEN** a caller submits `FOR value IN [1] WITH ORDINALITY index WITH OFFSET other RETURN index`
 - **THEN** the system raises a query error before execution
+
 ### Requirement: UNWIND ordinality
 
 `WITH ORDINALITY <name>` SHALL bind a one-based position and `WITH OFFSET <name>` SHALL bind a
@@ -652,6 +1041,7 @@ two forms SHALL NOT be combined.
 
 - **WHEN** a caller submits `FOR value IN [1, 2] WITH OFFSET index RETURN index`
 - **THEN** the statement is accepted and returns indexes 0 and 1
+
 ### Requirement: UNWIND placement and scope
 
 The element variable SHALL be fresh in the current scope. The element and index variables SHALL be
@@ -662,6 +1052,7 @@ clause within its segment.
 
 - **WHEN** a caller submits `CREATE (n:Program) UNWIND [1] AS value RETURN value`
 - **THEN** the system raises a query error before execution
+
 ### Requirement: UNWIND as a row source
 
 A statement SHALL accept `FOR` as its only row source, with `UNWIND` accepted as the alias. A read statement with `FOR` and `RETURN` SHALL be valid without a `MATCH`, and a write statement MAY begin with `FOR` and omit both `MATCH` and `RETURN`.
@@ -680,6 +1071,7 @@ A statement SHALL accept `FOR` as its only row source, with `UNWIND` accepted as
 
 - **WHEN** a caller submits `RETURN 1 AS value` without a `MATCH`, `FOR`, or write clause
 - **THEN** the system raises a query error before execution
+
 ### Requirement: WITH projection and scope
 
 A `WITH` clause SHALL be a read stage that projects expressions into a new scope. Only names projected by the `WITH` SHALL be visible to later stages. A projected variable keeps its kind and snapshot; a non-variable expression SHALL require an alias. Duplicate output names SHALL be rejected, `WITH DISTINCT` SHALL remove duplicate rows, and `WITH` SHALL NOT be the final clause of a statement.
@@ -713,6 +1105,7 @@ A `WITH` clause SHALL be a read stage that projects expressions into a new scope
 
 - **WHEN** a statement ends with a `WITH` clause and has no `RETURN`
 - **THEN** the system raises a query error
+
 ### Requirement: WITH aggregation and pagination
 
 A `WITH` clause SHALL support the same aggregate functions, implicit grouping, `FILTER` (with `WHERE` as its alias), `ORDER BY`, `OFFSET` (with `SKIP` as its alias), and `LIMIT` as `RETURN`. A filter after `WITH` SHALL filter that stage's rows and MAY reference an aggregate alias. Names produced by the stage SHALL bind following stages, so grouped rows can be filtered, sorted, and paginated downstream.
@@ -741,6 +1134,7 @@ A `WITH` clause SHALL support the same aggregate functions, implicit grouping, `
 
 - **WHEN** a `WITH` stage mixes an aggregate with a non-aggregate expression
 - **THEN** one row is returned per distinct non-aggregate value
+
 ### Requirement: CREATE clause
 
 `INSERT` SHALL create nodes and relationships from a pattern. `CREATE` SHALL be accepted as an alias for a data-modifying `INSERT` and SHALL NOT be accepted for a catalog operation. `INSERT` SHALL always create new elements and SHALL NOT match existing ones.
@@ -789,6 +1183,7 @@ A `WITH` clause SHALL support the same aggregate functions, implicit grouping, `
 
 - **WHEN** a caller submits `CREATE GRAPH` or `INSERT GRAPH`
 - **THEN** the system raises a query error because catalog statements are out of profile
+
 ### Requirement: CREATE element validation
 
 A created node SHALL bind its variable for later clauses and `RETURN`. Labels and property maps
@@ -804,6 +1199,7 @@ evaluated against the current row.
 
 - **WHEN** a caller unwinds rows and creates a node whose property is a row field
 - **THEN** each created node stores that row's value
+
 ### Requirement: CREATE relationship constraints
 
 A created relationship SHALL require both endpoint nodes to be already bound by a variable. A
@@ -819,6 +1215,7 @@ pattern names none, and SHALL be directed.
 
 - **WHEN** a caller matches two nodes and submits `INSERT (a)-[r]->(b)`
 - **THEN** one relationship with an empty label set is created between them
+
 ### Requirement: MERGE matching and creation
 
 `MERGE` SHALL match one fixed-length path pattern as a whole. When the pattern matches, `MERGE` SHALL bind the existing elements and create nothing. When it does not match, `MERGE` SHALL create every unbound node and relationship in the pattern and reuse variables bound by earlier clauses. `MERGE` SHALL produce one row per match or one created row.
@@ -857,6 +1254,7 @@ pattern names none, and SHALL be directed.
 
 - **WHEN** a caller appends `RETURN n.designation AS name` to a successful `MERGE`
 - **THEN** the result contains one row with the matched or created designation
+
 ### Requirement: MERGE with multiple input rows
 
 `MERGE` SHALL run once per input row, in order, and a creation made for one row SHALL be visible to later rows in the same statement. When several input rows describe the same pattern, the first SHALL create it and later rows SHALL match it. A pattern that matches several existing rows SHALL produce several rows and SHALL NOT create.
@@ -880,6 +1278,7 @@ pattern names none, and SHALL be directed.
 
 - **WHEN** a later row of a `MERGE` statement fails
 - **THEN** every creation made by that statement is rolled back
+
 ### Requirement: MERGE pattern restrictions
 
 A `MERGE` pattern SHALL contain one path, SHALL NOT bind a path variable, SHALL NOT use a quantified relationship, and SHALL use exactly one relationship type with the outgoing direction for every relationship it can create. `MERGE` SHALL reject a relationship variable already bound by an earlier clause.
@@ -913,6 +1312,7 @@ A `MERGE` pattern SHALL contain one path, SHALL NOT bind a path variable, SHALL 
 
 - **WHEN** a caller merges a relationship variable already bound by an earlier clause
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: Conditional updates for MERGE
 
 A `MERGE` MAY carry at most one `ON CREATE SET` and one `ON MATCH SET`, in that order. `ON CREATE SET` SHALL apply only to rows the clause created, and `ON MATCH SET` only to rows it matched. Assignments SHALL follow `SET` rules and SHALL be evaluated once per output row.
@@ -951,6 +1351,7 @@ A `MERGE` MAY carry at most one `ON CREATE SET` and one `ON MATCH SET`, in that 
 
 - **WHEN** a conditional assignment sets a property to null
 - **THEN** the property is removed, following `SET` rules
+
 ### Requirement: Pattern property expressions
 
 A pattern property value SHALL be a non-aggregate expression evaluated against the current row and the statement parameters. A referenced variable SHALL be in scope before the pattern. In `MATCH`, a null value SHALL match nothing. In `CREATE`, a null value SHALL be omitted from the created properties. In `MERGE`, a null value SHALL raise a query error.
@@ -994,6 +1395,7 @@ A pattern property value SHALL be a non-aggregate expression evaluated against t
 
 - **WHEN** a pattern property value references a variable the pattern itself introduces
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: SET clause
 
 `SET` SHALL assign a property from an expression and SHALL add labels to a bound node or relationship. Assigning a null value SHALL remove the property. Labels added with `SET` SHALL be static identifiers. `SET` SHALL reject an unbound variable and SHALL reject a label added to a value that is not a node or relationship.
@@ -1032,6 +1434,7 @@ A pattern property value SHALL be a non-aggregate expression evaluated against t
 
 - **WHEN** a caller unwinds a scalar value and submits `SET` with a label on that variable
 - **THEN** the system raises a semantic query error and changes nothing
+
 ### Requirement: REMOVE clause
 
 `REMOVE` SHALL remove a property or one or more labels from a bound element. Removing a property or label that is absent SHALL leave the element unchanged. `REMOVE` SHALL reject an unbound variable.
@@ -1060,6 +1463,7 @@ A pattern property value SHALL be a non-aggregate expression evaluated against t
 
 - **WHEN** a caller submits `REMOVE n.cycles` without binding `n`
 - **THEN** the system raises a semantic query error and changes nothing
+
 ### Requirement: DELETE clause
 
 `DELETE` SHALL delete relationships and nodes. A node that still has an incident relationship SHALL be rejected unless `DETACH DELETE` is used, which SHALL remove its incident relationships first. `NODETACH DELETE` SHALL be accepted as the explicit non-detaching form and SHALL behave exactly as `DELETE`. `DELETE` SHALL reject an unbound variable and SHALL reject a value that is not a node or relationship.
@@ -1093,6 +1497,7 @@ A pattern property value SHALL be a non-aggregate expression evaluated against t
 
 - **WHEN** a caller binds a scalar value and submits `DELETE` on it
 - **THEN** the system raises a semantic query error and changes nothing
+
 ### Requirement: Mutation cardinality
 
 Write clauses SHALL operate on match rows. An entity referenced by more than one row SHALL be mutated or deleted once per statement. Clauses SHALL execute in source order, and each clause SHALL observe the mutations of the clauses before it.
@@ -1111,6 +1516,7 @@ Write clauses SHALL operate on match rows. An entity referenced by more than one
 
 - **WHEN** a statement sets a property and then removes it in a later clause
 - **THEN** the property is absent from the committed data
+
 ### Requirement: Write results and summary
 
 A statement MAY omit `RETURN` when it contains a write clause. In that case the result SHALL have no columns and no rows and SHALL expose a mutation summary with counts of created and deleted nodes and relationships and of property and label changes. When `RETURN` is present, the result SHALL carry projected rows and the same summary.
@@ -1129,6 +1535,7 @@ A statement MAY omit `RETURN` when it contains a write clause. In that case the 
 
 - **WHEN** a caller submits `CREATE (n:Program {designation: 'Tron'}) RETURN n.designation AS name`
 - **THEN** the result contains one row with `name` equal to `Tron` and a non-zero created count
+
 ### Requirement: Write atomicity
 
 A statement classified as a write SHALL execute in one implicit `BEGIN IMMEDIATE` transaction. Success SHALL commit every mutation of that statement. Any failure SHALL roll back every mutation of that statement and leave no transaction open. A write statement executed through an active transaction SHALL participate in that transaction without opening another.
@@ -1152,6 +1559,7 @@ A statement classified as a write SHALL execute in one implicit `BEGIN IMMEDIATE
 
 - **WHEN** a caller executes a write statement through `Transaction.query`
 - **THEN** the mutations are visible inside the transaction and are undone by its rollback
+
 ### Requirement: Write value validation
 
 Property values assigned by a write clause SHALL satisfy the stored value rules: booleans, signed 64-bit integers, finite floats, strings, and homogeneous lists of those scalars. Assigning null SHALL remove the property. A value that violates these rules SHALL raise a query execution error and SHALL change nothing.
@@ -1175,6 +1583,7 @@ Property values assigned by a write clause SHALL satisfy the stored value rules:
 
 - **WHEN** a caller assigns a parameter holding NaN or infinity
 - **THEN** the system raises a query execution error and commits nothing
+
 ### Requirement: Write error mapping
 
 Domain and storage failures encountered while executing a write statement SHALL be raised as query execution errors. Element-specific failures, including a missing element or a protected deletion, SHALL NOT escape as storage or domain exceptions, and raw SQLite exceptions SHALL NOT escape.
@@ -1193,6 +1602,7 @@ Domain and storage failures encountered while executing a write statement SHALL 
 
 - **WHEN** SQLite reports a failure during a write statement
 - **THEN** the caller receives a query execution error and no raw SQLite exception
+
 ### Requirement: Value equality and comparison
 
 The dialect SHALL treat integers and floats as one numeric family for equality and ordering, while booleans SHALL remain distinct from numbers. Strings SHALL compare by Unicode code point, and lists SHALL compare element-wise with order significant. Null SHALL propagate through comparison operators.
@@ -1216,6 +1626,7 @@ The dialect SHALL treat integers and floats as one numeric family for equality a
 
 - **WHEN** a caller compares the strings `'Quorra'` and `'quorra'`
 - **THEN** the comparison does not report equality
+
 ### Requirement: Null semantics
 
 A missing property SHALL evaluate to null. Comparisons, arithmetic, string predicates, and `IN` SHALL propagate null. `IS NULL` and `IS NOT NULL` SHALL always return a boolean. `WHERE` SHALL keep only rows whose predicate is true; false and null SHALL both be discarded.
@@ -1239,6 +1650,7 @@ A missing property SHALL evaluate to null. Comparisons, arithmetic, string predi
 
 - **WHEN** an aggregate receives null inputs
 - **THEN** `count(expr)`, `sum`, `avg`, `min`, `max`, and `collect` ignore those inputs, while `count(*)` still counts rows
+
 ### Requirement: Filtering expressions
 
 `WHERE` SHALL accept the dialect's scalar expression surface: comparison operators, `AND`, `OR`, `NOT`, `IN`, `IS NULL`, `IS NOT NULL`, `STARTS WITH`, `ENDS WITH`, `CONTAINS`, arithmetic, string concatenation, list and map literals, list access and comprehensions, `CASE`, path functions, scalar functions, and read-only query expressions. String predicates SHALL be case-sensitive.
@@ -1277,6 +1689,7 @@ A missing property SHALL evaluate to null. Comparisons, arithmetic, string predi
 
 - **WHEN** a caller filters with `EXISTS { MATCH (n)-[:TRUSTS]->(m:Program) }`
 - **THEN** only rows with at least one matching inner row are returned
+
 ### Requirement: Scalar functions
 
 The dialect SHALL support the core functions `id`, `labels`, `type`, `properties`, `keys`, `size`, `coalesce`, `toInteger`, `toFloat`, `toString`, `lower`, `upper`, `trim`, `abs`, `concat`, `startNode`, and `endNode`, plus the extended functions in this spec. Function names SHALL be case-insensitive; `labels` and `keys` SHALL return sorted lists; `labels` SHALL accept a node or relationship; `type` SHALL return the first sorted relationship label or null.
@@ -1305,6 +1718,7 @@ The dialect SHALL support the core functions `id`, `labels`, `type`, `properties
 
 - **WHEN** a caller uses a function name that is not in the supported function catalog
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: Arithmetic
 
 The dialect SHALL support `+`, `-`, `*`, `/`, `%`, and unary minus on numeric values. `/` SHALL always return a float. Integer overflow and division by zero SHALL raise a query execution error rather than returning a coerced or partial value.
@@ -1328,6 +1742,7 @@ The dialect SHALL support `+`, `-`, `*`, `/`, `%`, and unary minus on numeric va
 
 - **WHEN** an arithmetic result falls outside the signed 64-bit range
 - **THEN** the system raises a query execution error
+
 ### Requirement: Projection and result columns
 
 `RETURN` SHALL project expressions, aliases, and node, relationship, or path values. A column SHALL take its alias when present and otherwise its expression text. `RETURN ALL` SHALL be the explicit form of the default, and `RETURN *` SHALL project every variable in scope in introduction order. Duplicate column names SHALL be rejected, and `DISTINCT` SHALL remove duplicate projected rows.
@@ -1381,6 +1796,7 @@ The dialect SHALL support `+`, `-`, `*`, `/`, `%`, and unary minus on numeric va
 
 - **WHEN** a caller submits `CREATE (n:Program) RETURN NO BINDINGS`
 - **THEN** the node is created and the result has one empty row
+
 ### Requirement: RETURN NO BINDINGS extension
 
 As a pygrafito extension, `RETURN NO BINDINGS` SHALL return zero columns and one empty row per input
@@ -1396,6 +1812,7 @@ BY`, `OFFSET`, or `LIMIT`; GQL's canonical no-result form is `FINISH`.
 
 - **WHEN** a caller submits `MATCH (n:Program) RETURN NO BINDINGS ORDER BY n.designation`
 - **THEN** the system raises a syntax error before execution
+
 ### Requirement: Aggregation and grouping
 
 The dialect SHALL support `count`, `collect`, `sum`, `avg`, `min`, and `max`, including `DISTINCT` variants. `count(*)` SHALL count rows, `count(expr)` SHALL count non-null values, and empty input SHALL yield count 0, an empty collected list, sum 0, and null for `avg`, `min`, and `max` when the projection is a global aggregate.
@@ -1434,6 +1851,7 @@ The dialect SHALL support `count`, `collect`, `sum`, `avg`, `min`, and `max`, in
 
 - **WHEN** a caller returns `n.cycles GROUP BY n.cycles`
 - **THEN** one row is returned per distinct value of `n.cycles`
+
 ### Requirement: Grouping keys
 
 A non-aggregate `RETURN` expression SHALL form an implicit grouping key when the projection has no
@@ -1449,6 +1867,7 @@ keys.
 
 - **WHEN** a caller returns `n.cycles, count(*) GROUP BY n.cycles`
 - **THEN** one row is returned for each distinct value of `n.cycles`, even if another non-aggregate expression could have formed a different implicit key
+
 ### Requirement: Ordering and pagination
 
 `ORDER BY` SHALL accept one or more expressions or projected aliases with optional `ASC` or `DESC`, defaulting to ascending. Each sort key MAY specify `NULLS FIRST` or `NULLS LAST`; the default SHALL place nulls last in ascending order and first in descending order. `OFFSET` SHALL accept a non-negative integer or parameter, and `SKIP` SHALL be accepted as its alias. `LIMIT` SHALL accept a non-negative integer or parameter. Negative and non-integer values SHALL be rejected before execution.
@@ -1482,6 +1901,36 @@ keys.
 
 - **WHEN** `OFFSET`, `SKIP`, or `LIMIT` receives a parameter
 - **THEN** the parameter value is validated as a non-negative integer before execution
+
+### Requirement: Demand-driven read execution
+
+A read statement SHALL consume rows lazily when it does not need every row first, and SHALL stop matching and expanding once the final `LIMIT` and `OFFSET` are satisfied. `ORDER BY`, `DISTINCT`, aggregation, `GROUP BY`, set operations, writes, `NEXT`, and `FINISH` SHALL evaluate their input fully. `EXISTS { ... }` SHALL stop at its first inner row; `COUNT { ... }` SHALL consume all rows.
+
+#### Scenario: Limit stops expansion
+
+- **WHEN** a query with a final `LIMIT` and no ordering or grouping is executed
+- **THEN** relationship expansions stop once the requested rows and skipped rows are produced
+
+#### Scenario: Limit zero does nothing
+
+- **WHEN** a query with a final `LIMIT 0` is executed
+- **THEN** no pattern expansion happens and the result has no rows
+
+#### Scenario: Ordering forces full evaluation
+
+- **WHEN** a query with `ORDER BY` and `LIMIT` is executed
+- **THEN** every matching row is produced before ordering and pagination apply
+
+#### Scenario: Aggregation forces full evaluation
+
+- **WHEN** a query with aggregation or `GROUP BY` and `LIMIT` is executed
+- **THEN** every matching row is consumed before the aggregate result is paginated
+
+#### Scenario: Exists stops early
+
+- **WHEN** an `EXISTS { ... }` subquery finds its first inner row
+- **THEN** the inner pattern stops expanding
+
 ### Requirement: Parameters and injection safety
 
 The dialect SHALL bind `$name` parameters from a mapping. Parameter values SHALL be bound as data and SHALL never be interpolated into SQL text or used as identifiers. A referenced parameter that is missing SHALL raise a semantic query error. Extra parameters SHALL be ignored.
@@ -1500,6 +1949,7 @@ The dialect SHALL bind `$name` parameters from a mapping. Parameter values SHALL
 
 - **WHEN** a parameter appears where a label, relationship type, or property key is required
 - **THEN** the system raises a query error
+
 ### Requirement: Result model
 
 `QueryResult` SHALL expose ordered column names and iterate immutable rows. A row SHALL support lookup by column name. Result values SHALL be null, booleans, integers, floats, strings, lists, maps, `Node`, `Relationship`, or `Path` snapshots. Row order without `ORDER BY` SHALL be unspecified. A result SHALL expose a mutation summary, and a write statement without `RETURN` SHALL expose no columns and no rows.
@@ -1528,6 +1978,7 @@ The dialect SHALL bind `$name` parameters from a mapping. Parameter values SHALL
 
 - **WHEN** a caller executes a read statement
 - **THEN** every mutation count in its summary is zero
+
 ### Requirement: Prepared queries
 
 `Graph.prepare` SHALL parse and validate a statement once and return a `PreparedQuery` whose `execute` method may run repeatedly with different parameters. A prepared statement MAY be a write statement. Preparation SHALL reject syntax and semantic errors before execution, and prepared columns SHALL be available before the first execution and SHALL be empty without `RETURN`. For a compound query, prepared columns SHALL be the first operand's columns.
@@ -1556,6 +2007,7 @@ The dialect SHALL bind `$name` parameters from a mapping. Parameter values SHALL
 
 - **WHEN** a caller prepares a compound query whose first operand returns `name` and `cycles`
 - **THEN** the prepared columns are `name` and `cycles` before execution
+
 ### Requirement: Transaction and lifecycle integration
 
 `Transaction.query` SHALL execute read and write statements within the active transaction and SHALL observe that transaction's uncommitted writes. `Graph.query` and `PreparedQuery.execute` SHALL raise `TransactionError` while an explicit transaction is active. Using a closed graph handle SHALL raise `GraphClosedError`.
@@ -1579,6 +2031,7 @@ The dialect SHALL bind `$name` parameters from a mapping. Parameter values SHALL
 
 - **WHEN** a caller invokes `Graph.query`, `Graph.prepare`, or `PreparedQuery.execute` on a closed graph
 - **THEN** the system raises `GraphClosedError`
+
 ### Requirement: Query errors and positions
 
 The system SHALL raise `QuerySyntaxError`, `QuerySemanticError`, or `QueryExecutionError`, all subclasses of `QueryError` and `PygrafitoError`. Syntax and semantic errors SHALL report a line and column when a source position is available. Raw SQLite exceptions SHALL NOT escape; execution failures SHALL be raised as a query execution error.
@@ -1597,6 +2050,7 @@ The system SHALL raise `QuerySyntaxError`, `QuerySemanticError`, or `QueryExecut
 
 - **WHEN** a query fails during evaluation, such as by division by zero
 - **THEN** the system raises an execution query error and does not leak a raw SQLite exception
+
 ### Requirement: Consistent execution snapshot
 
 A query SHALL evaluate against one consistent graph state. Writes made after execution starts SHALL NOT change an already returned result, and a query executed through an active transaction SHALL include that transaction's uncommitted writes.
@@ -1615,6 +2069,26 @@ A query SHALL evaluate against one consistent graph state. Writes made after exe
 
 - **WHEN** a statement with several read stages runs while another connection changes a row between stages
 - **THEN** every stage observes the state at execution start
+
+### Requirement: Consistent open-traversal snapshot
+
+A statement with an open-ended pattern SHALL read inside one consistent snapshot per contiguous read prefix. The snapshot SHALL be released before the statement returns. Read stages SHALL be drained before the first write stage, and the write SHALL stay atomic with the statement.
+
+#### Scenario: Concurrent write does not change an open walk
+
+- **WHEN** another connection writes to the graph while an open walk is being iterated
+- **THEN** the walk continues to reflect the graph state at the start of the statement
+
+#### Scenario: Read stages finish before writes
+
+- **WHEN** a statement matches with an open quantifier and then sets a property
+- **THEN** the read stage is fully consumed before the statement's first write executes
+
+#### Scenario: Budget failure leaves no transaction open
+
+- **WHEN** an open-walk statement exceeds the budget
+- **THEN** the call raises, releases the read snapshot, and leaves the graph handle usable
+
 ### Requirement: Identifier casing and quoting
 
 Keywords and function names SHALL be case-insensitive. Variable names, labels, relationship labels, and property keys SHALL be case-sensitive. Backtick-quoted identifiers SHALL allow spaces, dots, and escaped backticks in labels, relationship labels, property keys, and variables.
@@ -1638,6 +2112,7 @@ Keywords and function names SHALL be case-insensitive. Variable names, labels, r
 
 - **WHEN** a caller writes a label or relationship label in backticks with spaces
 - **THEN** the exact stored label is matched
+
 ### Requirement: FILTER stage
 
 A `FILTER` stage SHALL filter the rows produced by the preceding read stage. `FILTER WHERE` SHALL be accepted as the explicit spelling. A filter SHALL evaluate a boolean expression against the current row, keep only rows whose predicate is true, and SHALL NOT introduce a new binding.
@@ -1656,6 +2131,7 @@ A `FILTER` stage SHALL filter the rows produced by the preceding read stage. `FI
 
 - **WHEN** a `FILTER` references a variable that is not bound before the stage
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: Comments
 
 The dialect SHALL accept `//` line comments, `/* ... */` block comments, and `--` line comments. `-->` and `<--` SHALL be read as arrows, never as comments. A `--` that immediately follows a node or relationship pattern SHALL raise a syntax error rather than start a comment.
@@ -1679,6 +2155,7 @@ The dialect SHALL accept `//` line comments, `/* ... */` block comments, and `--
 
 - **WHEN** a caller writes `MATCH (a)--(b) RETURN b`
 - **THEN** the system raises a syntax error with a position and does not silently ignore the pattern
+
 ### Requirement: Path modes
 
 A path SHALL be matched under one of four path modes. `WALK` SHALL allow a node or a relationship to repeat within the path. `TRAIL` SHALL forbid reusing a relationship while allowing a node to repeat. `SIMPLE` SHALL forbid repeating a node except that the start and end node MAY be the same. `ACYCLIC` SHALL forbid repeating any node, including the start and end node. The default for a canonical path without an explicit or implied mode SHALL be `WALK`.
@@ -1717,6 +2194,7 @@ A path SHALL be matched under one of four path modes. `WALK` SHALL allow a node 
 
 - **WHEN** a caller writes `MATCH TRAIL (a)-[:TRUSTS*1..3]->(b) RETURN b`
 - **THEN** only the named path is matched under `TRAIL` and other paths in the clause keep the default
+
 ### Requirement: Path mode selection
 
 The effective path mode of a path SHALL be resolved in this order: an explicit per-path mode, an explicit clause mode, `TRAIL` when the path contains a legacy quantifier, and `WALK` otherwise. An explicit mode SHALL override both defaults. A path that mixes a legacy and a canonical quantifier without an explicit mode SHALL be a semantic error, and that error SHALL be raised before execution.
@@ -1750,6 +2228,96 @@ The effective path mode of a path SHALL be resolved in this order: an explicit p
 
 - **WHEN** one path contains both quantifier forms and the path or clause names an explicit mode
 - **THEN** the statement is accepted and that mode applies
+
+### Requirement: Match modes
+
+A `MATCH` or `OPTIONAL MATCH` clause SHALL resolve exactly one match mode: `REPEATABLE ELEMENTS`
+or `DIFFERENT EDGES`. `REPEATABLE ELEMENTS` SHALL add no constraint and SHALL be the default.
+`DIFFERENT EDGES` SHALL forbid any relationship from binding more than once anywhere in the
+clause, across every path and every repetition inside a path. Nodes MAY repeat under either mode.
+
+#### Scenario: Default is repeatable elements
+
+- **WHEN** a caller matches two patterns that can share one relationship without naming a match mode
+- **THEN** both patterns may bind that relationship
+
+#### Scenario: Explicit repeatable elements
+
+- **WHEN** a caller submits `MATCH REPEATABLE ELEMENTS (a)-[r]->(b), (c)-[s]->(d) RETURN r, s`
+- **THEN** `r` and `s` may bind the same relationship
+
+#### Scenario: Different edges rejects a shared relationship
+
+- **WHEN** a caller submits `MATCH DIFFERENT EDGES (a)-[r]->(b), (c)-[s]->(d) RETURN r, s` and
+  the only candidate makes `r` and `s` the same relationship
+- **THEN** that combination is not produced
+
+#### Scenario: Different edges rejects reuse inside a walk
+
+- **WHEN** a `WALK` path under `DIFFERENT EDGES` would revisit one relationship
+- **THEN** that extension is not produced
+
+#### Scenario: Parallel relationships stay distinct
+
+- **WHEN** two separate relationships connect the same pair of nodes and `DIFFERENT EDGES` binds
+  one to each of two positions
+- **THEN** the match is produced because the relationships are different
+
+#### Scenario: Nodes may repeat
+
+- **WHEN** `DIFFERENT EDGES` matches a route that revisits a node without reusing a relationship
+- **THEN** the match is produced
+
+#### Scenario: Self-loop consumes one relationship
+
+- **WHEN** `DIFFERENT EDGES` matches a self-loop in two positions
+- **THEN** only one position may bind that relationship
+
+#### Scenario: Already unique clause is unchanged
+
+- **WHEN** a clause that never binds one relationship twice runs under `DIFFERENT EDGES`
+- **THEN** it produces the same rows and bindings as the default mode
+
+#### Scenario: Optional match uses the same rule
+
+- **WHEN** an `OPTIONAL MATCH DIFFERENT EDGES` finds no edge-disjoint match for an input row
+- **THEN** the row is preserved with the pattern variables null
+
+### Requirement: Match mode composition and scope
+
+The match mode SHALL be resolved independently of the path mode and SHALL combine with it by
+intersection: an extension SHALL be accepted only when both the effective path mode and the match
+mode allow it. The match mode SHALL apply only to the paths of its own clause. A relationship bound
+by an earlier stage MAY be bound again by a later clause, and write clauses (`INSERT`, `CREATE`,
+and `MERGE`) SHALL NOT carry a match mode.
+
+#### Scenario: Different edges narrows walk
+
+- **WHEN** a path resolves to `WALK` and its clause names `DIFFERENT EDGES`
+- **THEN** each relationship is used at most once in the clause
+
+#### Scenario: Trail and different edges agree
+
+- **WHEN** a path resolves to `TRAIL` and its clause names `DIFFERENT EDGES`
+- **THEN** both rules forbid relationship reuse and the match is produced
+
+#### Scenario: Repeatable elements loosens trail only across paths
+
+- **WHEN** two `TRAIL` paths in one `REPEATABLE ELEMENTS` clause use different relationships but
+  the same node
+- **THEN** both paths are produced
+
+#### Scenario: Scope is the clause
+
+- **WHEN** an earlier `MATCH` binds a relationship and a later `MATCH DIFFERENT EDGES` binds it
+  again in a different path
+- **THEN** the later match is accepted because the mode does not cross the clause boundary
+
+#### Scenario: Write clauses have no match mode
+
+- **WHEN** a caller writes `INSERT DIFFERENT EDGES (a)-[:TRUSTS]->(b)`
+- **THEN** the system raises a query error before execution
+
 ### Requirement: Query budget counters
 
 A query SHALL be limited by a budget that counts relationship expansions and intermediate rows produced by a stage. The budget MAY also carry an optional wall-clock limit, which SHALL be disabled by default. The documented defaults SHALL be 1,000,000 expansions and 100,000 intermediate rows unless the implementation records a different tuned value with its benchmark. A counter that is absent from the budget SHALL be unlimited.
@@ -1773,6 +2341,7 @@ A query SHALL be limited by a budget that counts relationship expansions and int
 
 - **WHEN** a caller opens a graph without a budget
 - **THEN** the documented expansion and row defaults apply
+
 ### Requirement: Query budget override
 
 A caller SHALL be able to set a graph default budget and to override it for one execution. The override SHALL apply only to that execution and SHALL NOT change the graph default. A budget passed to a prepared query execution SHALL apply to every execution that supplies it.
@@ -1791,6 +2360,7 @@ A caller SHALL be able to set a graph default budget and to override it for one 
 
 - **WHEN** a prepared query is executed twice with different budgets
 - **THEN** each execution uses its own override
+
 ### Requirement: Budget exhaustion
 
 Exceeding any enabled budget counter SHALL raise a query execution error that names the counter and its limit. The error SHALL never be returned as a partial result, and the same failure SHALL be raised by a query that reaches the limit through matching, filtering, or expansion.
@@ -1814,6 +2384,7 @@ Exceeding any enabled budget counter SHALL raise a query execution error that na
 
 - **WHEN** a read query exceeds the budget after producing some rows
 - **THEN** the call raises and returns no rows
+
 ### Requirement: Budget rollback
 
 A write statement that exceeds the budget SHALL roll back every mutation it made, and the graph handle SHALL remain usable for later statements. A write inside an active transaction SHALL undo only its own mutations and leave the caller's transaction usable.
@@ -1832,19 +2403,7 @@ A write statement that exceeds the budget SHALL roll back every mutation it made
 
 - **WHEN** a write inside an active transaction exceeds the budget
 - **THEN** the statement's mutations are undone and the transaction can continue
-### Requirement: Deferred open-ended traversal
 
-An open-ended upper bound SHALL be out of scope for this release. The forms `*`, `+`, `*n..`, and `{m,}` SHALL be rejected with a deferred-construct error that names the follow-up change, and the rejection SHALL happen before execution.
-
-#### Scenario: Open-ended forms are rejected
-
-- **WHEN** a caller writes `*`, `+`, `*1..`, or `{1,}` as a quantifier
-- **THEN** the system raises a deferred-construct error before execution
-
-#### Scenario: Closed forms are accepted
-
-- **WHEN** a caller writes `{1}`, `{1,3}`, `{,3}`, `*1`, `*1..3`, or `*0..3`
-- **THEN** the statement is accepted and matched under its resolved path mode
 ### Requirement: LET clause
 
 `LET` SHALL be a read stage that adds row-wise bindings without removing existing bindings.
@@ -1876,6 +2435,7 @@ assignment SHALL bind a scalar. `LET` SHALL be usable as the only row source of 
 
 - **WHEN** a caller submits `MATCH (n:Program) LET element = n MATCH (element)-[:ALLIES_WITH]->(m) RETURN m`
 - **THEN** the statement is accepted and the second pattern matches from the bound node
+
 ### Requirement: LET binding rules
 
 A `LET` name already bound in the current scope, or repeated in the same clause, SHALL be rejected.
@@ -1901,6 +2461,7 @@ statement.
 
 - **WHEN** a caller submits `MATCH (n:Program) LET value = 1`
 - **THEN** the system raises a query error before execution because the read segment has no `RETURN` or `FINISH`
+
 ### Requirement: NEXT composition
 
 `NEXT` SHALL separate two linear segments. The preceding segment's `RETURN` table SHALL be the
@@ -1932,6 +2493,7 @@ as a Cypher-compatible extension. A statement SHALL remain one transaction and o
 
 - **WHEN** a later segment exceeds the query budget after an earlier segment wrote
 - **THEN** the whole statement rolls back and no earlier mutation remains
+
 ### Requirement: NEXT YIELD
 
 `NEXT` MAY carry `YIELD item [AS alias] [, ...]`. Each item SHALL name a column of the preceding
@@ -1968,6 +2530,7 @@ end in `RETURN`. Without `YIELD`, every preceding column SHALL remain in scope.
 
 - **WHEN** a caller submits `CREATE (n:Program {designation: 'Clu'}) NEXT YIELD n RETURN n`
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: NEXT placement and result
 
 Each read segment SHALL end with `RETURN` or `FINISH`; a write segment MAY omit the result clause.
@@ -2004,6 +2567,7 @@ in a row. `FINISH` SHALL be final, and a statement SHALL contain at most one `FI
 
 - **WHEN** a caller submits `MATCH (n:Program) FINISH NEXT MATCH (m:Program) RETURN m`
 - **THEN** the system raises a query error before execution
+
 ### Requirement: FINISH clause
 
 `FINISH` SHALL end a statement without producing a result. It SHALL apply every preceding read and
@@ -2035,6 +2599,7 @@ instead of using `FINISH`. `FINISH` SHALL NOT be the only clause of a statement.
 
 - **WHEN** a caller submits `FINISH` with no row source and no write clause
 - **THEN** the system raises a query error before execution
+
 ### Requirement: GROUP BY clause
 
 `GROUP BY` SHALL be a suffix of `RETURN`. It SHALL group the input rows by the listed keys and
@@ -2066,6 +2631,7 @@ aggregates SHALL deduplicate the keys. `RETURN DISTINCT ... GROUP BY ...` SHALL 
 
 - **WHEN** a caller submits `MATCH (n:Program) RETURN DISTINCT n.cycles GROUP BY n.cycles ORDER BY n.cycles`
 - **THEN** the statement is accepted and returns one row per distinct cycle count
+
 ### Requirement: GROUP BY keys and grouping rules
 
 GQL grouping keys are direct variable references; pygrafito additionally accepts expressions as a
@@ -2113,22 +2679,7 @@ Empty input SHALL produce no groups unless `GROUP BY ()` is used.
 
 - **WHEN** a caller submits `MATCH (n:Program {designation: 'Nobody'}) RETURN n.cycles, count(*) GROUP BY n.cycles`
 - **THEN** the result contains no rows
-### Requirement: Deferred construct diagnostics
 
-A construct the profile lists as deferred SHALL raise a semantic query error that names the
-construct and the follow-up change that implements it. The error SHALL NOT be reported as an
-unexpected token, and the statement SHALL NOT execute or partially execute. Unsupported
-out-of-profile constructs SHALL keep their explicit rejection.
-
-#### Scenario: Open-bound gate
-
-- **WHEN** a caller uses an open-ended upper bound (`*`, `+`, `*n..`, or `{m,}`)
-- **THEN** the error names the construct and `add-gql-unbounded-traversal`
-
-#### Scenario: Statement does not execute
-
-- **WHEN** a deferred construct appears in a statement that also contains a write clause
-- **THEN** the statement changes no data
 ### Requirement: CASE expressions
 
 The dialect SHALL support simple and searched `CASE` expressions. A simple `CASE` SHALL compare its
@@ -2160,6 +2711,7 @@ missing `ELSE` SHALL produce null, and only the selected branch SHALL be evaluat
 
 - **WHEN** a caller submits `RETURN CASE WHEN true THEN 1 ELSE 1 / 0 END AS result`
 - **THEN** the result is 1 and no division error is raised
+
 ### Requirement: Map literals
 
 The dialect SHALL support map literals of the form `{key: expression, ...}`. Keys SHALL be static
@@ -2202,6 +2754,7 @@ SHALL NOT be orderable.
 
 - **WHEN** a caller submits `INSERT (n:Program {metadata: {role: 'system'}})`
 - **THEN** the system raises a query execution error and creates no node
+
 ### Requirement: List indexing and slicing
 
 The dialect SHALL support zero-based list indexing `list[index]` and slicing `list[start:end]` with
@@ -2243,6 +2796,7 @@ produce null, and a non-list target SHALL raise a query error.
 
 - **WHEN** a caller submits `RETURN 36[0] AS value`
 - **THEN** the system raises a query error before execution
+
 ### Requirement: List comprehensions
 
 The dialect SHALL support list comprehensions of the form `[variable IN list [WHERE predicate] [| expression]]`.
@@ -2285,6 +2839,7 @@ element. A null list SHALL produce null, and a non-list SHALL raise a query erro
 
 - **WHEN** a caller submits `MATCH (n:Program) RETURN [n IN [1, 2] | n] AS values`
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: String concatenation
 
 The dialect SHALL support string concatenation with `||`. Both operands SHALL be strings, null SHALL
@@ -2321,6 +2876,7 @@ operands SHALL raise a query error.
 
 - **WHEN** a caller submits `RETURN 'Tron' + 1 AS value`
 - **THEN** the system raises a query error
+
 ### Requirement: Path functions
 
 The dialect SHALL support `nodes(path)`, `relationships(path)`, and `length(path)`. `nodes` SHALL
@@ -2352,6 +2908,7 @@ SHALL produce null, and a non-path argument SHALL raise a query error.
 
 - **WHEN** a caller submits `MATCH (n:Program) RETURN nodes(n) AS nodes`
 - **THEN** the system raises a semantic query error before execution
+
 ### Requirement: List construction functions
 
 The dialect SHALL support `range` and `reverse`. `range(start, end [, step])` SHALL produce an
@@ -2399,6 +2956,7 @@ raise a query error.
 
 - **WHEN** a caller submits `RETURN range('36', 38) AS cycles`
 - **THEN** the system raises a query error
+
 ### Requirement: List element functions
 
 The dialect SHALL support `head`, `last`, and `tail`. `head` SHALL return the first element, `last`
@@ -2430,6 +2988,7 @@ argument SHALL raise a query error.
 
 - **WHEN** a caller submits `RETURN tail(36) AS rest`
 - **THEN** the system raises a query error
+
 ### Requirement: String scalar functions
 
 The dialect SHALL support `split`, `substring`, and `replace`. `split(string, delimiter)` SHALL
@@ -2477,6 +3036,7 @@ and invalid delimiters, negative positions, or wrong types SHALL raise a query e
 
 - **WHEN** a caller submits `RETURN replace(36, '3', '4') AS value`
 - **THEN** the system raises a query error
+
 ### Requirement: Numeric and boolean scalar functions
 
 The dialect SHALL support `toBoolean`, `round`, `ceil`, and `floor`. `toBoolean` SHALL convert
@@ -2524,6 +3084,7 @@ SHALL produce null, and wrong types or negative precision SHALL raise a query er
 
 - **WHEN** a caller submits `RETURN round(36.5, -1) AS value`
 - **THEN** the system raises a query error
+
 ### Requirement: WITH * projection
 
 `WITH *` SHALL project every variable in the current scope in introduction order, preserving each
@@ -2560,6 +3121,7 @@ statement. A `WITH *` that would duplicate a name SHALL be rejected.
 
 - **WHEN** a statement ends with `WITH *` and has no following clause
 - **THEN** the system raises a query error
+
 ### Requirement: Query expression subqueries
 
 The dialect SHALL support read-only `EXISTS { ... }` and `COUNT { ... }` query expressions. The
@@ -2607,6 +3169,7 @@ positions in read stages, projections, `LET`, grouping keys, and ordering.
 
 - **WHEN** a caller submits `MATCH (n:Program) RETURN EXISTS { MATCH (m:Program) RETURN m } AS found`
 - **THEN** the system raises a query error before execution
+
 ### Requirement: Subquery scope and correlation
 
 An outer variable referenced inside a subquery SHALL refer to the outer binding. A name introduced
@@ -2639,6 +3202,7 @@ against the current row.
 
 - **WHEN** a caller evaluates an uncorrelated `EXISTS` for several outer rows
 - **THEN** every row receives the same boolean result
+
 ### Requirement: Subquery budget and snapshot
 
 A subquery SHALL share the enclosing statement's query budget, transaction, and consistent
@@ -2665,6 +3229,7 @@ partial result, and a subquery SHALL NOT start a transaction.
 
 - **WHEN** a statement with a subquery runs while another connection changes a row
 - **THEN** the outer query and subquery observe the same execution snapshot
+
 ### Requirement: Set operations
 
 The dialect SHALL support compound queries built from two or more read-only linear statements with
@@ -2707,6 +3272,7 @@ write, `FINISH`, or `RETURN NO BINDINGS`.
 
 - **WHEN** a caller uses `FINISH` or `RETURN NO BINDINGS` as a set operand
 - **THEN** the system raises a query error before execution
+
 ### Requirement: Set operation columns
 
 Every operand of a set operation SHALL produce the same number of columns in the same order with the
@@ -2738,6 +3304,7 @@ implicit type coercion SHALL occur, and duplicate detection SHALL use dialect eq
 
 - **WHEN** one operand returns the integer 36 and another returns the float 36.0
 - **THEN** `UNION` treats them as the same value
+
 ### Requirement: Set operation ordering and pagination
 
 `ORDER BY`, `OFFSET`, and `LIMIT` after a compound query SHALL apply to the combined result.
@@ -2769,6 +3336,7 @@ clauses inside an operand's final `RETURN` SHALL be rejected; intermediate `RETU
 
 - **WHEN** a compound query orders an output column with `NULLS FIRST` or `NULLS LAST`
 - **THEN** null placement follows the requested rule
+
 ### Requirement: Set operation execution
 
 A compound query SHALL execute all operands in one transaction and one snapshot under one budget.

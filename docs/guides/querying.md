@@ -305,6 +305,169 @@ with Graph.open(":memory:") as graph:
 A canonical path without an explicit mode uses `WALK`; a path with a legacy `*n..m` quantifier
 keeps `TRAIL`. See [Path modes](../reference/query-language.md#path-modes) for the resolution order.
 
+## Share relationships across a clause
+
+A match mode constrains the whole `MATCH` clause rather than one path. `REPEATABLE ELEMENTS` is the
+default and lets two patterns bind the same relationship. `DIFFERENT EDGES` allows each
+relationship at most once in the clause, so two patterns must use different edges.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    flynn = graph.add_node("Program", designation="Flynn")
+    tron = graph.add_node("Program", designation="Tron")
+    clu = graph.add_node("Program", designation="Clu")
+    graph.add_relationship(flynn, "TRUSTS", tron)
+    graph.add_relationship(tron, "TRUSTS", clu)
+    graph.add_relationship(clu, "TRUSTS", flynn)
+
+    cycle = graph.query(
+        "MATCH DIFFERENT EDGES (a:Program)-[r:TRUSTS]->(b), "
+        "(b)-[s:TRUSTS]->(c), (c)-[t:TRUSTS]->(a) RETURN count(*) AS total"
+    )
+    print(cycle.rows[0]["total"])  # 3
+
+with Graph.open(":memory:") as graph:
+    flynn = graph.add_node("Program", designation="Flynn")
+    tron = graph.add_node("Program", designation="Tron")
+    graph.add_relationship(flynn, "TRUSTS", tron)
+    graph.add_relationship(flynn, "TRUSTS", tron)
+
+    repeatable = graph.query(
+        "MATCH REPEATABLE ELEMENTS (a)-[r:TRUSTS]->(b), (c)-[s:TRUSTS]->(d) "
+        "FILTER id(r) = id(s) RETURN count(*) AS total"
+    )
+    different = graph.query(
+        "MATCH DIFFERENT EDGES (a)-[r:TRUSTS]->(b), (c)-[s:TRUSTS]->(d) "
+        "FILTER id(r) = id(s) RETURN count(*) AS total"
+    )
+    print(repeatable.rows[0]["total"], different.rows[0]["total"])  # 2 0
+```
+
+`DIFFERENT EDGES` is scoped to its clause. A later `MATCH` may bind a relationship that an earlier
+clause already used. See [Match modes](../reference/query-language.md#match-modes) for the full
+rule.
+
+## Pick a route or the shortest routes
+
+A path-search prefix selects among the routes a pattern matches. `ANY SHORTEST` returns one
+shortest route per endpoint pair, `ALL SHORTEST` returns every shortest route, and `SHORTEST k`
+returns up to `k` routes in increasing length.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("User", designation="Kevin Flynn")
+    sam = graph.add_node("User", designation="Sam Flynn")
+    quorra = graph.add_node("Program", designation="Quorra")
+    alan = graph.add_node("User", designation="Alan Bradley")
+    graph.add_relationship(kevin, "PARENT_OF", sam)
+    graph.add_relationship(kevin, "TRUSTS", quorra)
+    graph.add_relationship(sam, "TRUSTS", alan)
+    graph.add_relationship(quorra, "TRUSTS", alan)
+    graph.add_relationship(sam, "TRUSTS", quorra)
+
+    shortest = graph.query(
+        "MATCH p = ANY SHORTEST (a:User {designation: 'Kevin Flynn'})"
+        "-[:PARENT_OF|TRUSTS{1,3}]->(b:User {designation: 'Alan Bradley'}) "
+        "RETURN length(p) AS hops"
+    )
+    print(shortest.rows[0]["hops"])  # 2
+
+    all_shortest = graph.query(
+        "MATCH p = ALL SHORTEST (a:User {designation: 'Kevin Flynn'})"
+        "-[:PARENT_OF|TRUSTS{1,3}]->(b:User {designation: 'Alan Bradley'}) "
+        "RETURN length(p) AS hops ORDER BY hops"
+    )
+    print([row["hops"] for row in all_shortest])  # [2, 2]
+
+    top_two = graph.query(
+        "MATCH p = SHORTEST 2 (a:User {designation: 'Kevin Flynn'})"
+        "-[:PARENT_OF|TRUSTS{1,3}]->(b:User {designation: 'Alan Bradley'}) "
+        "RETURN length(p) AS hops ORDER BY hops"
+    )
+    print([row["hops"] for row in top_two])  # [2, 2]
+```
+
+The selection is per first-and-last-node pair. Parallel relationships count as different routes,
+and ties use a deterministic relationship-then-node order. `SHORTEST 0` returns no rows.
+
+## Repeat a path shape
+
+A grouped path repeats a whole term, not one relationship. Variables first introduced inside the
+group bind ordered lists, and a group path variable binds the complete repeated path.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    flynn = graph.add_node("Program", designation="Flynn")
+    tron = graph.add_node("Program", designation="Tron")
+    clu = graph.add_node("Program", designation="Clu")
+    graph.add_relationship(flynn, "TRUSTS", tron)
+    graph.add_relationship(tron, "TRUSTS", clu)
+    graph.add_relationship(clu, "TRUSTS", flynn)
+
+    result = graph.query(
+        "MATCH (s:Program {designation: 'Flynn'}) "
+        "(p = (a)-[r:TRUSTS]->(b)){2} "
+        "RETURN length(p) AS hops, [x IN nodes(p) | x.designation] AS names, "
+        "[x IN r | id(x)] AS relationships"
+    )
+    row = result.rows[0]
+    print(row["hops"])  # 2
+    print(row["names"])  # ['Flynn', 'Tron', 'Clu']
+    print(len(row["relationships"]))  # 2
+```
+
+`{0,2}` allows zero iterations when the rest of the path still matches; group variables then bind
+empty lists. The legacy `*n..m` spelling is rejected on a group. Use `{1,3}`, `*`, or `+` for an
+open group, and add `LIMIT`, `TRAIL`, or a search prefix when the graph is cyclic.
+
+## Bound an open walk
+
+A missing upper bound makes a quantifier open-ended. `TRAIL`, `SIMPLE`, and `ACYCLIC` bound the
+walk themselves. An open `WALK` can repeat forever, so give it a final `LIMIT` or rely on the query
+budget.
+
+```python
+from pygrafito import Graph, QueryBudget, QueryBudgetExceededError
+
+with Graph.open(":memory:") as graph:
+    flynn = graph.add_node("Program", designation="Flynn")
+    tron = graph.add_node("Program", designation="Tron")
+    clu = graph.add_node("Program", designation="Clu")
+    graph.add_relationship(flynn, "TRUSTS", tron)
+    graph.add_relationship(tron, "TRUSTS", clu)
+    graph.add_relationship(clu, "TRUSTS", flynn)
+
+    bounded = graph.query(
+        "MATCH TRAIL (a:Program {designation: 'Flynn'})-[:TRUSTS+]->(b) "
+        "RETURN b.designation AS name ORDER BY name"
+    )
+    print([row["name"] for row in bounded])  # ['Clu', 'Flynn', 'Tron']
+
+    limited = graph.query(
+        "MATCH (a:Program {designation: 'Flynn'})-[:TRUSTS+]->(b) "
+        "RETURN b.designation AS name LIMIT 5"
+    )
+    print(len(limited.rows))  # 5
+
+    try:
+        graph.query(
+            "MATCH (a:Program {designation: 'Flynn'})-[:TRUSTS+]->(b) RETURN b",
+            budget=QueryBudget(max_expansions=10),
+        )
+    except QueryBudgetExceededError as error:
+        print(error.counter)  # expansions
+```
+
+A final `LIMIT` stops matching and expansion as soon as the rows exist. Ordering, distinctness,
+aggregation, grouping, set operations, writes, `NEXT`, and `FINISH` need every row before they can
+produce a result, so they evaluate the whole walk first.
+
 ## Bound query work
 
 Every execution runs under a query budget. Two counters bound the work — relationship expansions

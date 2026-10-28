@@ -23,9 +23,9 @@ The current release contains `supported`, `gated`, and `out of profile` rows. Th
 
 ## Current status
 
-The current release implements the supported rows below. The 1.0 target adds the remaining gated
-path rows. Gated constructs do not execute in this release; the parser or semantic analyzer rejects
-them with a positioned query error, and the matrix names the follow-up change.
+The current release implements every supported row below, including open-ended quantifiers, match
+modes, path search, and grouped quantified paths. No path-engine row is gated. Constructs outside
+the profile are rejected with a positioned query error, and the matrix records their status.
 
 | Area | Current release | 1.0 target |
 | --- | --- | --- |
@@ -34,8 +34,8 @@ them with a positioned query error, and the matrix names the follow-up change.
 | Iteration and filtering | `FOR`, `UNWIND` alias, `FILTER`, stage `WHERE` alias, `MATCH ... WHERE` | Same surface |
 | Binding, composition, and grouping | `LET`, `NEXT` with `YIELD`, `FINISH`, `GROUP BY`, `WITH` extension, implicit grouping | Same surface |
 | Projection, ordering, and pagination | `RETURN`, `RETURN DISTINCT`, `RETURN ALL`, `RETURN *`, `RETURN NO BINDINGS`; `ORDER BY`, `OFFSET`, `SKIP`, `LIMIT` | Same surface |
-| Quantifiers | Closed `{n}`, `{m,n}`, `{,n}`; legacy `*n`, `*n..m`, `*0..m` | Closed forms plus open-ended `{m,}`, `*`, `+`, and legacy `*n..` |
-| Path modes | `WALK` default; `TRAIL`, `SIMPLE`, `ACYCLIC` explicit | Same modes plus match modes, grouped quantified paths, and path search |
+| Quantifiers | Closed `{n}`, `{m,n}`, `{,n}`; open `{m,}`, `*`, `+`; legacy `*n`, `*n..m`, `*0..m`, `*n..` | Same surface |
+| Path modes | `WALK` default; `TRAIL`, `SIMPLE`, `ACYCLIC` explicit; match modes `REPEATABLE ELEMENTS` and `DIFFERENT EDGES`; path search `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | Same modes plus grouped quantified paths |
 | Expressions | Current operators, property access, list literals, `CASE`, map literals, list indexing and slicing, list comprehensions, string concatenation, path functions, core and extended scalar functions, aggregates | Same surface |
 | Subqueries | Read-only `EXISTS { ... }` and `COUNT { ... }` | Same surface |
 | Set operations | `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT` | Same surface |
@@ -78,7 +78,7 @@ entry.
 | Grouping | `GROUP BY key [, ...]`, `GROUP BY ()` | Explicit grouping; implicit grouping is an extension. Expression keys are an extension. |
 | Projection | `RETURN`, `RETURN DISTINCT`, `RETURN ALL`, `FINISH` | `RETURN *` is canonical; `RETURN NO BINDINGS` is a pygrafito extension. |
 | Ordering and pagination | `ORDER BY`, `OFFSET`, `SKIP`, `LIMIT` | `ASC`/`ASCENDING`, `DESC`/`DESCENDING`, and `NULLS FIRST`/`NULLS LAST` are in scope. |
-| Quantifiers | `{n}`, `{m,n}`, `{,n}`, `{m,}`, `*`, `+` | Placement follows the GQL path-pattern grammar. Open upper bounds are gated. |
+| Quantifiers | `{n}`, `{m,n}`, `{,n}`, `{m,}`, `*`, `+` | Placement follows the GQL path-pattern grammar. A missing upper bound means unbounded. |
 | Labels | Conjunction, disjunction, negation, wildcard | Node and edge label expressions; `IS` is accepted in place of `:`. |
 | Edge directions | `->`, `<-`, `-`, `~`, `<~`, `~>`, `<->` | `-` is any direction; `~` is undirected only. |
 | Comments | `//`, `--`, `/* ... */` | `--` is a GQL line comment; legacy double-dash arrows are an alias. |
@@ -89,10 +89,10 @@ entry.
 | Path functions | `nodes(path)`, `relationships(path)`, `length(path)` | Supported. |
 | Subqueries | `EXISTS { ... }`, `COUNT { ... }` | Read-only, correlated or uncorrelated. |
 | Set operations | `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT` | Read-only compound queries. |
-| Path search | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | In the 1.0 target; gated in the current release. |
-| Match modes | `DIFFERENT EDGES`, `REPEATABLE ELEMENTS` | In the 1.0 target; gated in the current release. |
-| Grouped quantified paths | Repetition of a grouped path pattern | Syntax and semantics are owned by `define-gql-path-semantics`; gated. |
-| Open-ended quantifiers | `{m,}`, `*`, `+`; legacy `*n..` | In the 1.0 target; gated until lazy traversal lands. |
+| Path search | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | Supported; whole-path selection per endpoint pair. |
+| Match modes | `DIFFERENT EDGES`, `REPEATABLE ELEMENTS` | Supported; `REPEATABLE ELEMENTS` is the default. |
+| Grouped quantified paths | Repetition of a grouped path pattern, with list bindings and inner modes | Supported. |
+| Open-ended quantifiers | `{m,}`, `*`, `+`; legacy `*n..` | Supported, with demand-driven limits and the query budget. |
 
 Label expressions use `&` for conjunction, the vertical-bar operator for disjunction, `!` for
 negation, and `%` for the wildcard. For example, `(:Program&:ISO)` matches a node carrying both
@@ -134,14 +134,14 @@ legacy `-->` or `<--` arrow is never truncated into a comment.
 ## Compatibility construct: the legacy quantifier
 
 The legacy Cypher quantifier is a compatibility construct. It keeps its Cypher default of
-relationship-unique trails. The canonical closed forms are supported; the open forms are gated.
+relationship-unique trails. The canonical closed and open forms are supported.
 
 | Form | Default path mode | Status | Notes |
 | --- | --- | --- | --- |
 | `*n`, `*n..m`, `*0..m` | `TRAIL` | supported | Cypher-compatible. The upper bound is finite. |
-| `*n..` | `TRAIL` | gated | Legacy open upper bound; lands with `add-gql-unbounded-traversal`. |
+| `*n..` | `TRAIL` | supported | Legacy open upper bound. |
 | `{n}`, `{m,n}`, `{,n}` | `WALK` (target) | supported | GQL canonical closed quantifiers. |
-| `{m,}`, `*`, `+` | `WALK` (target) | gated | GQL canonical open forms; land with `add-gql-unbounded-traversal`. |
+| `{m,}`, `*`, `+` | `WALK` | supported | GQL canonical open forms. |
 | Explicit `WALK`, `TRAIL`, `SIMPLE`, or `ACYCLIC` | The explicit mode | supported | Overrides both defaults. |
 
 The effective mode for a path is resolved in this order:
@@ -164,8 +164,9 @@ MATCH WALK (a)-[:ALLIES_WITH*1..3]->(b)     -- explicit WALK wins
 MATCH TRAIL (a)-[:ALLIES_WITH{1,3}]->(b)    -- explicit TRAIL wins
 ```
 
-The canonical closed forms require an explicit upper bound. The open upper bound (`*`, `+`,
-`*n..`, and `{m,}`) is gated for 1.0 and names `add-gql-unbounded-traversal`. It is not deferred.
+A missing upper bound means the quantifier is unbounded. The open forms are `{m,}`, `*`
+(zero or more), `+` (one or more), and the legacy `*n..` spelling. An open walk stops when the
+result demand is met or when the query budget stops it; it never returns a truncated path set.
 
 ## Path modes
 
@@ -175,11 +176,10 @@ The canonical closed forms require an explicit upper bound. The open upper bound
 | `TRAIL` | A relationship may not repeat within one path; nodes may repeat. | Supported; also the default for the legacy quantifier. |
 | `SIMPLE` | Nodes may not repeat, except that the start and end may be the same. | Supported. |
 | `ACYCLIC` | No node may repeat. | Supported. |
-| `DIFFERENT EDGES` | Distinct edge bindings within a match. | Gated; lands with `add-gql-match-modes`. |
-| `REPEATABLE ELEMENTS` | Elements may repeat within a match. | Gated; lands with `add-gql-match-modes`. |
-| Grouped quantified paths | Repetition of a parenthesized path pattern. | Gated; lands with `add-gql-grouped-quantified-paths`. |
-| Path search | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k`. | Gated; lands with `add-gql-path-search`. |
-| Open-ended quantifiers | `*`, `+`, `*n..`, and `{m,}` in any mode. | Gated; lands with `add-gql-unbounded-traversal`. This also enables unbounded traversal; `Unbounded WALK` is not a separate construct or matrix row. |
+
+Match modes, quantifiers with an open upper bound, path search, and grouped quantified paths are
+separate constructs with their own matrix rows. Their interaction with these four modes is defined
+in [Path semantics](#path-semantics).
 
 The path changes depend on `define-gql-path-semantics`, which owns the interaction between path
 modes, match modes, quantifiers, and search prefixes.
@@ -187,6 +187,256 @@ modes, match modes, quantifiers, and search prefixes.
 The Python `paths()` API remains a relationship-unique, bounded trail enumerator. It does not
 follow the query language's `WALK` default. Use `paths()` when you want a trail, and `MATCH TRAIL`
 when you want a trail in the query language.
+
+## Path semantics
+
+This section publishes the 1.0 target for how path modes, match modes, quantifiers, and path search
+combine. `define-gql-path-semantics` owns these decisions. `add-gql-unbounded-traversal`,
+`add-gql-match-modes`, `add-gql-path-search`, and `add-gql-grouped-quantified-paths` have landed.
+Each construct keeps a
+[conformance matrix](#conformance-matrix) row, and every table here repeats its current status. A
+construct marked `gated` does not execute in this release, and an example that uses one is a target
+example rather than current behavior.
+
+### Path modes and match modes
+
+Path modes constrain one path. Match modes constrain the whole `MATCH` clause. Both apply at the
+same time, and neither overrides the other.
+
+| Path mode | Constraint inside one path | Status |
+| --- | --- | --- |
+| `WALK` | None. Nodes and relationships may repeat. | Canonical default; supported. |
+| `TRAIL` | No relationship may occur twice. Nodes may repeat. | Supported; default for a legacy quantifier. |
+| `SIMPLE` | No node may repeat, except that the first and last node may be the same. | Supported. |
+| `ACYCLIC` | No node may repeat, including the first and last. | Supported. |
+
+| Match mode | Constraint across all paths of one `MATCH` clause | Status |
+| --- | --- | --- |
+| `REPEATABLE ELEMENTS` | None. This is the default. | Supported. |
+| `DIFFERENT EDGES` | Each relationship binds at most once in the clause, including repetitions inside one path. | Supported. |
+
+A relationship use is accepted only when both the path mode and the match mode accept it. `TRAIL`
+and `DIFFERENT EDGES` therefore agree inside a path, while `WALK` and `DIFFERENT EDGES` together
+mean "a walk path, but every edge used once in the clause".
+
+The match mode defaults to `REPEATABLE ELEMENTS` so existing query results do not change. The
+profile publishes that choice instead of implying another default.
+
+The effective path mode keeps the resolution order described under [Path modes](#path-modes):
+explicit per-path mode, explicit clause mode, `TRAIL` for a path that contains a legacy quantifier,
+then `WALK`. The match mode is resolved independently at clause level, so
+`MATCH DIFFERENT EDGES TRAIL (a)-[:TRUSTS{1,3}]->(b)` applies both rules.
+
+Match modes apply to `MATCH` and `OPTIONAL MATCH`. `INSERT`, `CREATE`, and `MERGE` patterns have no
+match mode and keep their current behavior. `DIFFERENT EDGES` is scoped to the clause: an
+relationship bound by an earlier `MATCH` stage may be bound again in a later stage.
+
+### Quantifiers
+
+| Form | Lower bound | Upper bound | Tier | Default path mode | Status | Follow-up change |
+| --- | --- | --- | --- | --- | --- | --- |
+| `{n}` | `n` | `n` | Canonical GQL | `WALK` | supported | — |
+| `{m,n}` | `m` | `n` | Canonical GQL | `WALK` | supported | — |
+| `{,n}` | `0` | `n` | Canonical GQL | `WALK` | supported | — |
+| `{m,}` | `m` | unbounded | Canonical GQL | `WALK` | supported | — |
+| `*` | `0` | unbounded | Canonical GQL | `WALK` | supported | — |
+| `+` | `1` | unbounded | Canonical GQL | `WALK` | supported | — |
+| `*n` | `n` | `n` | Compatibility construct | `TRAIL` | supported | — |
+| `*n..m` | `n` | `m` | Compatibility construct | `TRAIL` | supported | — |
+| `*0..m` | `0` | `m` | Compatibility construct | `TRAIL` | supported | — |
+| `*n..` | `n` | unbounded | Compatibility construct | `TRAIL` | supported | — |
+| Group `{...}` | as written | as written | Canonical GQL | `WALK` | supported | — |
+
+The bare `*` and `+` are the canonical GQL forms, not legacy spellings. `*` is zero or more and
+`+` is one or more, so a query that wants at least one hop writes `+` or `{1,}`. A missing upper
+bound means unbounded; an open `WALK` stops at demand or at the query budget.
+
+Mixing a legacy and a canonical quantifier in one path without an explicit path mode is a semantic
+error, exactly as today. Bounds are non-negative integer literals; parameters and expressions are
+rejected. A lower bound of zero is legal on a relationship segment.
+
+### Zero-hop and zero-length bindings
+
+| Situation | Node bindings | Relationship binding | Path binding |
+| --- | --- | --- | --- |
+| A quantified segment matches zero hops | Both end nodes bind to the same node | The relationship variable binds `[]` | The path contains one node and no relationship for that segment |
+| A path pattern has no relationships | Its single node variable binds that node | None | The path contains one node and no relationships; `length(p)` is `0` |
+| A group matches zero iterations | Boundary nodes coincide; group-local node variables bind `[]` | Group-local relationship variables bind `[]` | A group path variable is not allowed when zero iterations are possible |
+
+A zero-hop segment evaluates its label, property, and inline `WHERE` constraints only when it
+matches at least one hop; at zero hops there is no relationship to test. Node constraints on the
+end node always apply. Path modes apply across the whole path, including zero-hop segments. The
+closed forms with a zero lower bound execute today; the open and grouped rows follow their owners.
+
+### Termination, demand, and the budget
+
+| Query shape | Termination |
+| --- | --- |
+| Closed quantifier, any mode | Finite. |
+| Open-ended quantifier under `TRAIL`, `SIMPLE`, or `ACYCLIC` | Finite: the path mode bounds the path length. |
+| Open-ended quantifier with any search prefix | Finite: search selects a finite number of paths per partition, and the set of partitions is finite. |
+| Open-ended quantifier under `WALK` without a search prefix | Infinite in general. Completes only when execution is demand-bounded. |
+
+Demand-bounded means that a final `LIMIT`, with or without `OFFSET`, satisfies all of these: the
+statement is read-only, no `ORDER BY`, `DISTINCT`, aggregation, `GROUP BY`, set operation, write
+clause, `NEXT` boundary, or `FINISH` follows, and the result does not need all rows before the
+first one. `EXISTS { ... }` also stops after its first inner row. A `LIMIT` under `ORDER BY`,
+`DISTINCT`, aggregation, or a write clause requires full evaluation.
+
+An open `WALK` with no demand bound and no search prefix runs until the budget stops it. Execution
+then raises a budget error that names the counter and the limit, and returns no partial result; it
+never returns a truncated path set. Use `LIMIT`, a search prefix, or a repetition-restricting path
+mode such as `TRAIL` to make the shape finite.
+
+Budget accounting:
+
+- Each candidate relationship expansion counts once against the expansion counter, whether it is
+  later accepted or rejected.
+- Each produced binding counts once against the row counter.
+- Path search counts exploration expansions; selecting or deduplicating a path adds none.
+- A group iteration adds no counter of its own because each iteration consumes at least one
+  relationship.
+- A wall-clock limit remains opt-in and is checked at the existing intervals.
+
+### Path search
+
+A search prefix applies to one path pattern. It partitions the matches of that pattern by the
+pair of boundary nodes of the path, its first node and its last node, within each input row. Each
+input row is partitioned independently, so the same endpoint pair in two rows is two partitions.
+
+| Prefix | Selection per partition | Status |
+| --- | --- | --- |
+| none | Every path. This is the default. | Supported. |
+| `ANY` | One path. A deterministic shortest path is a valid choice. | Supported. |
+| `ANY SHORTEST` | One path of minimum length. | Supported. |
+| `ALL SHORTEST` | Every path of minimum length. | Supported. |
+| `SHORTEST k` | Up to `k` paths in increasing length; ties count toward `k`. | Supported. |
+
+`k` in `SHORTEST k` is a non-negative integer literal, so parameters, expressions, negative
+values, and non-integers are rejected. `SHORTEST 0` selects no path.
+
+Two paths are the same when their node sequence and their orientation-aware relationship sequence
+are identical. Parallel relationships produce different paths because their relationship
+identifiers differ, so `ALL SHORTEST` returns distinct paths rather than distinct endpoint pairs.
+
+When a prefix chooses among paths of the same length, the tie-break order is:
+
+1. Shorter path first.
+2. Then the lexicographically smaller relationship sequence, comparing each traversed
+   relationship's identifier and traversal orientation.
+3. Then the lexicographically smaller node sequence.
+
+The evaluator enumerates relationships in ascending identifier order and target nodes in ascending
+identifier order, so the choice is deterministic. Output rows for a path pattern follow this order
+unless the statement has its own `ORDER BY`.
+
+A search prefix is written after the optional path variable and before a per-path mode. A
+clause-level mode comes before the prefix:
+
+```text
+MATCH p = ANY SHORTEST WALK (a)-[:TRUSTS*1..3]->(b) RETURN p
+MATCH TRAIL ANY (a)-[:TRUSTS*1..3]->(b) RETURN p
+```
+
+A prefix inside a group is a semantic error because search applies to the whole path. A path
+pattern carries at most one search prefix.
+
+These examples run on the published TRON fixtures:
+
+| Example | Result |
+| --- | --- |
+| `MATCH p = ALL SHORTEST (a:User {designation: 'Kevin Flynn'})-[:PARENT_OF\|TRUSTS{1,2}]->(b {designation: 'Alan Bradley'}) RETURN p` on `tron-diamond` | Two two-hop paths, one through Sam Flynn and one through Quorra. |
+| The same query with `ANY SHORTEST` | One two-hop path, chosen by the tie-break order. |
+| `MATCH p = SHORTEST 2 (a:User {designation: 'Kevin Flynn'})-[:TRUSTS|ALLIES_WITH]->(b:Program {designation: 'Quorra'}) RETURN p` on `tron-parallel` | Both one-hop paths, because the parallel relationships are different paths. |
+| The same query with `SHORTEST 0` | No rows. |
+| `MATCH p = ANY (a:Program)-[:TRUSTS{1,3}]->(b:Program) RETURN p` on `tron-cycle` | One path per endpoint pair. |
+
+### Grouped quantified paths
+
+A path pattern is a juxtaposition of path terms. A path term is a node pattern followed by zero or
+more relationship-node pairs, or a parenthesized path pattern followed by a quantifier. Adjacent
+terms share their boundary node: the last node of one term is the first node of the next.
+
+```text
+MATCH p = (kevin:User)-[:TRUSTS]->((a:Program)-[r:TRUSTS]->(b:Program)){1,3} RETURN p
+```
+
+The conformance matrix classifies grouped quantified paths as one row, `Grouped quantified paths`.
+The row is supported and carries its six corpus cases.
+
+A group follows these rules:
+
+- It contains at least one relationship position, directly or through a nested group.
+- Its quantifier is `{n}`, `{m,n}`, `{,n}`, `{m,}`, `*`, or `+`. The legacy `*n..m` spelling is not
+  allowed on a group.
+- The whole path pattern contains at least one element that consumes a relationship, so a path is
+  never empty and a lone zero-lower-bound group is rejected.
+- It may name an inner path mode after its opening parenthesis,
+  `(TRAIL (a:Program)-[r:TRUSTS]->(b:Program)){1,3}`. Inner and outer modes both apply, and the
+  stricter constraint wins. A group may not name a search prefix.
+- A group variable occurs at most once in its group. The implicit boundary equality between
+  iterations is not expressed through a variable.
+- A variable bound before the group may be referenced inside it. It acts as an equality
+  constraint, not as a group variable.
+- Nested groups follow the same rules. A group inside a group may not rebind an outer group
+  variable.
+
+Variables first introduced inside a group are **group variables**. Outside the group they bind
+ordered lists: a node variable binds the node per iteration, a relationship variable binds the
+relationship per iteration, and nesting flattens the lists in traversal order.
+
+A path variable on a group binds one path for the concatenated iterations. It is rejected when the
+quantifier admits zero iterations, because a path contains at least one node. Zero iterations are
+allowed only when the rest of the path pattern contributes at least one relationship; group
+variables then bind empty lists.
+
+Every group contains at least one relationship position whose effective minimum hop count is at
+least one. This progress rule guarantees that each iteration consumes a relationship and charges
+the expansion counter, so an open group cannot loop without consuming budget.
+
+Path modes, match modes, path search, path variables, and path functions see the group as part of
+the whole path. A grouped path is not a separate result.
+
+A group is rejected when it has no relationship position, when it cannot progress, when it is the
+only path term and admits zero iterations, when it names a path variable and admits zero
+iterations, when it binds a variable twice or shadows an outer variable, or when it names a search
+prefix. The consolidated list is under [Rejected path combinations](#rejected-path-combinations).
+
+### Rejected path combinations
+
+Each combination below is a semantic error. It is rejected with a positioned query error before
+any statement text executes, and the implementing change adds its focused rejection test.
+
+| Combination | Why it is rejected | Follow-up change |
+| --- | --- | --- |
+| Mixing a legacy and a canonical quantifier in one path without an explicit mode | The two forms have different defaults, and the profile refuses to guess which one the author intended. | Already enforced |
+| A search prefix inside a group | Search applies to the whole path, not to one term. | Already enforced |
+| A group with no relationship position, a group that cannot progress, or a lone zero-lower-bound group | A path must not be empty, and every iteration must consume a relationship. | Already enforced |
+| A group path variable on a quantifier that admits zero iterations | A path contains at least one node, so it cannot represent an empty iteration. | Already enforced |
+| A variable introduced twice inside one group, or a group variable that shadows an outer variable | Group variables bind one ordered list, and shadowing would make the binding ambiguous. | Already enforced |
+| `SHORTEST k` with a non-literal, negative, or non-integer `k` | Selection counts have to be fixed before execution. | Already enforced |
+| More than one search prefix on one path pattern | A partition has one selection rule. | Already enforced |
+
+The mixed-quantifier rejection already has a focused test and is also listed under
+[Rejected forms](#rejected-forms).
+
+### Migration notes
+
+- `WALK` stays the default path mode, and `REPEATABLE ELEMENTS` becomes the explicit default match
+  mode, so existing queries keep their results.
+- `DIFFERENT EDGES` is opt-in. A query with several patterns that relies on sharing a relationship
+  changes only when it adds that keyword. It applies to the whole clause, not across `MATCH` stages.
+- Open quantifiers were rejected before this release. Accepting them adds behavior and removes
+  none. Bare `*` includes zero-hop matches, so write `+` or `{1,}` when you want at least one hop.
+- `DIFFERENT`, `EDGES`, `REPEATABLE`, `ELEMENTS`, `ANY`, and `SHORTEST` are reserved keywords in
+  this release. Backtick-quote existing variables and aliases that use those spellings.
+- Grouped path syntax was a syntax error before this release. It now binds variables introduced
+  inside the group as ordered lists, so write a list comprehension to project their elements.
+- An open `WALK` without `LIMIT`, a search prefix, or a grouped repetition restriction runs to the
+  budget error instead of failing as a deferred construct. Write `LIMIT`, a search prefix, or
+  `TRAIL` for a finite result.
+- The Python `paths()` API keeps its relationship-unique, bounded trail contract. The target path
+  semantics do not change it.
 
 ## Query budget
 
@@ -258,7 +508,7 @@ Out of profile means the construct is rejected with an explicit query error. It 
 | Whole-map assignment (`SET n = {...}`, `SET n += {...}`) | Cypher-only convenience form. Assign or remove properties individually. | A positioned query error before execution. |
 | `exists(n.prop)` | Cypher-only function form. Use `n.prop IS NOT NULL`. | A positioned query error before execution. |
 | Regex predicates | Cypher-only regular-expression matching. Use `STARTS WITH`, `ENDS WITH`, and `CONTAINS` for literal predicates. | A positioned query error before execution. |
-| `shortestPath()`, `allShortestPaths()` | Cypher-only path functions. Use `Graph.shortest_path`, or the target path-search prefixes when they land. | A positioned query error before execution. |
+| `shortestPath()`, `allShortestPaths()` | Cypher-only path functions. Use `Graph.shortest_path`, or the supported path-search prefixes. | A positioned query error before execution. |
 | Servers and drivers | The library is embedded; there is no network protocol or driver layer. | No query API exists; query text that attempts it is rejected. |
 | Clustering, authentication, and multi-tenancy | There is no server, account, or tenant layer. | No query API exists; query text that attempts it is rejected. |
 | Multi-graph storage | One graph handle owns one database. | No query API exists; query text that attempts it is rejected. |
@@ -269,16 +519,8 @@ Out of profile means the construct is rejected with an explicit query error. It 
 
 ### Gated for 1.0
 
-A gated construct is in the 1.0 target but cannot execute in the current release. The matrix below
-records the owner for each family. The [conformance matrix](#conformance-matrix) has the exact
-feature rows.
-
-| Gated surface | Follow-up change |
-| --- | --- |
-| `DIFFERENT EDGES`, `REPEATABLE ELEMENTS` | `define-gql-path-semantics`, then `add-gql-match-modes` |
-| Grouped quantified paths | `define-gql-path-semantics`, `add-gql-unbounded-traversal`, then `add-gql-grouped-quantified-paths` |
-| `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | `define-gql-path-semantics`, `add-gql-unbounded-traversal`, `add-gql-match-modes`, then `add-gql-path-search` |
-| Open-ended quantifiers `*`, `+`, `{m,}`, and legacy `*n..` | `define-gql-path-semantics`, then `add-gql-unbounded-traversal` |
+No matrix surface is gated in the current release. The path-engine rows all execute, and the
+[conformance matrix](#conformance-matrix) records their implementing cases.
 
 ### Deferred
 
@@ -382,15 +624,15 @@ the previous table, not a matrix status.
 | `UNION ALL` | Canonical GQL | supported | `UNION ALL` | Set operation preserving duplicates. |
 | `INTERSECT` | Canonical GQL | supported | `INTERSECT` | Set operation. |
 | `EXCEPT` | Canonical GQL | supported | `EXCEPT` | Set operation. |
-| `DIFFERENT EDGES` | Canonical GQL | gated | `DIFFERENT EDGES` | `define-gql-path-semantics`, then `add-gql-match-modes`. |
-| `REPEATABLE ELEMENTS` | Canonical GQL | gated | `REPEATABLE ELEMENTS` | `define-gql-path-semantics`, then `add-gql-match-modes`. |
-| Grouped quantified path pattern | Canonical GQL | gated | `Grouped quantified paths` | `define-gql-path-semantics`, `add-gql-unbounded-traversal`, then `add-gql-grouped-quantified-paths`. |
-| `ANY` | Canonical GQL | gated | `Path search prefixes` | `define-gql-path-semantics`, `add-gql-unbounded-traversal`, `add-gql-match-modes`, then `add-gql-path-search`. |
-| `ANY SHORTEST` | Canonical GQL | gated | `Path search prefixes` | Same follow-up. |
-| `ALL SHORTEST` | Canonical GQL | gated | `Path search prefixes` | Same follow-up. |
-| `SHORTEST k` | Canonical GQL | gated | `Path search prefixes` | Same follow-up. |
-| `*`, `+`, `{m,}` | Canonical GQL | gated | `Open-ended quantifiers` | `define-gql-path-semantics`, then `add-gql-unbounded-traversal`. |
-| `*n..` | Compatibility construct | gated | `Open-ended quantifiers` | Legacy open upper bound; same follow-up. |
+| `DIFFERENT EDGES` | Canonical GQL | supported | `DIFFERENT EDGES` | Clause-wide edge uniqueness. |
+| `REPEATABLE ELEMENTS` | Canonical GQL | supported | `REPEATABLE ELEMENTS` | Default; no extra constraint. |
+| Grouped quantified path pattern | Canonical GQL | supported | `Grouped quantified paths` | Repeated path terms with group variable lists and inner modes. |
+| `ANY` | Canonical GQL | supported | `Path search prefixes` | One deterministic shortest path per partition. |
+| `ANY SHORTEST` | Canonical GQL | supported | `Path search prefixes` | One minimum-length path. |
+| `ALL SHORTEST` | Canonical GQL | supported | `Path search prefixes` | Every minimum-length path. |
+| `SHORTEST k` | Canonical GQL | supported | `Path search prefixes` | Up to `k` paths in increasing length. |
+| `*`, `+`, `{m,}` | Canonical GQL | supported | `Open-ended quantifiers` | Open upper bound. |
+| `*n..` | Compatibility construct | supported | `Open-ended quantifiers` | Legacy open upper bound; default `TRAIL`. |
 | Catalog statements (`CREATE GRAPH`, `DROP GRAPH`, `INSERT GRAPH`, schemas) | Out of profile | out of profile | `Catalog statements`; rejected forms | Embedded single graph. |
 | Graph types | Out of profile | out of profile | `Graph types` | No schema layer. |
 | Sessions | Out of profile | out of profile | `Sessions` | No server state. |
@@ -447,7 +689,7 @@ rows have no query case.
 | `ORDER BY` with null ordering | Canonical GQL | supported | implemented | None | — | nulls-first-explicit |
 | `OFFSET` and `SKIP` | Canonical GQL | supported | implemented | Canonical synonyms, not aliases | — | offset-paginates |
 | `LIMIT` | Canonical GQL | supported | implemented | None | — | limit-bounds-the-result |
-| `{n,m}` quantifier | Canonical GQL | supported | implemented | Open upper bounds are gated under `Open-ended quantifiers` | — | quantifier-bounded-range |
+| `{n,m}` quantifier | Canonical GQL | supported | implemented | Open upper bounds are covered by `Open-ended quantifiers` | — | quantifier-bounded-range |
 | Label expressions (and, or, not, wildcard) | Canonical GQL | supported | implemented | None | — | label-conjunction |
 | Edge directions `->`, `<-`, `-`, `~`, `<~`, `~>`, `<->` | Canonical GQL | supported | implemented | None | — | arrow-outgoing |
 | Comments `//`, `--`, `/* ... */` | Canonical GQL | supported | implemented | `--` is a comment, not an edge alias | — | dash-comment |
@@ -484,11 +726,11 @@ rows have no query case.
 | `UNION ALL` | Canonical GQL | supported | implemented | Set operation with duplicates | — | union-all-preserves-duplicates |
 | `INTERSECT` | Canonical GQL | supported | implemented | Set operation | — | intersect-keeps-program-names |
 | `EXCEPT` | Canonical GQL | supported | implemented | Set operation | — | except-removes-program-names |
-| `DIFFERENT EDGES` | Canonical GQL | gated | not implemented | Match mode | `define-gql-path-semantics`, then `add-gql-match-modes` | pending |
-| `REPEATABLE ELEMENTS` | Canonical GQL | gated | not implemented | Match mode | `define-gql-path-semantics`, then `add-gql-match-modes` | pending |
-| Grouped quantified paths | Canonical GQL | gated | not implemented | Parenthesized path repetition | `define-gql-path-semantics`, `add-gql-unbounded-traversal`, then `add-gql-grouped-quantified-paths` | pending |
-| Path search prefixes | Canonical GQL | gated | not implemented | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | `define-gql-path-semantics`, `add-gql-unbounded-traversal`, `add-gql-match-modes`, then `add-gql-path-search` | pending |
-| Open-ended quantifiers | Canonical GQL | gated | not implemented | `*`, `+`, `*n..`, `{m,}`; enables unbounded traversal. `Unbounded WALK` is not a separate row | `define-gql-path-semantics`, then `add-gql-unbounded-traversal` | pending |
+| `DIFFERENT EDGES` | Canonical GQL | supported | implemented | Match mode; applies across every path of one clause | — | different-edges-shared-edge, different-edges-quantified, different-edges-two-patterns, different-edges-parallel |
+| `REPEATABLE ELEMENTS` | Canonical GQL | supported | implemented | Match mode; default and no extra constraint | — | repeatable-elements-shared-edge |
+| Grouped quantified paths | Canonical GQL | supported | implemented | Parenthesized path repetition with list bindings, nested flattening, zero iterations, and inner modes | — | grouped-fixed-repetition, grouped-bounded-diamond, grouped-list-bindings, grouped-zero-iterations, grouped-nested, grouped-inner-mode |
+| Path search prefixes | Canonical GQL | supported | implemented | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k`; partitioned by first and last node with the documented tie-break | — | any-per-partition, any-shortest-diamond, all-shortest-diamond, shortest-k-parallel, shortest-k-zero, shortest-self-loop |
+| Open-ended quantifiers | Canonical GQL | supported | implemented | Open forms `*`, `+`, `*n..`, `{m,}` with demand-driven limits; `Unbounded WALK` is not a separate row | — | open-star, open-plus, open-canonical-tail, open-legacy-tail, unbounded-walk-limit, unbounded-trail-cycle, unbounded-zero-hop |
 | Catalog statements | Out of profile | out of profile | rejected | Embedded single graph | — | n/a |
 | Graph types | Out of profile | out of profile | rejected | No schema layer | — | n/a |
 | Sessions | Out of profile | out of profile | rejected | No server state | — | n/a |
@@ -554,6 +796,17 @@ the case name and feature id. The coverage rules are enforced in both directions
 carry none. Gated rows carry no corpus case in this change; their cases land with the follow-up
 change.
 
+### Path corpus cases
+
+Every path-engine row is supported and carries its corpus cases:
+
+| Matrix row | Corpus cases |
+| --- | --- |
+| `Path search prefixes` | `any-per-partition`, `any-shortest-diamond`, `all-shortest-diamond`, `shortest-k-parallel`, `shortest-k-zero`, `shortest-self-loop` |
+| `Grouped quantified paths` | `grouped-fixed-repetition`, `grouped-bounded-diamond`, `grouped-list-bindings`, `grouped-zero-iterations`, `grouped-nested`, `grouped-inner-mode` |
+
+Every case uses a TRON-themed fixture and tags `canonical` or `compatibility` as appropriate.
+
 ## 1.0 release gate
 
 The 1.0 profile is a release gate. The gate blocks 1.0 until every item is checked:
@@ -608,8 +861,12 @@ surface, so migration can be incremental.
 | Implicit grouping | `GROUP BY` | Implicit grouping remains an extension. |
 | `RETURN NO BINDINGS` | `FINISH` | `RETURN NO BINDINGS` remains a zero-column extension. |
 | `*1..3` | `{1,3}` | The legacy form keeps `TRAIL`; the canonical form uses `WALK`. |
+| `*` when at least one hop is intended | `+` or `{1,}` | `*` includes zero-hop matches once open quantifiers land. |
+| An open `WALK` without `LIMIT` | `LIMIT`, a search prefix, or `TRAIL` | An unbounded walk fails on the budget instead of returning a truncated result. |
 | `-->`, `<--`, `--` | `->`, `<-`, `-` | `-->` and `<--` remain aliases; `--` is a comment. |
 | No path mode | `WALK` default | Use `MATCH TRAIL` for the old trail behavior. |
+| Unquoted `different`, `edges`, `repeatable`, `elements` identifiers | Backtick-quoted names | These words are now reserved keywords; quote existing variables or aliases that use them. |
+| Unquoted `any`, `shortest` identifiers | Backtick-quoted names | These words are reserved keywords; quote existing variables or aliases that use them. |
 | `type(r)` | `LABELS(r)` | `type()` remains an extension. |
 | `MERGE` | No GQL equivalent | `MERGE` remains an extension. |
 | Unquoted `when`, `then`, `else`, `end`, `union`, `intersect`, `except` identifiers | Backtick-quoted names | These words are now reserved keywords; quote existing variables or aliases that use them. |

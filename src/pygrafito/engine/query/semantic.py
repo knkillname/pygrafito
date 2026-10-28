@@ -21,6 +21,8 @@ from pygrafito.engine.query.ast import (
     Filter,
     Finish,
     FunctionCall,
+    GroupedPathTerm,
+    HopRange,
     IsNull,
     Let,
     LetAssignment,
@@ -31,6 +33,7 @@ from pygrafito.engine.query.ast import (
     Literal,
     MapLiteral,
     Match,
+    MatchMode,
     Merge,
     Next,
     NodePattern,
@@ -40,6 +43,8 @@ from pygrafito.engine.query.ast import (
     ParsedStatement,
     PathMode,
     PathPattern,
+    PathSearch,
+    PathSearchKind,
     Property,
     PropertyEntry,
     RelationshipPattern,
@@ -48,6 +53,7 @@ from pygrafito.engine.query.ast import (
     ReturnItem,
     Set,
     SetOperation,
+    SimplePathTerm,
     SortItem,
     Star,
     Statement,
@@ -73,6 +79,7 @@ class VariableKind(Enum):
     """Kind of value bound to one pattern variable."""
 
     NODE = "node"
+    NODE_LIST = "node list"
     RELATIONSHIP = "relationship"
     RELATIONSHIP_LIST = "relationship list"
     PATH = "path"
@@ -133,10 +140,14 @@ class MatchStage:
         Path patterns evaluated together as one stage.
     where : Expression | None
         Filter attached to the stage, or ``None``.
+    match_mode : MatchMode, optional
+        Relationship-sharing rule of the clause, by default
+        ``MatchMode.REPEATABLE_ELEMENTS``.
     """
 
     patterns: tuple[PathPattern, ...]
     where: Expression | None
+    match_mode: MatchMode = MatchMode.REPEATABLE_ELEMENTS
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -151,11 +162,15 @@ class OptionalMatchStage:
         Filter attached to the optional stage, or ``None``.
     introduced : frozenset[str]
         Variables the stage introduces, which are null when it does not match.
+    match_mode : MatchMode, optional
+        Relationship-sharing rule of the clause, by default
+        ``MatchMode.REPEATABLE_ELEMENTS``.
     """
 
     patterns: tuple[PathPattern, ...]
     where: Expression | None
     introduced: frozenset[str]
+    match_mode: MatchMode = MatchMode.REPEATABLE_ELEMENTS
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -652,11 +667,13 @@ class SemanticAnalyzer:
                         patterns=patterns,
                         where=clause.where,
                         introduced=frozenset(set(self._kinds) - before),
+                        match_mode=clause.match_mode,
                     )
                 else:
                     stage = MatchStage(
                         patterns=patterns,
                         where=clause.where,
+                        match_mode=clause.match_mode,
                     )
                 operations.append(stage)
             elif isinstance(clause, With):
@@ -1377,6 +1394,7 @@ class SemanticAnalyzer:
             )
         if kind in {
             VariableKind.PATH,
+            VariableKind.NODE_LIST,
             VariableKind.RELATIONSHIP_LIST,
             VariableKind.SCALAR,
         }:
@@ -1401,31 +1419,266 @@ class SemanticAnalyzer:
             if existing is not None:
                 message = f"path variable {pattern.variable!r} is already bound"
                 raise QuerySemanticError(message)
-        for node in pattern.nodes:
+        if pattern.search is not None:
+            self._validate_search(pattern.search)
+        if pattern.variable is not None:
+            self._register(pattern.variable, VariableKind.PATH)
+        for term in pattern.terms:
+            if isinstance(term, SimplePathTerm):
+                self._bind_simple_term(
+                    term,
+                    group_locals=None,
+                    visible=frozenset(self._kinds),
+                    outer_locals=frozenset(),
+                )
+            else:
+                self._bind_group(
+                    term,
+                    visible=frozenset(self._kinds),
+                    outer_locals=frozenset(),
+                )
+        if (
+            len(pattern.terms) == 1
+            and isinstance(pattern.terms[0], GroupedPathTerm)
+            and pattern.terms[0].quantifier.min_hops == 0
+        ):
+            message = "a path pattern cannot consist only of a group with a zero lower bound"
+            raise QuerySemanticError(message)
+
+    def _bind_simple_term(
+        self,
+        term: SimplePathTerm,
+        *,
+        group_locals: dict[str, VariableKind] | None,
+        visible: frozenset[str],
+        outer_locals: frozenset[str],
+    ) -> None:
+        """Bind one simple path term.
+
+        Parameters
+        ----------
+        term : SimplePathTerm
+            Term to bind.
+        group_locals : dict[str, VariableKind] | None
+            Variables introduced by the enclosing group, or ``None`` outside
+            a group.
+        visible : frozenset[str]
+            Variables bound before the outermost group.
+        outer_locals : frozenset[str]
+            Variables local to an enclosing group.
+        """
+        for node in term.nodes:
             self._validate_property_map(node.properties)
-        for relationship in pattern.relationships:
+            if node.variable is not None:
+                kind = VariableKind.NODE if group_locals is None else VariableKind.NODE_LIST
+                self._bind_scoped_variable(
+                    node.variable,
+                    kind,
+                    group_locals=group_locals,
+                    visible=visible,
+                    outer_locals=outer_locals,
+                )
+        for relationship in term.relationships:
             quantified = relationship.min_hops is not None or relationship.max_hops is not None
             if quantified:
                 self._validate_quantifier(relationship)
             self._validate_property_map(relationship.properties)
-        if pattern.variable is not None:
-            self._register(pattern.variable, VariableKind.PATH)
-        for node in pattern.nodes:
-            if node.variable is not None:
-                self._register(node.variable, VariableKind.NODE)
-        for relationship in pattern.relationships:
-            quantified = relationship.min_hops is not None or relationship.max_hops is not None
             if relationship.variable is not None:
-                self._register(
-                    relationship.variable,
-                    VariableKind.RELATIONSHIP_LIST if quantified else VariableKind.RELATIONSHIP,
+                kind = (
+                    VariableKind.RELATIONSHIP
+                    if group_locals is None and not quantified
+                    else VariableKind.RELATIONSHIP_LIST
                 )
-        for node in pattern.nodes:
+                self._bind_scoped_variable(
+                    relationship.variable,
+                    kind,
+                    group_locals=group_locals,
+                    visible=visible,
+                    outer_locals=outer_locals,
+                )
+        for node in term.nodes:
             if node.where is not None:
                 self._validate_expression(node.where, aggregates_allowed=False)
-        for relationship in pattern.relationships:
+        for relationship in term.relationships:
             if relationship.where is not None:
                 self._validate_expression(relationship.where, aggregates_allowed=False)
+
+    def _bind_scoped_variable(
+        self,
+        name: str,
+        kind: VariableKind,
+        *,
+        group_locals: dict[str, VariableKind] | None,
+        visible: frozenset[str],
+        outer_locals: frozenset[str],
+    ) -> None:
+        """Register one variable under the current group scope.
+
+        Parameters
+        ----------
+        name : str
+            Variable name.
+        kind : VariableKind
+            Kind required at this position.
+        group_locals : dict[str, VariableKind] | None
+            Variables introduced by the enclosing group, or ``None`` outside
+            a group.
+        visible : frozenset[str]
+            Variables bound before the outermost group.
+        outer_locals : frozenset[str]
+            Variables local to an enclosing group.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the variable shadows an outer name, repeats inside one group,
+            or conflicts with an existing kind.
+        """
+        if group_locals is None:
+            self._register(name, kind)
+            return
+        if name in outer_locals:
+            message = f"nested group cannot reference enclosing group variable {name!r}"
+            raise QuerySemanticError(message)
+        if name in visible:
+            scalar = (
+                VariableKind.NODE if kind is VariableKind.NODE_LIST else VariableKind.RELATIONSHIP
+            )
+            existing = self._kinds.get(name)
+            if existing is not scalar:
+                message = (
+                    f"variable {name!r} is already bound as a "
+                    f"{None if existing is None else existing.value} and cannot be a "
+                    f"{scalar.value}"
+                )
+                raise QuerySemanticError(message)
+            return
+        if name in group_locals:
+            message = f"variable {name!r} occurs more than once in one group"
+            raise QuerySemanticError(message)
+        self._register(name, kind)
+        group_locals[name] = kind
+
+    def _bind_group(
+        self,
+        term: GroupedPathTerm,
+        *,
+        visible: frozenset[str],
+        outer_locals: frozenset[str],
+    ) -> dict[str, VariableKind]:
+        """Bind one grouped path term and its inner pattern.
+
+        Parameters
+        ----------
+        term : GroupedPathTerm
+            Grouped term to bind.
+        visible : frozenset[str]
+            Variables bound before the outermost group.
+        outer_locals : frozenset[str]
+            Variables local to an enclosing group.
+
+        Returns
+        -------
+        dict[str, VariableKind]
+            Variables introduced by this group, including nested groups.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a scope, path variable, quantifier, or progress rule is
+            violated.
+        """
+        self._validate_group_quantifier(term.quantifier)
+        if term.pattern.variable is not None:
+            message = "a grouped path binds its path variable before the inner pattern"
+            raise QuerySemanticError(message)
+        if term.pattern.search is not None:
+            message = "a path-search prefix is not allowed inside a grouped pattern"
+            raise QuerySemanticError(message)
+        if term.pattern.minimum_relationships() < 1:
+            message = "a grouped path must consume at least one relationship per iteration"
+            raise QuerySemanticError(message)
+        group_locals: dict[str, VariableKind] = {}
+        if term.variable is not None:
+            if term.quantifier.min_hops < 1:
+                message = "a group path variable requires a positive lower bound"
+                raise QuerySemanticError(message)
+            if (
+                term.variable in visible
+                or term.variable in outer_locals
+                or term.variable in group_locals
+            ):
+                message = f"group path variable {term.variable!r} shadows an outer variable"
+                raise QuerySemanticError(message)
+            self._register(term.variable, VariableKind.PATH)
+            group_locals[term.variable] = VariableKind.PATH
+        for inner in term.pattern.terms:
+            if isinstance(inner, SimplePathTerm):
+                self._bind_simple_term(
+                    inner,
+                    group_locals=group_locals,
+                    visible=visible,
+                    outer_locals=outer_locals,
+                )
+                continue
+            nested = self._bind_group(
+                inner,
+                visible=visible,
+                outer_locals=outer_locals | frozenset(group_locals),
+            )
+            for name, kind in nested.items():
+                if name in group_locals:
+                    message = f"variable {name!r} occurs more than once in one group"
+                    raise QuerySemanticError(message)
+                group_locals[name] = kind
+        return group_locals
+
+    @staticmethod
+    def _validate_group_quantifier(quantifier: HopRange) -> None:
+        """Validate the bounds of a grouped path term.
+
+        Parameters
+        ----------
+        quantifier : HopRange
+            Group repetition bounds.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a bound is negative or the lower bound exceeds the upper bound.
+        """
+        if quantifier.min_hops < 0 or (quantifier.max_hops is not None and quantifier.max_hops < 0):
+            message = "grouped path bounds must be non-negative"
+            raise QuerySemanticError(message)
+        if quantifier.max_hops is not None and quantifier.min_hops > quantifier.max_hops:
+            message = "the grouped path lower bound cannot exceed the upper bound"
+            raise QuerySemanticError(message)
+
+    @staticmethod
+    def _validate_search(search: PathSearch) -> None:
+        """Validate one path-search prefix.
+
+        Parameters
+        ----------
+        search : PathSearch
+            Parsed prefix.
+
+        Raises
+        ------
+        QuerySemanticError
+            If ``SHORTEST`` carries a missing or negative count.
+        """
+        if search.kind is not PathSearchKind.SHORTEST:
+            return
+        if search.k is None or search.k < 0:
+            message = "SHORTEST k requires a non-negative integer literal"
+            if search.span is None:
+                raise QuerySemanticError(message)
+            raise QuerySemanticError(
+                message,
+                line=search.span.line,
+                column=search.span.column,
+            )
 
     @staticmethod
     def _validate_quantifier(relationship: RelationshipPattern) -> None:
@@ -1439,18 +1692,15 @@ class SemanticAnalyzer:
         Raises
         ------
         QuerySemanticError
-            If the upper bound is missing, a bound is negative, or the lower
-            bound exceeds the upper bound.
+            If a bound is negative or the lower bound exceeds a present upper
+            bound.
         """
         upper = relationship.max_hops
-        if upper is None:
-            message = "a variable-length relationship requires an explicit upper bound"
-            raise QuerySemanticError(message)
         lower = 1 if relationship.min_hops is None else relationship.min_hops
-        if lower < 0 or upper < 0:
+        if lower < 0 or (upper is not None and upper < 0):
             message = "variable-length bounds must be non-negative"
             raise QuerySemanticError(message)
-        if lower > upper:
+        if upper is not None and lower > upper:
             message = "the variable-length lower bound cannot exceed the upper bound"
             raise QuerySemanticError(message)
 
@@ -1509,12 +1759,13 @@ class SemanticAnalyzer:
             return pattern.mode
         if clause_mode is not None:
             return clause_mode
+        relationships = pattern.all_relationships()
         legacy = any(
             relationship.canonical_quantifier is False
             and (relationship.min_hops is not None or relationship.max_hops is not None)
-            for relationship in pattern.relationships
+            for relationship in relationships
         )
-        canonical = any(relationship.canonical_quantifier for relationship in pattern.relationships)
+        canonical = any(relationship.canonical_quantifier for relationship in relationships)
         if legacy and canonical:
             message = (
                 "a path cannot mix a legacy and a canonical quantifier without an explicit "
@@ -1955,6 +2206,9 @@ class SemanticAnalyzer:
                 if kind is VariableKind.RELATIONSHIP_LIST:
                     message = "relationship lists do not have properties"
                     raise QuerySemanticError(message)
+                if kind is VariableKind.NODE_LIST:
+                    message = "node lists do not have properties"
+                    raise QuerySemanticError(message)
             self._validate_expression(
                 expression.target,
                 aggregates_allowed=aggregates_allowed,
@@ -2238,7 +2492,7 @@ class SemanticAnalyzer:
                 return ArgumentKind.NODE
             if kind is VariableKind.RELATIONSHIP:
                 return ArgumentKind.RELATIONSHIP
-            if kind is VariableKind.RELATIONSHIP_LIST:
+            if kind in {VariableKind.RELATIONSHIP_LIST, VariableKind.NODE_LIST}:
                 return ArgumentKind.LIST
             if kind is VariableKind.PATH:
                 return ArgumentKind.PATH

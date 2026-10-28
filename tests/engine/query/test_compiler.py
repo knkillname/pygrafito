@@ -332,6 +332,46 @@ class TestPushdown:
         assert compiled.residual is not None
 
 
+class TestMatchModeCompilation:
+    """Verify clause-wide edge inequalities for fixed patterns."""
+
+    def compile(self, text: str) -> CompiledMatch:
+        statement = Parser.parse_statement(text)
+        match = next(clause for clause in statement.clauses if isinstance(clause, Match))
+        return Compiler(match).compile({})
+
+    def test_default_adds_no_cross_pattern_predicate(self) -> None:
+        """Leave the default repeatable clause unchanged."""
+        compiled = self.compile("MATCH (a)-[r]->(b), (c)-[s]->(d) RETURN r, s")
+        assert "r0.id <> r1.id" not in compiled.sql
+
+    def test_different_edges_adds_a_cross_pattern_predicate(self) -> None:
+        """Compare the two relationship aliases under DIFFERENT EDGES."""
+        compiled = self.compile("MATCH DIFFERENT EDGES (a)-[r]->(b), (c)-[s]->(d) RETURN r, s")
+        assert compiled.sql.count("r0.id <> r1.id") == 1
+
+    def test_repeatable_elements_matches_the_default(self) -> None:
+        """Keep the explicit repeatable clause free of cross predicates."""
+        compiled = self.compile("MATCH REPEATABLE ELEMENTS (a)-[r]->(b), (c)-[s]->(d) RETURN r, s")
+        assert " <> " not in compiled.sql
+
+    def test_repeated_variable_is_not_compared_with_itself(self) -> None:
+        """Reuse one alias for a repeated relationship variable."""
+        compiled = self.compile("MATCH DIFFERENT EDGES (a)-[r]->(b), (c)-[r]->(d) RETURN r")
+        assert "r0.id <> r0.id" not in compiled.sql
+        assert "r0.id <> r1.id" not in compiled.sql
+
+    def test_trail_and_different_edges_share_one_predicate(self) -> None:
+        """Deduplicate the pair already implied by TRAIL."""
+        compiled = self.compile("MATCH DIFFERENT EDGES TRAIL (a)-[r]->(b)-[s]->(c) RETURN r")
+        assert compiled.sql.count("r0.id <> r1.id") == 1
+
+    def test_undirected_patterns_are_compared(self) -> None:
+        """Apply the rule to undirected relationship positions."""
+        compiled = self.compile("MATCH DIFFERENT EDGES (a)-[r]-(b), (c)-[s]-(d) RETURN r")
+        assert "r0.id <> r1.id" in compiled.sql
+
+
 class TestBatchNodeLoading:
     """Verify batch node loading returns the same snapshots as single reads."""
 

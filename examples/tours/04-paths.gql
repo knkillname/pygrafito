@@ -1,6 +1,6 @@
 // 04-paths.gql - canonical quantifiers, path modes, directions, and path variables.
-// The closed {n,m} quantifier and WALK are implemented. The legacy *n..m form remains a
-// compatibility construct whose default path mode is TRAIL.
+// Closed and open quantifiers are implemented. The legacy *n..m form remains a
+// compatibility construct whose default path mode is TRAIL; the canonical open forms use WALK.
 
 MATCH (a:Place {designation: 'The Grid'})-[:HAS_PART{1,2}]->(b:Place)
 RETURN count(DISTINCT b) AS places;
@@ -19,3 +19,21 @@ RETURN p LIMIT 1;
 
 MATCH (a:Program {designation: 'Tron'})-[r]-(b)
 RETURN type(r) AS kind, b.designation AS peer ORDER BY peer LIMIT 10;
+
+MATCH TRAIL (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY+]->(b:Place)
+RETURN count(*) AS reachable;
+
+MATCH (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY+]->(b:Place)
+RETURN b.designation AS place ORDER BY place LIMIT 5;
+
+MATCH DIFFERENT EDGES (a:Place)-[r:HAS_PART|CONNECTED_BY]->(b:Place), (c:Place)-[s:HAS_PART|CONNECTED_BY]->(d:Place)
+RETURN count(*) AS disjoint_pairs;
+
+MATCH p = ANY SHORTEST (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY{1,4}]-(b:Place {designation: 'I/O Tower'})
+RETURN length(p) AS hops;
+
+MATCH p = SHORTEST 2 (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY{1,4}]-(b:Place {designation: 'I/O Tower'})
+RETURN length(p) AS hops ORDER BY hops;
+
+MATCH (start:Place {designation: "Flynn's Arcade"}) (p = (a:Place)-[:HAS_PART|CONNECTED_BY]-(b:Place)){2}
+RETURN length(p) AS hops, [x IN a | x.designation] AS stops LIMIT 5;

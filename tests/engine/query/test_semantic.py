@@ -9,11 +9,13 @@ from pygrafito.engine.query.ast import (
     FunctionCall,
     Literal,
     Match,
+    MatchMode,
     NodePattern,
     OrdinalityKind,
     Parameter,
     PathMode,
     PathPattern,
+    RelationshipPattern,
     Return,
     ReturnItem,
     Set,
@@ -211,7 +213,7 @@ class TestGroupingAndColumns:
     def test_generated_text_when_source_text_is_missing(self) -> None:
         statement = Statement(
             clauses=(
-                Match(patterns=(PathPattern(nodes=(NodePattern(variable="n"),)),)),
+                Match(patterns=(PathPattern.simple(nodes=(NodePattern(variable="n"),)),)),
                 Return(
                     items=(
                         ReturnItem(
@@ -435,15 +437,20 @@ class TestVariableLength:
         analysis = self.analyze("MATCH (a)-[r:ALLIES_WITH*1..3]->(b) RETURN r")
         assert analysis.variable_kinds["r"] is VariableKind.RELATIONSHIP_LIST
 
-    def test_bare_quantifier_requires_an_upper_bound(self) -> None:
-        with pytest.raises(QuerySemanticError) as caught:
-            self.analyze("MATCH (a)-[*]->(b) RETURN b")
-        assert "add-gql-unbounded-traversal" in caught.value.message
+    def relationship(self, text: str) -> RelationshipPattern:
+        analysis = self.analyze(text)
+        stage = analysis.stages[0]
+        if not isinstance(stage, MatchStage):
+            raise AssertionError("expected a match stage")
+        return stage.patterns[0].relationships[0]
 
-    def test_open_range_requires_an_upper_bound(self) -> None:
-        with pytest.raises(QuerySemanticError) as caught:
-            self.analyze("MATCH (a)-[*1..]->(b) RETURN b")
-        assert "add-gql-unbounded-traversal" in caught.value.message
+    def test_bare_quantifier_has_no_upper_bound(self) -> None:
+        relationship = self.relationship("MATCH (a)-[*]->(b) RETURN b")
+        assert (relationship.min_hops, relationship.max_hops) == (0, None)
+
+    def test_open_range_has_no_upper_bound(self) -> None:
+        relationship = self.relationship("MATCH (a)-[*1..]->(b) RETURN b")
+        assert (relationship.min_hops, relationship.max_hops) == (1, None)
 
     def test_negative_bounds_are_rejected(self) -> None:
         with pytest.raises(QuerySemanticError):
@@ -899,6 +906,26 @@ class TestPathModeResolution:
         """Resolve a canonical quantifier to WALK."""
         assert self.mode("MATCH (a)-[:TRUSTS{1,3}]->(b) RETURN b") is PathMode.WALK
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "MATCH (a)-[:TRUSTS*]->(b) RETURN b",
+            "MATCH (a)-[:TRUSTS+]->(b) RETURN b",
+            "MATCH (a)-[:TRUSTS{2,}]->(b) RETURN b",
+        ],
+    )
+    def test_open_canonical_quantifier_implies_walk(self, text: str) -> None:
+        """Resolve each canonical open form to WALK."""
+        assert self.mode(text) is PathMode.WALK
+
+    def test_open_legacy_quantifier_implies_trail(self) -> None:
+        """Keep the legacy open form's TRAIL default."""
+        assert self.mode("MATCH (a)-[:TRUSTS*2..]->(b) RETURN b") is PathMode.TRAIL
+
+    def test_explicit_mode_wins_over_an_open_legacy_quantifier(self) -> None:
+        """Honor an explicit mode over the legacy open default."""
+        assert self.mode("MATCH WALK (a)-[:TRUSTS*2..]->(b) RETURN b") is PathMode.WALK
+
     def test_explicit_clause_mode_wins_over_canonical(self) -> None:
         """Keep an explicit clause mode over the canonical default."""
         assert self.mode("MATCH TRAIL (a)-[:TRUSTS{1,3}]->(b) RETURN b") is PathMode.TRAIL
@@ -916,6 +943,73 @@ class TestPathModeResolution:
         if not isinstance(stage, MatchStage):
             raise AssertionError("expected a match stage")
         assert stage.patterns[0].mode is PathMode.TRAIL
+
+
+class TestMatchModeResolution:
+    """Verify the clause match mode reaches stages and plans."""
+
+    def analyze(self, text: str) -> Analysis:
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
+
+    def stage(self, text: str) -> MatchStage | OptionalMatchStage:
+        analysis = self.analyze(text)
+        stage = analysis.stages[0]
+        if not isinstance(stage, MatchStage | OptionalMatchStage):
+            raise AssertionError("expected a match stage")
+        return stage
+
+    def test_default_match_mode_is_repeatable(self) -> None:
+        """Default the stage to repeatable elements."""
+        assert self.stage("MATCH (a) RETURN a").match_mode is MatchMode.REPEATABLE_ELEMENTS
+
+    def test_explicit_match_mode_reaches_the_stage(self) -> None:
+        """Carry DIFFERENT EDGES on a mandatory stage."""
+        stage = self.stage("MATCH DIFFERENT EDGES (a) RETURN a")
+        assert stage.match_mode is MatchMode.DIFFERENT_EDGES
+
+    def test_optional_stage_carries_the_match_mode(self) -> None:
+        """Carry DIFFERENT EDGES on an optional stage."""
+        stage = self.stage("OPTIONAL MATCH DIFFERENT EDGES (a) RETURN a")
+        assert isinstance(stage, OptionalMatchStage)
+        assert stage.match_mode is MatchMode.DIFFERENT_EDGES
+
+    def test_default_and_repeatable_plans_agree(self) -> None:
+        """Produce the same operators for the default and explicit repeatable mode."""
+        default = PlanBuilder.build(self.analyze("MATCH (a) RETURN a"))
+        repeatable = PlanBuilder.build(self.analyze("MATCH REPEATABLE ELEMENTS (a) RETURN a"))
+        assert isinstance(default, Plan)
+        assert isinstance(repeatable, Plan)
+        assert default.operators == repeatable.operators
+
+    def test_plan_distinguishes_different_edges(self) -> None:
+        """Expose the explicit mode in the plan operators."""
+        analysis = self.analyze("MATCH DIFFERENT EDGES (a) RETURN a")
+        plan = PlanBuilder.build(analysis)
+        assert isinstance(plan, Plan)
+        assert "different_edges" in plan.operators
+
+    def test_adjacent_different_edges_clauses_stay_separate(self) -> None:
+        """Do not fuse clauses whose scope must not cross."""
+        analysis = self.analyze(
+            "MATCH DIFFERENT EDGES (a)-[:TRUSTS]->(b) "
+            "MATCH DIFFERENT EDGES (c)-[:TRUSTS]->(d) RETURN c"
+        )
+        plan = PlanBuilder.build(analysis)
+        assert isinstance(plan, Plan)
+        assert len(plan.stages) == 2
+        for stage in plan.stages:
+            if not isinstance(stage.stage, MatchStage | OptionalMatchStage):
+                raise AssertionError("expected a match stage")
+            assert stage.stage.match_mode is MatchMode.DIFFERENT_EDGES
+
+    def test_default_adjacent_matches_still_fuse(self) -> None:
+        """Keep the existing fusion for repeatable clauses."""
+        analysis = self.analyze("MATCH (a)-[:TRUSTS]->(b) MATCH (b)-[:TRUSTS]->(c) RETURN c")
+        plan = PlanBuilder.build(analysis)
+        assert isinstance(plan, Plan)
+        assert len(plan.stages) == 1
 
 
 class TestPlanCarriesPathModes:

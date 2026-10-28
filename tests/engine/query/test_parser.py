@@ -24,6 +24,7 @@ from pygrafito.engine.query.ast import (
     Literal,
     MapLiteral,
     Match,
+    MatchMode,
     Merge,
     Next,
     Operators,
@@ -159,10 +160,14 @@ class TestAcceptedSyntax:
             relationship = self.match(Parser.parse_statement(text)).patterns[0].relationships[0]
             assert (relationship.min_hops, relationship.max_hops) == expected
 
-    def test_bare_quantifier_is_deferred(self) -> None:
-        with pytest.raises(QuerySemanticError) as caught:
-            Parser.parse_statement("MATCH (a)-[*]->(b) RETURN b")
-        assert "add-gql-unbounded-traversal" in caught.value.message
+    def test_bare_quantifier_is_zero_or_more(self) -> None:
+        relationship = (
+            self.match(Parser.parse_statement("MATCH (a)-[*]->(b) RETURN b"))
+            .patterns[0]
+            .relationships[0]
+        )
+        assert (relationship.min_hops, relationship.max_hops) == (0, None)
+        assert relationship.canonical_quantifier
 
     def test_canonical_quantifier_forms(self) -> None:
         forms = {
@@ -185,18 +190,23 @@ class TestAcceptedSyntax:
         assert not legacy.canonical_quantifier
 
     @pytest.mark.parametrize(
-        "text",
+        ("text", "expected", "canonical"),
         [
-            "MATCH (a)-[:ALLIES_WITH{1,}]->(b) RETURN b",
-            "MATCH (a)-[:ALLIES_WITH*1..]->(b) RETURN b",
-            "MATCH (a)-[:ALLIES_WITH*]->(b) RETURN b",
-            "MATCH (a)-[:ALLIES_WITH+]->(b) RETURN b",
+            ("MATCH (a)-[:ALLIES_WITH{1,}]->(b) RETURN b", (1, None), True),
+            ("MATCH (a)-[:ALLIES_WITH*1..]->(b) RETURN b", (1, None), False),
+            ("MATCH (a)-[:ALLIES_WITH*]->(b) RETURN b", (0, None), True),
+            ("MATCH (a)-[:ALLIES_WITH+]->(b) RETURN b", (1, None), True),
         ],
     )
-    def test_open_ended_quantifier_is_deferred(self, text: str) -> None:
-        with pytest.raises(QuerySemanticError) as caught:
-            Parser.parse_statement(text)
-        assert "add-gql-unbounded-traversal" in caught.value.message
+    def test_open_ended_quantifier_is_accepted(
+        self,
+        text: str,
+        expected: tuple[int, int | None],
+        canonical: bool,
+    ) -> None:
+        relationship = self.match(Parser.parse_statement(text)).patterns[0].relationships[0]
+        assert (relationship.min_hops, relationship.max_hops) == expected
+        assert relationship.canonical_quantifier is canonical
 
     def test_malformed_quantifier_is_a_syntax_error(self) -> None:
         with pytest.raises(QuerySyntaxError):
@@ -690,6 +700,106 @@ class TestPathModes:
         """Reject a path mode where a data pattern is expected."""
         with pytest.raises(QuerySyntaxError):
             Parser.parse_statement("CREATE WALK (n:Program)")
+
+
+class TestMatchModes:
+    """Verify the clause-level match-mode keyword and its placement."""
+
+    @staticmethod
+    def match(statement: object) -> Match:
+        """Return the MATCH clause of a parsed statement.
+
+        Parameters
+        ----------
+        statement : object
+            Parsed statement.
+
+        Returns
+        -------
+        Match
+            First match clause.
+        """
+        if not hasattr(statement, "clauses"):
+            raise AssertionError("expected a parsed statement")
+        clauses = statement.clauses
+        if not isinstance(clauses[0], Match):
+            raise AssertionError("expected a match clause")
+        return clauses[0]
+
+    def test_default_is_repeatable_elements(self) -> None:
+        """Default a clause without a named mode to repeatable elements."""
+        clause = self.match(Parser.parse_statement("MATCH (a) RETURN a"))
+        assert clause.match_mode is MatchMode.REPEATABLE_ELEMENTS
+
+    @pytest.mark.parametrize(
+        ("text", "mode"),
+        [
+            ("MATCH DIFFERENT EDGES (a) RETURN a", MatchMode.DIFFERENT_EDGES),
+            ("MATCH REPEATABLE ELEMENTS (a) RETURN a", MatchMode.REPEATABLE_ELEMENTS),
+            ("match different edges (a) return a", MatchMode.DIFFERENT_EDGES),
+        ],
+    )
+    def test_clause_match_mode(self, text: str, mode: MatchMode) -> None:
+        """Parse both spellings case-insensitively."""
+        assert self.match(Parser.parse_statement(text)).match_mode is mode
+
+    def test_match_mode_precedes_the_path_mode(self) -> None:
+        """Accept a path mode after the match mode."""
+        clause = self.match(Parser.parse_statement("MATCH DIFFERENT EDGES WALK (a) RETURN a"))
+        assert clause.match_mode is MatchMode.DIFFERENT_EDGES
+        assert clause.mode is PathMode.WALK
+
+    def test_optional_match_takes_a_match_mode(self) -> None:
+        """Accept the mode on OPTIONAL MATCH."""
+        clause = self.match(
+            Parser.parse_statement("OPTIONAL MATCH REPEATABLE ELEMENTS TRAIL (a) RETURN a")
+        )
+        assert clause.optional
+        assert clause.match_mode is MatchMode.REPEATABLE_ELEMENTS
+        assert clause.mode is PathMode.TRAIL
+
+    def test_match_mode_applies_to_every_comma_pattern(self) -> None:
+        """Keep per-path modes while the match mode stays clause-wide."""
+        clause = self.match(
+            Parser.parse_statement("MATCH DIFFERENT EDGES (a), ACYCLIC (b) RETURN a")
+        )
+        assert clause.match_mode is MatchMode.DIFFERENT_EDGES
+        assert clause.patterns[0].mode is None
+        assert clause.patterns[1].mode is PathMode.ACYCLIC
+
+    @pytest.mark.parametrize(
+        ("text", "column"),
+        [
+            ("MATCH DIFFERENT (a) RETURN a", 17),
+            ("MATCH REPEATABLE (a) RETURN a", 18),
+        ],
+    )
+    def test_missing_match_mode_word_reports_a_position(self, text: str, column: int) -> None:
+        """Report the offending token when EDGES or ELEMENTS is missing."""
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement(text)
+        assert caught.value.line == 1
+        assert caught.value.column == column
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "INSERT DIFFERENT EDGES (a)-[:TRUSTS]->(b)",
+            "CREATE REPEATABLE ELEMENTS (n:Program)",
+            "MERGE DIFFERENT EDGES (n:Program)",
+        ],
+    )
+    def test_write_clauses_have_no_match_mode(self, text: str) -> None:
+        """Reject a match mode where a data pattern is expected."""
+        with pytest.raises(QuerySyntaxError):
+            Parser.parse_statement(text)
+
+    def test_reserved_words_need_backticks_as_names(self) -> None:
+        """Reject a plain match-mode word used as a variable."""
+        with pytest.raises(QuerySyntaxError):
+            Parser.parse_statement("MATCH (different) RETURN different")
+        clause = self.match(Parser.parse_statement("MATCH (`different`) RETURN `different`"))
+        assert clause.patterns[0].nodes[0].variable == "different"
 
 
 class TestCompositionSyntax:

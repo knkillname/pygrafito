@@ -10,7 +10,7 @@ import json
 import sqlite3
 import types
 import typing
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from sqlite3 import Connection
 
 from pygrafito.engine.query.ast import (
@@ -18,6 +18,7 @@ from pygrafito.engine.query.ast import (
     Case,
     Expression,
     FunctionCall,
+    GroupedPathTerm,
     IsNull,
     ListAccess,
     ListComprehension,
@@ -26,12 +27,16 @@ from pygrafito.engine.query.ast import (
     Literal,
     MapLiteral,
     Match,
+    MatchMode,
     NodePattern,
     OrdinalityKind,
     Parameter,
+    PathMode,
     PathPattern,
+    PathSearchKind,
     Property,
     SetOperation,
+    SimplePathTerm,
     Star,
     Subquery,
     Unary,
@@ -62,6 +67,7 @@ from pygrafito.engine.query.semantic import (
     WriteStage,
     YieldStage,
 )
+from pygrafito.engine.query.stream import Demand, PlanShape, RowStream
 from pygrafito.engine.query.values import (
     Aggregates,
     ExpressionEvaluator,
@@ -509,10 +515,59 @@ class QueryExecutor:
             if isinstance(operation, WithStage) and operation.segment_return:
                 lines.append("RETURN")
                 continue
+            lines.extend(self._search_line(operation))
+            lines.extend(self._match_mode_line(operation))
             lines.extend(self._explain_stage(operation, parameters, resolver))
         if plan.analysis.finish:
             lines.append("FINISH")
         return tuple(lines)
+
+    @staticmethod
+    def _search_line(stage: object) -> tuple[str, ...]:
+        """Return explain lines for explicit path-search prefixes.
+
+        Parameters
+        ----------
+        stage : object
+            Planned operation.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One line per searched path pattern.
+        """
+        if not isinstance(stage, MatchStage | OptionalMatchStage):
+            return ()
+        lines: list[str] = []
+        for pattern in stage.patterns:
+            search = pattern.search
+            if search is None:
+                continue
+            label = search.kind.value
+            if search.kind is PathSearchKind.SHORTEST:
+                label = f"{label} {search.k}"
+            lines.append(f"PATH SEARCH {label}")
+        return tuple(lines)
+
+    @staticmethod
+    def _match_mode_line(stage: object) -> tuple[str, ...]:
+        """Return the explain line for an explicit match mode.
+
+        Parameters
+        ----------
+        stage : object
+            Planned operation.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One line for ``DIFFERENT EDGES``, otherwise none.
+        """
+        if isinstance(stage, MatchStage) and stage.match_mode is MatchMode.DIFFERENT_EDGES:
+            return ("MATCH DIFFERENT EDGES",)
+        if isinstance(stage, OptionalMatchStage) and stage.match_mode is MatchMode.DIFFERENT_EDGES:
+            return ("OPTIONAL MATCH DIFFERENT EDGES",)
+        return ()
 
     def _explain_stage(
         self,
@@ -555,9 +610,13 @@ class QueryExecutor:
             return ()
         if isinstance(stage, FilterStage):
             return ("FILTER",)
-        if self._is_quantified(stage.patterns):
-            return self._explain_quantified(stage, parameters, resolver)
-        match = Match(patterns=stage.patterns, where=stage.where)
+        if self._uses_pattern_engine(stage.patterns):
+            return self._explain_pattern_engine(stage, parameters, resolver)
+        match = Match(
+            patterns=stage.patterns,
+            where=stage.where,
+            match_mode=stage.match_mode,
+        )
         compiled = Compiler(match, self._codec).compile(parameters, resolver=resolver)
         try:
             rows = self._connection.execute(
@@ -569,13 +628,13 @@ class QueryExecutor:
             raise QueryExecutionError(message) from error
         return tuple(str(row[3]) for row in rows)
 
-    def _explain_quantified(
+    def _explain_pattern_engine(
         self,
         stage: MatchStage | OptionalMatchStage,
         parameters: Mapping[str, QueryValue],
         resolver: PatternValueResolver,
     ) -> tuple[str, ...]:
-        """Explain a stage that expands quantified relationships.
+        """Explain a stage evaluated by the pattern engine.
 
         Parameters
         ----------
@@ -593,14 +652,14 @@ class QueryExecutor:
         """
         lines: list[str] = []
         for pattern in stage.patterns:
-            first = pattern.nodes[0]
+            first = pattern.first_node
             synthetic = NodePattern(
                 variable="__pygrafito_start",
                 labels=first.labels,
                 properties=first.properties,
                 label_expression=first.label_expression,
             )
-            match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
+            match = Match(patterns=(PathPattern.simple(nodes=(synthetic,)),))
             compiled = Compiler(match, self._codec).compile(parameters, resolver=resolver)
             try:
                 rows = self._connection.execute(
@@ -611,13 +670,74 @@ class QueryExecutor:
                 message = "query planning failed"
                 raise QueryExecutionError(message) from error
             lines.extend(str(row[3]) for row in rows)
-        depth = sum(
-            1 if relationship.max_hops is None else relationship.max_hops
-            for pattern in stage.patterns
-            for relationship in pattern.relationships
-        )
+        for pattern in stage.patterns:
+            lines.extend(self._group_labels(pattern.terms))
+        open_patterns = [pattern for pattern in stage.patterns if self._has_open_position(pattern)]
+        if open_patterns:
+            for pattern in open_patterns:
+                mode = PathMode.WALK if pattern.mode is None else pattern.mode
+                lines.append(f"MATCH QUANTIFIED OPEN {mode.name}")
+            depth = sum(
+                pattern.maximum_relationships() or 0
+                for pattern in stage.patterns
+                if all(pattern is not open_pattern for open_pattern in open_patterns)
+            )
+            if depth:
+                lines.append(f"QUANTIFIED PATTERN max_hops={depth}")
+            return tuple(lines)
+        non_open = [pattern for pattern in stage.patterns if not self._has_open_position(pattern)]
+        if not any(self._is_quantified((pattern,)) for pattern in non_open):
+            return tuple(lines)
+        depth = sum(pattern.maximum_relationships() or 0 for pattern in non_open)
         lines.append(f"QUANTIFIED PATTERN max_hops={depth}")
         return tuple(lines)
+
+    @classmethod
+    def _group_labels(
+        cls,
+        terms: Sequence[SimplePathTerm | GroupedPathTerm],
+    ) -> tuple[str, ...]:
+        """Return explain lines for grouped terms.
+
+        Parameters
+        ----------
+        terms : Sequence[SimplePathTerm | GroupedPathTerm]
+            Terms to inspect.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One label per group, including nested groups.
+        """
+        labels: list[str] = []
+        for term in terms:
+            if isinstance(term, SimplePathTerm):
+                continue
+            quantifier = term.quantifier
+            if quantifier.max_hops is None:
+                labels.append("GROUP OPEN")
+            elif quantifier.min_hops == quantifier.max_hops:
+                labels.append(f"GROUP {{{quantifier.min_hops}}}")
+            else:
+                labels.append(f"GROUP {{{quantifier.min_hops},{quantifier.max_hops}}}")
+            labels.extend(cls._group_labels(term.pattern.terms))
+        return tuple(labels)
+
+    @staticmethod
+    def _has_open_position(pattern: PathPattern) -> bool:
+        """Report whether a pattern has an open-ended relationship position.
+
+        Parameters
+        ----------
+        pattern : PathPattern
+            Pattern to inspect.
+
+        Returns
+        -------
+        bool
+            ``True`` when a quantified position has no upper bound.
+        """
+        return pattern.has_open_position()
 
     def execute_graph(
         self,
@@ -862,6 +982,17 @@ class QueryExecutor:
         functions = ScalarFunctions(snapshots)
         runner = SubqueryExecutor(self, functions, tracker, analysis.subquery_analyses)
         evaluator = ExpressionEvaluator(functions, runner)
+        shape = PlanShape(analysis)
+        if shape.streamable:
+            return self._execute_streaming(
+                plan,
+                parameters,
+                tracker,
+                evaluator,
+                shape,
+                skip,
+                limit,
+            )
         bindings: list[dict[str, QueryValue]] = [{}]
         mutations = MutationExecutor(self._nodes, self._relationships)
         matcher = functools.partial(
@@ -916,6 +1047,653 @@ class QueryExecutor:
             columns=analysis.columns,
             rows=tuple(Row(columns=analysis.columns, row_values=row.values) for row in selected),
             summary=mutations.summary,
+        )
+
+    def _execute_streaming(
+        self,
+        plan: Plan,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+        evaluator: ExpressionEvaluator,
+        shape: PlanShape,
+        skip: int | None,
+        limit: int | None,
+    ) -> QueryResult:
+        """Execute a read statement through the pull pipeline.
+
+        Parameters
+        ----------
+        plan : Plan
+            Planned linear statement.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        shape : PlanShape
+            Classification that selected the streaming path.
+        skip : int | None
+            Rows to discard before the result.
+        limit : int | None
+            Maximum result rows, or ``None``.
+
+        Returns
+        -------
+        QueryResult
+            Materialized result rows produced before demand was met.
+        """
+        analysis = plan.analysis
+        operations = self._read_operations(analysis.operations)
+        demand = Demand(skip=skip, limit=limit)
+        projected: list[ProjectedRow] = []
+        with (
+            self._read_snapshot(shape),
+            RowStream(
+                self._iter_bindings(
+                    operations,
+                    ({},),
+                    evaluator,
+                    parameters,
+                    tracker,
+                )
+            ) as stream,
+        ):
+            while demand.wants():
+                tracker.check_time()
+                try:
+                    binding = next(stream)
+                except StopIteration:
+                    break
+                if not demand.accept():
+                    continue
+                values = tuple(
+                    evaluator.evaluate(item.expression, binding, parameters)
+                    for item in analysis.items
+                )
+                projected.append(ProjectedRow(binding=binding, values=values))
+        return QueryResult(
+            columns=analysis.columns,
+            rows=tuple(Row(columns=analysis.columns, row_values=row.values) for row in projected),
+            summary=MutationSummary(),
+        )
+
+    @contextlib.contextmanager
+    def _read_snapshot(self, shape: PlanShape) -> Iterator[None]:
+        """Hold one read snapshot around a statement with an open pattern.
+
+        The caller usually supplies the transaction. When it does not, a
+        deferred read transaction is opened here and released on success or
+        failure.
+
+        Parameters
+        ----------
+        shape : PlanShape
+            Classification of the statement being executed.
+
+        Yields
+        ------
+        None
+            Control while the snapshot is active.
+        """
+        if not shape.open_pattern or self._connection.in_transaction:
+            yield
+            return
+        self._connection.execute("BEGIN")
+        try:
+            yield
+        except BaseException:
+            with contextlib.suppress(sqlite3.Error):
+                self._connection.execute("ROLLBACK")
+            raise
+        else:
+            with contextlib.suppress(sqlite3.Error):
+                self._connection.execute("COMMIT")
+
+    @staticmethod
+    def _read_operations(
+        operations: Sequence[object],
+    ) -> tuple[
+        MatchStage
+        | OptionalMatchStage
+        | UnwindStage
+        | WithStage
+        | FilterStage
+        | LetStage
+        | YieldStage,
+        ...,
+    ]:
+        """Return the read stages of a streamable plan.
+
+        Parameters
+        ----------
+        operations : Sequence[object]
+            Analysed operations in source order.
+
+        Returns
+        -------
+        tuple[MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage | LetStage \
+| YieldStage, ...]
+            Read stages, in source order.
+
+        Raises
+        ------
+        QueryExecutionError
+            If a non-read operation reaches the streaming path.
+        """
+        selected: list[
+            MatchStage
+            | OptionalMatchStage
+            | UnwindStage
+            | WithStage
+            | FilterStage
+            | LetStage
+            | YieldStage
+        ] = []
+        for operation in operations:
+            if not isinstance(
+                operation,
+                MatchStage
+                | OptionalMatchStage
+                | UnwindStage
+                | WithStage
+                | FilterStage
+                | LetStage
+                | YieldStage,
+            ):
+                message = "a streamable plan contains a non-read operation"
+                raise QueryExecutionError(message)
+            selected.append(operation)
+        return tuple(selected)
+
+    def _iter_bindings(
+        self,
+        operations: Sequence[
+            MatchStage
+            | OptionalMatchStage
+            | UnwindStage
+            | WithStage
+            | FilterStage
+            | LetStage
+            | YieldStage
+        ],
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Apply read stages lazily to an initial set of rows.
+
+        Parameters
+        ----------
+        operations : Sequence[MatchStage | OptionalMatchStage | UnwindStage | WithStage | \
+FilterStage | LetStage | YieldStage]
+            Read stages in execution order.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Initial rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            Output rows of the last stage.
+        """
+        rows: Iterator[dict[str, QueryValue]] = (dict(binding) for binding in bindings)
+        for operation in operations:
+            rows = self._iter_stage(
+                operation,
+                rows,
+                evaluator,
+                parameters,
+                tracker,
+            )
+        yield from rows
+
+    def _iter_stage(
+        self,
+        stage: MatchStage
+        | OptionalMatchStage
+        | UnwindStage
+        | WithStage
+        | FilterStage
+        | LetStage
+        | YieldStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Apply one read stage to a lazy row stream.
+
+        Parameters
+        ----------
+        stage : MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage | \
+LetStage | YieldStage
+            Read stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            Output rows of the stage.
+        """
+        if isinstance(stage, MatchStage):
+            yield from self._iter_match_stage(
+                stage,
+                bindings,
+                evaluator,
+                parameters,
+                tracker,
+            )
+            return
+        if isinstance(stage, OptionalMatchStage):
+            yield from self._iter_optional_match_stage(
+                stage,
+                bindings,
+                evaluator,
+                parameters,
+                tracker,
+            )
+            return
+        if isinstance(stage, UnwindStage):
+            yield from self._iter_unwind_stage(
+                stage,
+                bindings,
+                evaluator,
+                parameters,
+                tracker,
+            )
+            return
+        if isinstance(stage, FilterStage):
+            yield from self._iter_filter_stage(
+                stage,
+                bindings,
+                evaluator,
+                parameters,
+                tracker,
+            )
+            return
+        if isinstance(stage, LetStage):
+            yield from self._iter_let_stage(
+                stage,
+                bindings,
+                evaluator,
+                parameters,
+                tracker,
+            )
+            return
+        if isinstance(stage, YieldStage):
+            yield from self._iter_yield_stage(stage, bindings, tracker)
+            return
+        yield from self._iter_with_stage(
+            stage,
+            bindings,
+            evaluator,
+            parameters,
+            tracker,
+        )
+
+    def _iter_match_stage(
+        self,
+        stage: MatchStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Run a mandatory match stage lazily.
+
+        Parameters
+        ----------
+        stage : MatchStage
+            Stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            One output row per match.
+        """
+        names = self._pattern_variables(stage.patterns)
+        if self._uses_pattern_engine(stage.patterns):
+            engine = self._pattern_engine(evaluator, parameters, tracker, stage.match_mode)
+            for binding in bindings:
+                if self._has_null_binding(binding, names):
+                    continue
+                with RowStream(engine.iter_match(stage.patterns, stage.where, binding)) as stream:
+                    for match in stream:
+                        yield {**binding, **match}
+            return
+        for binding in bindings:
+            if self._has_null_binding(binding, names):
+                continue
+            for match in self._match_rows(
+                stage.patterns,
+                stage.where,
+                evaluator,
+                parameters,
+                binding,
+                stage.match_mode,
+            ):
+                tracker.consume_rows()
+                yield {**binding, **match}
+
+    def _iter_optional_match_stage(
+        self,
+        stage: OptionalMatchStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Run an optional match stage lazily as a left join.
+
+        Parameters
+        ----------
+        stage : OptionalMatchStage
+            Stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            One output row per match, or one null-extended row.
+        """
+        names = self._pattern_variables(stage.patterns)
+        engine = (
+            self._pattern_engine(evaluator, parameters, tracker, stage.match_mode)
+            if self._uses_pattern_engine(stage.patterns)
+            else None
+        )
+        for binding in bindings:
+            if self._has_null_binding(binding, names):
+                tracker.consume_rows()
+                yield {**binding, **dict.fromkeys(sorted(stage.introduced))}
+                continue
+            if engine is None:
+                matches = self._match_rows(
+                    stage.patterns,
+                    stage.where,
+                    evaluator,
+                    parameters,
+                    binding,
+                    stage.match_mode,
+                )
+                if not matches:
+                    tracker.consume_rows()
+                    yield {**binding, **dict.fromkeys(sorted(stage.introduced))}
+                    continue
+                for match in matches:
+                    tracker.consume_rows()
+                    yield {**binding, **match}
+                continue
+            found = False
+            with RowStream(engine.iter_match(stage.patterns, stage.where, binding)) as stream:
+                for match in stream:
+                    found = True
+                    yield {**binding, **match}
+            if not found:
+                tracker.consume_rows()
+                yield {**binding, **dict.fromkeys(sorted(stage.introduced))}
+
+    def _iter_unwind_stage(
+        self,
+        stage: UnwindStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Expand list values lazily.
+
+        Parameters
+        ----------
+        stage : UnwindStage
+            Stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            One output row per expanded element.
+
+        Raises
+        ------
+        QueryExecutionError
+            If the evaluated value is not a list.
+        """
+        for binding in bindings:
+            value = evaluator.evaluate(stage.expression, binding, parameters)
+            if value is None:
+                continue
+            if isinstance(value, str) or not isinstance(value, Sequence):
+                message = "UNWIND requires a list value"
+                raise QueryExecutionError(message)
+            for index, item in enumerate(value):
+                tracker.consume_rows()
+                row = {**binding, stage.variable: item}
+                if stage.index is not None:
+                    position = index if stage.ordinality is OrdinalityKind.OFFSET else index + 1
+                    row[stage.index] = position
+                yield row
+
+    def _iter_filter_stage(
+        self,
+        stage: FilterStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Keep rows whose predicate is true, lazily.
+
+        Parameters
+        ----------
+        stage : FilterStage
+            Stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            Rows whose predicate evaluated to ``True``.
+        """
+        for binding in bindings:
+            if evaluator.evaluate(stage.where, binding, parameters) is not True:
+                continue
+            tracker.consume_rows()
+            yield dict(binding)
+
+    def _iter_let_stage(
+        self,
+        stage: LetStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Add ``LET`` bindings lazily.
+
+        Parameters
+        ----------
+        stage : LetStage
+            Stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            One output row per input row.
+        """
+        for binding in bindings:
+            row = dict(binding)
+            for assignment in stage.assignments:
+                row[assignment.name] = evaluator.evaluate(
+                    assignment.expression,
+                    row,
+                    parameters,
+                )
+            tracker.consume_rows()
+            yield row
+
+    @staticmethod
+    def _iter_yield_stage(
+        stage: YieldStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Select ``YIELD`` columns lazily.
+
+        Parameters
+        ----------
+        stage : YieldStage
+            Stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            Rows containing only the yielded columns.
+
+        Raises
+        ------
+        QueryExecutionError
+            If a source column is missing from an input row.
+        """
+        for binding in bindings:
+            row: dict[str, QueryValue] = {}
+            for item in stage.items:
+                if item.source not in binding:
+                    message = f"YIELD column {item.source!r} is not bound"
+                    raise QueryExecutionError(message)
+                row[item.name] = binding[item.source]
+            tracker.consume_rows()
+            yield row
+
+    def _iter_with_stage(
+        self,
+        stage: WithStage,
+        bindings: Iterator[dict[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> Iterator[dict[str, QueryValue]]:
+        """Project a ``WITH`` stage lazily when it has no blocking operator.
+
+        Parameters
+        ----------
+        stage : WithStage
+            Stage to run.
+        bindings : Iterator[dict[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Yields
+        ------
+        dict[str, QueryValue]
+            Rows projected into the stage's output scope.
+        """
+        for binding in bindings:
+            values = tuple(
+                evaluator.evaluate(item.expression, binding, parameters) for item in stage.items
+            )
+            row = {item.name: value for item, value in zip(stage.items, values, strict=True)}
+            if (
+                stage.where is not None
+                and evaluator.evaluate(stage.where, row, parameters) is not True
+            ):
+                continue
+            tracker.consume_rows()
+            yield row
+
+    def _pattern_engine(
+        self,
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+        match_mode: MatchMode,
+    ) -> PatternEngine:
+        """Build a pattern engine for one streaming stage.
+
+        Parameters
+        ----------
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+        match_mode : MatchMode
+            Relationship-sharing rule of the clause.
+
+        Returns
+        -------
+        PatternEngine
+            Engine that reads adjacency on demand for open patterns.
+        """
+        return PatternEngine(
+            self._nodes,
+            self._relationships,
+            self._select_start_nodes,
+            parameters,
+            evaluator,
+            tracker,
+            match_mode,
         )
 
     def _execute_compound(
@@ -1129,6 +1907,24 @@ class QueryExecutor:
             raise QueryExecutionError(message)
         runner = SubqueryExecutor(self, functions, tracker, analysis.subquery_analyses)
         evaluator = ExpressionEvaluator(functions, runner)
+        shape = PlanShape(analysis)
+        if limit is not None and shape.streamable_rows:
+            operations = self._read_operations(analysis.operations)
+            count = 0
+            with RowStream(
+                self._iter_bindings(
+                    operations,
+                    (binding,),
+                    evaluator,
+                    parameters,
+                    tracker,
+                )
+            ) as stream:
+                for _ in stream:
+                    count += 1
+                    if count >= limit:
+                        break
+            return count
         bindings: list[dict[str, QueryValue]] = [dict(binding)]
         for operation in analysis.operations:
             tracker.check_time()
@@ -1296,7 +2092,7 @@ class QueryExecutor:
         """
         results: list[dict[str, QueryValue]] = []
         names = self._pattern_variables(stage.patterns)
-        if self._is_quantified(stage.patterns):
+        if self._uses_pattern_engine(stage.patterns):
             return self._run_pattern_stage(
                 stage.patterns,
                 stage.where,
@@ -1304,6 +2100,7 @@ class QueryExecutor:
                 evaluator,
                 parameters,
                 tracker,
+                match_mode=stage.match_mode,
                 optional=False,
                 introduced=frozenset(),
             )
@@ -1316,6 +2113,7 @@ class QueryExecutor:
                 evaluator,
                 parameters,
                 binding,
+                stage.match_mode,
             )
             for match in matches:
                 tracker.consume_rows()
@@ -1353,7 +2151,7 @@ class QueryExecutor:
         """
         results: list[dict[str, QueryValue]] = []
         names = self._pattern_variables(stage.patterns)
-        if self._is_quantified(stage.patterns):
+        if self._uses_pattern_engine(stage.patterns):
             return self._run_pattern_stage(
                 stage.patterns,
                 stage.where,
@@ -1361,6 +2159,7 @@ class QueryExecutor:
                 evaluator,
                 parameters,
                 tracker,
+                match_mode=stage.match_mode,
                 optional=True,
                 introduced=stage.introduced,
             )
@@ -1375,6 +2174,7 @@ class QueryExecutor:
                 evaluator,
                 parameters,
                 binding,
+                stage.match_mode,
             )
             if not matches:
                 tracker.consume_rows()
@@ -1593,10 +2393,11 @@ class QueryExecutor:
         parameters: Mapping[str, QueryValue],
         tracker: BudgetTracker,
         *,
+        match_mode: MatchMode,
         optional: bool,
         introduced: frozenset[str],
     ) -> list[dict[str, QueryValue]]:
-        """Run a match stage that contains a quantified relationship.
+        """Run a match stage that uses the pattern engine.
 
         Parameters
         ----------
@@ -1612,6 +2413,8 @@ class QueryExecutor:
             Query parameter values.
         tracker : BudgetTracker
             Budget counters of this execution.
+        match_mode : MatchMode
+            Relationship-sharing rule of the clause.
         optional : bool
             Whether the stage is ``OPTIONAL MATCH``.
         introduced : frozenset[str]
@@ -1630,6 +2433,7 @@ class QueryExecutor:
             parameters,
             evaluator,
             tracker,
+            match_mode,
         )
         names = self._pattern_variables(patterns)
         results: list[dict[str, QueryValue]] = []
@@ -1678,7 +2482,7 @@ class QueryExecutor:
             properties=pattern.properties,
             label_expression=pattern.label_expression,
         )
-        match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
+        match = Match(patterns=(PathPattern.simple(nodes=(synthetic,)),))
         resolver = PatternValueResolver(evaluator, parameters)
         compiled = Compiler(match, self._codec).compile(parameters, binding, resolver)
         nodes: list[Node] = []
@@ -1687,6 +2491,24 @@ class QueryExecutor:
             if isinstance(node, Node):
                 nodes.append(node)
         return nodes
+
+    @staticmethod
+    def _uses_pattern_engine(patterns: Sequence[PathPattern]) -> bool:
+        """Report whether a pattern set needs the pattern engine.
+
+        Parameters
+        ----------
+        patterns : Sequence[PathPattern]
+            Patterns to inspect.
+
+        Returns
+        -------
+        bool
+            ``True`` for a quantified position or a path-search prefix.
+        """
+        return any(
+            pattern.search is not None or not pattern.is_simple for pattern in patterns
+        ) or QueryExecutor._is_quantified(patterns)
 
     @staticmethod
     def _is_quantified(patterns: Sequence[PathPattern]) -> bool:
@@ -1702,11 +2524,7 @@ class QueryExecutor:
         bool
             ``True`` when any relationship carries a hop bound.
         """
-        return any(
-            relationship.min_hops is not None or relationship.max_hops is not None
-            for pattern in patterns
-            for relationship in pattern.relationships
-        )
+        return any(pattern.has_quantified_relationship() for pattern in patterns)
 
     @staticmethod
     def _pattern_variables(patterns: Sequence[PathPattern]) -> set[str]:
@@ -1726,12 +2544,38 @@ class QueryExecutor:
         for pattern in patterns:
             if pattern.variable is not None:
                 names.add(pattern.variable)
-            for node in pattern.nodes:
-                if node.variable is not None:
-                    names.add(node.variable)
-            for relationship in pattern.relationships:
-                if relationship.variable is not None:
-                    names.add(relationship.variable)
+            names.update(QueryExecutor._term_variables(pattern.terms))
+        return names
+
+    @staticmethod
+    def _term_variables(
+        terms: Sequence[SimplePathTerm | GroupedPathTerm],
+    ) -> set[str]:
+        """Return every variable introduced by a sequence of path terms.
+
+        Parameters
+        ----------
+        terms : Sequence[SimplePathTerm | GroupedPathTerm]
+            Terms to inspect.
+
+        Returns
+        -------
+        set[str]
+            Variable names in the terms.
+        """
+        names: set[str] = set()
+        for term in terms:
+            if isinstance(term, SimplePathTerm):
+                for node in term.nodes:
+                    if node.variable is not None:
+                        names.add(node.variable)
+                for relationship in term.relationships:
+                    if relationship.variable is not None:
+                        names.add(relationship.variable)
+            else:
+                if term.variable is not None:
+                    names.add(term.variable)
+                names.update(QueryExecutor._term_variables(term.pattern.terms))
         return names
 
     @staticmethod
@@ -1790,6 +2634,7 @@ class QueryExecutor:
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
         bound: Mapping[str, QueryValue] | None = None,
+        match_mode: MatchMode = MatchMode.REPEATABLE_ELEMENTS,
     ) -> list[dict[str, QueryValue]]:
         """Run one pattern set and return its filtered variable bindings.
 
@@ -1805,13 +2650,20 @@ class QueryExecutor:
             Query parameter values.
         bound : Mapping[str, QueryValue] | None, optional
             Values already bound by an earlier stage, by default none.
+        match_mode : MatchMode, optional
+            Relationship-sharing rule of the clause, by default
+            ``MatchMode.REPEATABLE_ELEMENTS``.
 
         Returns
         -------
         list[dict[str, QueryValue]]
             Variable bindings in SQL row order.
         """
-        match = Match(patterns=tuple(patterns), where=where)
+        match = Match(
+            patterns=tuple(patterns),
+            where=where,
+            match_mode=match_mode,
+        )
         resolver = PatternValueResolver(evaluator, parameters)
         compiled = Compiler(match, self._codec).compile(parameters, bound, resolver)
         bindings = self._match_bindings(compiled)

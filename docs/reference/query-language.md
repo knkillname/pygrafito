@@ -267,9 +267,22 @@ and `{,n}` for at most `n` hops:
 
 The canonical form does not imply `TRAIL`: its mode comes from the
 [path-mode rule](#path-modes), so a canonical path without an explicit mode is a
-`WALK`. The legacy `*n..m` form keeps its `TRAIL` default. An open-ended upper
-bound is gated for 1.0: `*`, `+`, `*n..`, and `{m,}` raise a positioned error naming
-`add-gql-unbounded-traversal`.
+`WALK`. The legacy `*n..m` form keeps its `TRAIL` default.
+
+A missing upper bound means the quantifier is open-ended:
+
+```text
+(a)-[:ALLIES_WITH*]->(b)            zero or more hops
+(a)-[:ALLIES_WITH+]->(b)            one or more hops
+(a)-[:ALLIES_WITH{2,}]->(b)         two or more hops
+(a)-[:ALLIES_WITH*2..]->(b)         legacy spelling, TRAIL default
+```
+
+Bare `*` is zero or more, so it includes the zero-hop binding where both end
+nodes are the same node. The relationship variable binds an empty list for that
+binding, and a path variable contains one node and no relationships. Use `+` or
+`{1,}` when at least one hop is required. The legacy `*n..` form keeps the
+`TRAIL` default, while the canonical open forms default to `WALK`.
 
 `TRAIL` is relationship-unique: one match never uses the same relationship
 twice, while nodes may repeat. That is the same rule the Python `paths()` API
@@ -286,6 +299,29 @@ A relationship-list variable may be projected or passed to `size`; it cannot be
 used where a single relationship is required, so `type(r)` and `r.property` are
 semantic errors. Pattern property maps may contain expressions; see
 [Pattern property expressions](#pattern-property-expressions).
+
+## Open-ended traversal and demand
+
+`TRAIL`, `SIMPLE`, and `ACYCLIC` bound an open walk by the graph's elements, so
+those queries finish on their own. An open `WALK` can repeat without end. It
+stops when the result demand is met or when the query budget stops it:
+
+```text
+MATCH (a:Program {designation: 'Kevin Flynn'})-[:TRUSTS+]->(b)
+RETURN b.designation AS name LIMIT 5
+```
+
+A final `LIMIT`, with or without `OFFSET`, stops matching and expansion as soon
+as the requested rows exist. The statement must be a plain read projection: a
+final `ORDER BY`, `DISTINCT`, aggregation, `GROUP BY`, set operation, write
+clause, `NEXT` boundary, or `FINISH` needs every row before it can produce the
+result, so it evaluates the whole walk first. A `WITH` stage with ordering,
+distinctness, aggregation, or pagination also materializes its input.
+
+When an open `WALK` has no demand bound, it runs until the query budget raises
+`QueryBudgetExceededError`. The call returns no rows and no partial path set.
+Write a final `LIMIT`, a repetition-restricting mode such as `TRAIL`, or both
+when the graph may be cyclic or dense.
 
 ## Path modes
 
@@ -321,11 +357,131 @@ MATCH ACYCLIC (a)-[:TRUSTS]->(b)-[:TRUSTS]->(c)-[:TRUSTS]->(a) RETURN a   -- no 
 
 Reusing a relationship is the difference between `WALK` and `TRAIL`. On a graph with a self-loop,
 the two positions may bind the same edge under `WALK` and must bind distinct edges under `TRAIL`.
+For sharing across several patterns of one clause, see [Match modes](#match-modes).
 
 ```text
 MATCH WALK (a)-[r:TRUSTS]->(b)-[s:TRUSTS]->(c) RETURN c
 MATCH TRAIL (a)-[r:TRUSTS]->(b)-[s:TRUSTS]->(c) RETURN c   -- r and s differ
 ```
+
+## Path search
+
+A path-search prefix selects among the paths that one pattern matches. Write it after the optional
+path variable and before the path mode:
+
+```text
+MATCH p = ANY SHORTEST (a:Program {designation: 'Flynn'})-[:TRUSTS*1..3]->(b) RETURN p
+MATCH TRAIL SHORTEST 2 (a)-[:TRUSTS*1..]->(b) RETURN b
+```
+
+The selection is per partition. A partition is the pair formed by a path's first and last node
+within one input row, so the same endpoint pair in two input rows is two partitions.
+
+| Prefix | Rows per partition |
+| --- | --- |
+| none | Every match. This is the default. |
+| `ANY` | One path. pygrafito returns the deterministic shortest path, which is a valid `ANY` choice. |
+| `ANY SHORTEST` | One path of minimum length. |
+| `ALL SHORTEST` | Every path of minimum length. |
+| `SHORTEST k` | Up to `k` paths in increasing length. |
+
+`k` is a non-negative integer literal. `SHORTEST 0` produces no row and expands no relationship.
+Parameters, expressions, negative values, and non-integers are rejected before execution. There is
+no `ALL` prefix.
+
+Two paths are identical when their node sequence and their orientation-aware relationship sequence
+are identical. Parallel relationships are different paths. Ties break by the lexicographically
+smaller relationship sequence, then node sequence, so the same path is selected on every run.
+
+Path search evaluates only paths accepted by the effective path mode and the clause match mode.
+A `TRAIL` prefix and a `DIFFERENT EDGES` clause reject an edge-reusing candidate before selection.
+The evaluator expands in nondecreasing length order and stops a partition once its selection is
+complete, so longer routes are not enumerated after a shortest selection. A final `LIMIT` can stop
+partition discovery early.
+
+On the TRON diamond where Flynn reaches Alan through Sam and through Quorra, `ALL SHORTEST`
+returns both two-hop paths while `ANY SHORTEST` returns one:
+
+```text
+MATCH p = ALL SHORTEST (a:User {designation: 'Kevin Flynn'})-[:PARENT_OF|TRUSTS*1..3]->(b:User {designation: 'Alan Bradley'}) RETURN [n IN nodes(p) | n.designation]
+MATCH p = ANY SHORTEST (a:User {designation: 'Kevin Flynn'})-[:PARENT_OF|TRUSTS*1..3]->(b:User {designation: 'Alan Bradley'}) RETURN length(p)
+```
+
+Path search applies to a whole path. A prefix inside a grouped path pattern is a semantic error.
+
+## Grouped path patterns
+
+A path pattern is a juxtaposition of terms. A term is a node pattern followed by zero or more
+relationship-node pairs, or a parenthesized path pattern followed by a quantifier. Adjacent terms
+share their boundary node.
+
+```text
+MATCH (a:User {designation: 'Kevin Flynn'})
+      ((b)-[:TRUSTS]->(c)){2} (d) RETURN d.designation
+```
+
+The grouped quantifier may be `{n}`, `{m,n}`, `{,n}`, `{m,}`, `*`, or `+`. The legacy `*n..m`
+spelling is not accepted on a group. `{0,2}` allows zero iterations when the rest of the path can
+still match; a path that is only a zero-lower-bound group is rejected.
+
+A group may name a path variable before its inner path and a path mode after that variable:
+
+```text
+MATCH (p = TRAIL (a)-[r:TRUSTS]->(b)){2} RETURN length(p)
+MATCH WALK (ACYCLIC (a)-[:TRUSTS]->(b)){1,3} RETURN count(*) AS total
+```
+
+The outer path mode applies to the whole path. The inner mode applies to the group's own
+repetitions. Both are enforced, and the stricter rule wins.
+
+Variables first introduced inside a group become ordered lists of the elements they bind:
+
+```text
+MATCH ((a)-[r:TRUSTS]->(b)){2} RETURN [x IN a | x.designation], [x IN r | id(x)]
+```
+
+Nested groups flatten their lists in traversal order. A group path variable binds one `Path`
+containing every iteration, with the shared boundary node once. Zero iterations bind every group
+variable to an empty list. A variable bound before the group acts as an equality constraint inside
+it, so an outer start node does not become a group list.
+
+Every group must consume at least one relationship per iteration, and every group must contain a
+relationship position directly or through a nested group. A variable introduced twice in one group
+is rejected, and a nested group cannot reference an enclosing group's local variables. Property
+access and `type()` on a list variable are rejected; use a list comprehension instead. A search
+prefix inside a group is rejected because search applies to whole paths.
+
+## Match modes
+
+A path mode constrains repetition inside one path. A match mode constrains relationship sharing
+across the whole `MATCH` clause. Write the match mode after `MATCH` or `OPTIONAL MATCH` and before a
+path mode:
+
+```text
+MATCH REPEATABLE ELEMENTS (a)-[r:TRUSTS]->(b), (c)-[s:TRUSTS]->(d) RETURN r, s
+MATCH DIFFERENT EDGES WALK (a)-[r:TRUSTS]->(b)-[s:TRUSTS]->(c) RETURN c
+```
+
+`REPEATABLE ELEMENTS` is the default and adds no constraint. `DIFFERENT EDGES` allows each
+relationship to bind at most once anywhere in the clause, including repeated positions inside one
+walk. Nodes may still repeat under either mode.
+
+The two rules combine by intersection: an extension is accepted only when both the path mode and
+the match mode accept it. `TRAIL` and `DIFFERENT EDGES` both forbid relationship reuse inside a
+path, while `WALK` with `DIFFERENT EDGES` means a walk that still uses every relationship at most
+once in the clause. On a graph with two parallel relationships, this query returns the two
+edge-disjoint pairs and rejects the pairs that share one relationship:
+
+```text
+MATCH DIFFERENT EDGES (a)-[r:TRUSTS]->(b), (c)-[s:TRUSTS]->(d)
+RETURN id(r) AS r, id(s) AS s
+```
+
+The match mode is scoped to its clause. A relationship bound by an earlier `MATCH` may be bound
+again by a later `MATCH DIFFERENT EDGES`, and consecutive clauses are not fused when either one
+uses `DIFFERENT EDGES`. `INSERT`, `CREATE`, and `MERGE` patterns have no match mode.
+
+See [Path semantics](gql-profile.md#path-semantics) for the full matrix.
 
 ## Pattern variables and paths
 
@@ -1037,11 +1193,9 @@ deletion, a missing element, or an invalid stored value is raised as
 
 A construct that the GQL profile marks `gated` is in the 1.0 target but cannot
 execute in this release. It is rejected with a positioned syntax or semantic query
-error; the profile names the follow-up change. An open-ended upper bound (`*`, `+`,
-`*n..`, or `{m,}`) reports `add-gql-unbounded-traversal`. A gated construct stops
-the whole statement before execution, so a gated clause never writes data.
-Constructs the profile marks out of profile keep their existing explicit
-rejection.
+error, and the profile names the follow-up change. A gated construct stops the
+whole statement before execution, so a gated clause never writes data. Constructs
+the profile marks out of profile keep their existing explicit rejection.
 
 ## Consistent execution snapshot
 
@@ -1058,6 +1212,10 @@ includes that transaction's uncommitted writes and excludes writes from other
 connections.
 
 A statement with `NEXT` segments is still one transaction and one query budget.
+A statement with an open pattern reads one snapshot per contiguous read prefix,
+so a concurrent write cannot change the graph during the walk. The read snapshot
+is released before the statement returns, including after a budget failure or an
+arbitrary execution error.
 A later segment sees the writes of an earlier segment, and a failure in any
 segment rolls back every mutation of the statement.
 
@@ -1066,8 +1224,9 @@ segment rolls back every mutation of the statement.
 Keywords and function names are case-insensitive. Variable names, labels, and
 property keys are case-sensitive, so `Program` and `program` are different
 labels. `LET`, `NEXT`, `YIELD`, `GROUP`, `ORDINALITY`, `FINISH`, `WHEN`, `THEN`,
-`ELSE`, `END`, `UNION`, `INTERSECT`, and `EXCEPT` are reserved keywords. Quote a
-name with backticks when it collides with one. Existing variables or aliases
+`ELSE`, `END`, `UNION`, `INTERSECT`, `EXCEPT`, `DIFFERENT`, `EDGES`, `REPEATABLE`,
+`ELEMENTS`, `ANY`, and `SHORTEST` are reserved keywords. Quote a name with backticks when it collides
+with one. Existing variables or aliases
 using the newly reserved spellings must be backtick-quoted. For example:
 ```text
 LET `next` = 1 RETURN `next`
@@ -1088,8 +1247,15 @@ segment          = { match-clause | for-clause | unwind-clause | filter-clause
                  [ return-clause | finish-clause ]
 yield-item       = identifier [ "AS" identifier ]
 path-mode        = "WALK" | "TRAIL" | "SIMPLE" | "ACYCLIC"
-match-clause     = [ "OPTIONAL" ] "MATCH" [path-mode] [path-mode] path-pattern
-                   { "," [path-mode] path-pattern } [where-clause]
+match-mode       = "DIFFERENT" "EDGES" | "REPEATABLE" "ELEMENTS"
+path-search      = "ANY" [ "SHORTEST" ] | "ALL" "SHORTEST" | "SHORTEST" INTEGER
+match-clause     = [ "OPTIONAL" ] "MATCH" [match-mode] [path-search] [path-mode] path-pattern
+                   { "," [path-search] [path-mode] path-pattern } [where-clause]
+path-pattern     = path-term { path-term }
+path-term        = [ identifier "=" ] [path-mode] node-pattern
+                   { relationship-pattern node-pattern }
+                 | "(" [ identifier "=" ] [path-mode] path-pattern ")" group-quantifier
+group-quantifier = "*" | "+" | "{" [INTEGER] [ "," [INTEGER] ] "}"
 for-clause       = "FOR" identifier "IN" expression [ordinality]
 unwind-clause    = "UNWIND" expression "AS" identifier [ordinality]
 ordinality       = "WITH" ( "ORDINALITY" | "OFFSET" ) identifier
@@ -1130,6 +1296,7 @@ relationship     = "-" [relationship-detail] ( "->" | "-" )
 relationship-detail = "[" [identifier] [label-spec] [quantifier]
                    [property-map] [where-clause] "]"
 quantifier       = "*" [ INTEGER [ ".." [ INTEGER ] ] ]
+                 | "+"
                  | "{" INTEGER [ "," [ INTEGER ] ] "}"
 property-map     = "{" [ key ":" expression { "," key ":" expression } ] "}"
 where-clause     = "WHERE" expression
@@ -1176,18 +1343,15 @@ Use `-` for an undirected relationship.
 A construct that the profile marks `gated` is in the 1.0 target but cannot execute
 in this release. It is rejected with a positioned query error before the statement
 runs. The [GQL profile](gql-profile.md#gated-for-10) is the authoritative list of
-statuses and follow-up changes; this table mirrors the recognized forms.
+statuses and follow-up changes, and its
+[path semantics](gql-profile.md#path-semantics) section defines the target behavior
+that the follow-up changes implement. This table mirrors the recognized forms.
 
-| Construct | Follow-up change |
-| --- | --- |
-| `DIFFERENT EDGES`, `REPEATABLE ELEMENTS` | `add-gql-match-modes` |
-| Grouped quantified paths | `add-gql-grouped-quantified-paths` |
-| `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | `add-gql-path-search` |
-| Open-ended quantifiers (`*`, `+`, `*n..`, `{m,}`) | `add-gql-unbounded-traversal` |
+| Construct | Follow-up change | Target semantics |
+| --- | --- | --- |
+| Grouped quantified paths | `add-gql-grouped-quantified-paths` | [Grouped quantified paths](gql-profile.md#grouped-quantified-paths) |
 
-The path constructs also depend on `define-gql-path-semantics`, which owns their
-interaction with the supported path modes, and on `add-gql-unbounded-traversal`
-where they need an open-ended walk.
+`define-gql-path-semantics` owns how the supported path, match, and search rules interact.
 
 ## Unsupported constructs
 
@@ -1215,6 +1379,6 @@ path variable, more than one pattern, or an invalid relationship shape, are also
 rejected. The [rejected forms](gql-profile.md#rejected-forms) table and the
 query-language analysis document the exact restrictions.
 
-The path constructs are gated for 1.0, not out of profile. Extending the dialect
-requires its own specification change rather than silently accepting partial
-behavior.
+The remaining path constructs are gated for 1.0, not out of profile. Open-ended
+quantifiers and match modes are supported. Extending the dialect requires its own
+specification change rather than silently accepting partial behavior.

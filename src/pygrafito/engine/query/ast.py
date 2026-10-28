@@ -430,6 +430,42 @@ class PathMode(Enum):
     ACYCLIC = "acyclic"
 
 
+class MatchMode(Enum):
+    """Relationship-sharing rule resolved for one ``MATCH`` clause."""
+
+    REPEATABLE_ELEMENTS = "repeatable elements"
+    DIFFERENT_EDGES = "different edges"
+
+
+class PathSearchKind(Enum):
+    """Selection rule applied to the paths of one pattern."""
+
+    ANY = "ANY"
+    ANY_SHORTEST = "ANY SHORTEST"
+    ALL_SHORTEST = "ALL SHORTEST"
+    SHORTEST = "SHORTEST"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PathSearch:
+    """A path-search prefix attached to one path pattern.
+
+    Parameters
+    ----------
+    kind : PathSearchKind
+        Selection rule to apply.
+    k : int | None, optional
+        Number of paths selected by ``SHORTEST k``, by default ``None`` for
+        the other prefixes.
+    span : Span | None, optional
+        Source position of the prefix, by default ``None``.
+    """
+
+    kind: PathSearchKind
+    k: int | None = None
+    span: Span | None = None
+
+
 class OrdinalityKind(Enum):
     """Base used by an iteration position variable."""
 
@@ -528,7 +564,9 @@ class RelationshipPattern:
         ``None`` for an ordinary one-hop relationship.
     max_hops : int | None, optional
         Maximum relationship count for a quantified pattern, by default
-        ``None`` for an ordinary one-hop relationship.
+        ``None``. A quantified position with ``min_hops`` set and
+        ``max_hops`` absent is open-ended; both bounds are absent for an
+        ordinary one-hop relationship.
     canonical_quantifier : bool, optional
         Whether the quantifier uses the canonical ``{n,m}`` spelling, by
         default ``False`` for the legacy ``*n..m`` spelling and ordinary
@@ -551,28 +589,298 @@ class RelationshipPattern:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class PathPattern:
-    """One linear path pattern.
+class SimplePathTerm:
+    """A node pattern followed by relationship-node pairs.
 
     Parameters
     ----------
-    variable : str | None, optional
-        Path variable, or ``None`` when the path is not bound.
     nodes : tuple[NodePattern, ...]
-        Nodes from the start of the path to its end.
-    relationships : tuple[RelationshipPattern, ...]
-        Relationships in traversal order.
+        Nodes from the start of the term to its end.
+    relationships : tuple[RelationshipPattern, ...], optional
+        Relationships in traversal order, by default none.
+    """
+
+    nodes: tuple[NodePattern, ...]
+    relationships: tuple[RelationshipPattern, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HopRange:
+    """Repetition bounds of a grouped path term.
+
+    Parameters
+    ----------
+    min_hops : int
+        Minimum number of iterations.
+    max_hops : int | None
+        Maximum number of iterations, or ``None`` when open-ended.
+    """
+
+    min_hops: int
+    max_hops: int | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class GroupedPathTerm:
+    """A parenthesized path pattern followed by a repetition quantifier.
+
+    Parameters
+    ----------
+    pattern : PathPattern
+        Inner path pattern repeated by the term.
+    quantifier : HopRange
+        Repetition bounds.
+    variable : str | None, optional
+        Group path variable, by default ``None``.
+    mode : PathMode | None, optional
+        Inner path mode, by default ``None``.
+    """
+
+    pattern: PathPattern
+    quantifier: HopRange
+    variable: str | None = None
+    mode: PathMode | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class PathPattern:
+    """One path pattern made of juxtaposed terms.
+
+    Parameters
+    ----------
+    terms : tuple[SimplePathTerm | GroupedPathTerm, ...], optional
+        Path terms in traversal order, by default empty.
     variable : str | None, optional
         Path variable, or ``None`` when the path is not bound.
     mode : PathMode | None, optional
         Explicit per-path mode from the source, or the mode resolved by static
         analysis, by default ``None``.
+    search : PathSearch | None, optional
+        Path-search selection attached to the pattern, by default ``None``.
     """
 
-    nodes: tuple[NodePattern, ...]
-    relationships: tuple[RelationshipPattern, ...] = ()
+    terms: tuple[SimplePathTerm | GroupedPathTerm, ...] = ()
     variable: str | None = None
     mode: PathMode | None = None
+    search: PathSearch | None = None
+
+    @classmethod
+    def simple(
+        cls,
+        *,
+        nodes: tuple[NodePattern, ...],
+        relationships: tuple[RelationshipPattern, ...] = (),
+        variable: str | None = None,
+        mode: PathMode | None = None,
+        search: PathSearch | None = None,
+    ) -> PathPattern:
+        """Build a pattern containing one simple term.
+
+        Parameters
+        ----------
+        nodes : tuple[NodePattern, ...]
+            Nodes from the start of the path to its end.
+        relationships : tuple[RelationshipPattern, ...], optional
+            Relationships in traversal order, by default none.
+        variable : str | None, optional
+            Path variable, by default ``None``.
+        mode : PathMode | None, optional
+            Per-path mode, by default ``None``.
+        search : PathSearch | None, optional
+            Path-search selection, by default ``None``.
+
+        Returns
+        -------
+        PathPattern
+            One-term pattern.
+        """
+        return cls(
+            terms=(SimplePathTerm(nodes=nodes, relationships=relationships),),
+            variable=variable,
+            mode=mode,
+            search=search,
+        )
+
+    @property
+    def is_simple(self) -> bool:
+        """Report whether the pattern has one simple term.
+
+        Returns
+        -------
+        bool
+            ``True`` when the flat node and relationship accessors are valid.
+        """
+        return len(self.terms) == 1 and isinstance(self.terms[0], SimplePathTerm)
+
+    def flatten(
+        self,
+    ) -> tuple[tuple[NodePattern, ...], tuple[RelationshipPattern, ...]]:
+        """Return the flat nodes and relationships of a simple pattern.
+
+        Returns
+        -------
+        tuple[tuple[NodePattern, ...], tuple[RelationshipPattern, ...]]
+            Nodes and relationships in traversal order.
+
+        Raises
+        ------
+        ValueError
+            If the pattern contains a grouped term or several terms.
+        """
+        if not self.is_simple:
+            message = "the pattern has no flat node and relationship form"
+            raise ValueError(message)
+        term = self.terms[0]
+        if not isinstance(term, SimplePathTerm):
+            raise ValueError("the pattern has no flat node and relationship form")
+        return term.nodes, term.relationships
+
+    @property
+    def nodes(self) -> tuple[NodePattern, ...]:
+        """Return the flat nodes of a simple pattern.
+
+        Returns
+        -------
+        tuple[NodePattern, ...]
+            Nodes in traversal order.
+        """
+        return self.flatten()[0]
+
+    @property
+    def relationships(self) -> tuple[RelationshipPattern, ...]:
+        """Return the flat relationships of a simple pattern.
+
+        Returns
+        -------
+        tuple[RelationshipPattern, ...]
+            Relationships in traversal order.
+        """
+        return self.flatten()[1]
+
+    @property
+    def first_node(self) -> NodePattern:
+        """Return the first node pattern of the path.
+
+        Returns
+        -------
+        NodePattern
+            First node pattern of the first term.
+        """
+        term = self.terms[0]
+        if isinstance(term, SimplePathTerm):
+            return term.nodes[0]
+        return term.pattern.first_node
+
+    @property
+    def last_node(self) -> NodePattern:
+        """Return the last node pattern of the path.
+
+        Returns
+        -------
+        NodePattern
+            Last node pattern of the last term.
+        """
+        term = self.terms[-1]
+        if isinstance(term, SimplePathTerm):
+            return term.nodes[-1]
+        return term.pattern.last_node
+
+    def has_open_position(self) -> bool:
+        """Report whether the pattern contains an open repetition.
+
+        Returns
+        -------
+        bool
+            ``True`` when a relationship or grouped term has no upper bound.
+        """
+        for term in self.terms:
+            if isinstance(term, SimplePathTerm):
+                if any(
+                    relationship.min_hops is not None and relationship.max_hops is None
+                    for relationship in term.relationships
+                ):
+                    return True
+            elif term.quantifier.max_hops is None or term.pattern.has_open_position():
+                return True
+        return False
+
+    def all_relationships(self) -> tuple[RelationshipPattern, ...]:
+        """Return every relationship position, including nested groups.
+
+        Returns
+        -------
+        tuple[RelationshipPattern, ...]
+            Relationships in traversal order.
+        """
+        relationships: list[RelationshipPattern] = []
+        for term in self.terms:
+            if isinstance(term, SimplePathTerm):
+                relationships.extend(term.relationships)
+            else:
+                relationships.extend(term.pattern.all_relationships())
+        return tuple(relationships)
+
+    def has_quantified_relationship(self) -> bool:
+        """Report whether any relationship position carries a quantifier.
+
+        Returns
+        -------
+        bool
+            ``True`` when a relationship is quantified, including nested
+            groups.
+        """
+        return any(
+            relationship.min_hops is not None or relationship.max_hops is not None
+            for relationship in self.all_relationships()
+        )
+
+    def minimum_relationships(self) -> int:
+        """Return the minimum number of relationships the pattern traverses.
+
+        Returns
+        -------
+        int
+            Lower bound over every term.
+        """
+        total = 0
+        for term in self.terms:
+            if isinstance(term, SimplePathTerm):
+                total += sum(
+                    0 if relationship.min_hops == 0 else 1 for relationship in term.relationships
+                )
+            else:
+                total += term.quantifier.min_hops * term.pattern.minimum_relationships()
+        return total
+
+    def maximum_relationships(self) -> int | None:
+        """Return the maximum number of relationships the pattern traverses.
+
+        Returns
+        -------
+        int | None
+            Upper bound, or ``None`` when any repetition is open-ended.
+        """
+        total = 0
+        for term in self.terms:
+            if isinstance(term, SimplePathTerm):
+                for relationship in term.relationships:
+                    if relationship.min_hops is None and relationship.max_hops is None:
+                        total += 1
+                    elif relationship.max_hops is None:
+                        return None
+                    else:
+                        total += relationship.max_hops
+            else:
+                if term.quantifier.max_hops is None:
+                    return None
+                inner = term.pattern.maximum_relationships()
+                if inner is None:
+                    return None
+                total += term.quantifier.max_hops * inner
+        return total
+
+
+type PathTerm = SimplePathTerm | GroupedPathTerm
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -625,12 +933,16 @@ class Match:
         Whether the clause is ``OPTIONAL MATCH``, by default ``False``.
     mode : PathMode | None, optional
         Explicit clause-wide path mode, by default ``None``.
+    match_mode : MatchMode, optional
+        Relationship-sharing rule of the clause, by default
+        ``MatchMode.REPEATABLE_ELEMENTS``.
     """
 
     patterns: tuple[PathPattern, ...]
     where: Expression | None = None
     optional: bool = False
     mode: PathMode | None = None
+    match_mode: MatchMode = MatchMode.REPEATABLE_ELEMENTS
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -1045,6 +1357,8 @@ __all__ = [
     "Filter",
     "Finish",
     "FunctionCall",
+    "GroupedPathTerm",
+    "HopRange",
     "IsNull",
     "LabelAssignment",
     "LabelRemoval",
@@ -1058,6 +1372,7 @@ __all__ = [
     "MapEntry",
     "MapLiteral",
     "Match",
+    "MatchMode",
     "Merge",
     "Next",
     "NodePattern",
@@ -1067,6 +1382,9 @@ __all__ = [
     "ParsedStatement",
     "PathMode",
     "PathPattern",
+    "PathSearch",
+    "PathSearchKind",
+    "PathTerm",
     "Property",
     "PropertyAssignment",
     "PropertyEntry",
@@ -1077,6 +1395,7 @@ __all__ = [
     "ReturnItem",
     "Set",
     "SetOperation",
+    "SimplePathTerm",
     "SortItem",
     "Star",
     "Statement",

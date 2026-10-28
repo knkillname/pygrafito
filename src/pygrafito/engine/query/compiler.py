@@ -20,6 +20,7 @@ from pygrafito.engine.query.ast import (
     ListLiteral,
     Literal,
     Match,
+    MatchMode,
     NodePattern,
     Operators,
     Parameter,
@@ -771,6 +772,7 @@ class Compiler:
         self._path_node_aliases: list[str] = []
         self._path_relationships: list[RelationshipColumns] = []
         self._path_relationship_aliases: list[str] = []
+        self._inequality_pairs: set[tuple[str, str]] = set()
         self._node_counter = 0
         self._relationship_counter = 0
         self._label_counter = 0
@@ -813,6 +815,7 @@ class Compiler:
             self._compile_pattern(pattern)
             self._add_mode_predicates(pattern, node_start, relationship_start)
             paths.extend(self._build_paths(pattern, node_start, relationship_start))
+        self._add_match_mode_predicates()
         residual = self._compile_where()
         sql = self._build_sql()
         return CompiledMatch(
@@ -845,6 +848,7 @@ class Compiler:
         self._path_node_aliases = []
         self._path_relationships = []
         self._path_relationship_aliases = []
+        self._inequality_pairs = set()
         self._node_counter = 0
         self._relationship_counter = 0
         self._label_counter = 0
@@ -1295,6 +1299,13 @@ class Compiler:
         aliases = self._unique_aliases(self._path_node_aliases[node_start:])
         self._append_inequalities(aliases, skip_last_pair=mode is PathMode.SIMPLE)
 
+    def _add_match_mode_predicates(self) -> None:
+        """Add the clause-wide edge-inequality predicates for ``DIFFERENT EDGES``."""
+        if self._match.match_mode is not MatchMode.DIFFERENT_EDGES:
+            return
+        aliases = self._unique_aliases(self._path_relationship_aliases)
+        self._append_inequalities(aliases, skip_last_pair=False)
+
     def _append_inequalities(self, aliases: Sequence[str], *, skip_last_pair: bool) -> None:
         """Append pairwise id-inequality predicates for one path.
 
@@ -1310,6 +1321,10 @@ class Compiler:
                 if skip_last_pair and left_index == 0 and right_index == len(aliases) - 1:
                     continue
                 right = aliases[right_index]
+                pair = (left, right)
+                if pair in self._inequality_pairs:
+                    continue
+                self._inequality_pairs.add(pair)
                 self._predicates.append(f"{left}.id <> {right}.id")
 
     @staticmethod

@@ -115,7 +115,7 @@ class TestAstNodes:
             types=("ALLIES_WITH", "TRUSTS"),
             direction=EdgeDirection.OUTGOING,
         )
-        path = PathPattern(
+        path = PathPattern.simple(
             nodes=(node, NodePattern(variable="b")),
             relationships=(relationship,),
             variable="p",
@@ -127,7 +127,7 @@ class TestAstNodes:
         statement = Statement(
             clauses=(
                 Match(
-                    patterns=(PathPattern(nodes=(NodePattern(variable="n"),)),),
+                    patterns=(PathPattern.simple(nodes=(NodePattern(variable="n"),)),),
                     where=Literal(value=True),
                 ),
                 Return(
@@ -181,7 +181,7 @@ class TestAstNodes:
     def test_unwind_and_merge_fields(self) -> None:
         unwind = Unwind(expression=ListLiteral(items=()), variable="value")
         merge = Merge(
-            pattern=PathPattern(nodes=(NodePattern(variable="n"),)),
+            pattern=PathPattern.simple(nodes=(NodePattern(variable="n"),)),
             on_create=Set(
                 assignments=(PropertyAssignment(variable="n", key="k", value=Literal(value=1)),)
             ),
@@ -208,11 +208,11 @@ class TestAstNodes:
             Star(),
             NodePattern(),
             RelationshipPattern(),
-            PathPattern(nodes=(NodePattern(),)),
+            PathPattern.simple(nodes=(NodePattern(),)),
             ReturnItem(expression=Literal(value=1)),
             SortItem(expression=Literal(value=1)),
-            Match(patterns=(PathPattern(nodes=(NodePattern(),)),)),
-            Create(pattern=PathPattern(nodes=(NodePattern(),))),
+            Match(patterns=(PathPattern.simple(nodes=(NodePattern(),)),)),
+            Create(pattern=PathPattern.simple(nodes=(NodePattern(),))),
             Set(
                 assignments=(PropertyAssignment(variable="n", key="k", value=Literal(value=1)),),
                 labels=(LabelAssignment(variable="n", labels=("Program",)),),
@@ -228,7 +228,7 @@ class TestAstNodes:
                 expression=ListLiteral(items=(Literal(value=1),)),
                 variable="value",
             ),
-            Merge(pattern=PathPattern(nodes=(NodePattern(variable="n"),))),
+            Merge(pattern=PathPattern.simple(nodes=(NodePattern(variable="n"),))),
         ]
         for node in nodes:
             assert not hasattr(node, "__dict__")

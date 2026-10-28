@@ -6,7 +6,16 @@
 import dataclasses
 import typing
 
-from pygrafito.engine.query.ast import Binary, Create, Delete, Merge, Operators, Remove, Set
+from pygrafito.engine.query.ast import (
+    Binary,
+    Create,
+    Delete,
+    MatchMode,
+    Merge,
+    Operators,
+    Remove,
+    Set,
+)
 from pygrafito.engine.query.semantic import (
     Analysis,
     CompoundAnalysis,
@@ -28,6 +37,9 @@ class PlanOperator:
 
     MATCH: str = "match"
     OPTIONAL_MATCH: str = "optional_match"
+    PATH_SEARCH: str = "path_search"
+    GROUP: str = "group"
+    DIFFERENT_EDGES: str = "different_edges"
     UNWIND: str = "unwind"
     FILTER: str = "filter"
     LET: str = "let"
@@ -266,6 +278,9 @@ class PlanBuilder:
         pending: MatchStage | None = None
         for operation in operations:
             if isinstance(operation, MatchStage):
+                if pending is not None and cls._separate_clauses(pending, operation):
+                    entries.append(cls._entry(pending))
+                    pending = None
                 pending = cls._merge_match(pending, operation)
                 continue
             if pending is not None:
@@ -275,6 +290,28 @@ class PlanBuilder:
         if pending is not None:
             entries.append(cls._entry(pending))
         return tuple(entries)
+
+    @staticmethod
+    def _separate_clauses(left: MatchStage, right: MatchStage) -> bool:
+        """Report whether two match stages must stay separate clauses.
+
+        Parameters
+        ----------
+        left : MatchStage
+            Pending stage.
+        right : MatchStage
+            Stage to append.
+
+        Returns
+        -------
+        bool
+            ``True`` when either clause enforces ``DIFFERENT EDGES``, whose
+            scope must not cross the clause boundary.
+        """
+        return (
+            left.match_mode is MatchMode.DIFFERENT_EDGES
+            or right.match_mode is MatchMode.DIFFERENT_EDGES
+        )
 
     @classmethod
     def _merge_match(cls, left: MatchStage | None, right: MatchStage) -> MatchStage:
@@ -301,7 +338,11 @@ class PlanBuilder:
                 if where is None
                 else Binary(left=where, operator=Operators.AND, right=right.where)
             )
-        return MatchStage(patterns=left.patterns + right.patterns, where=where)
+        return MatchStage(
+            patterns=left.patterns + right.patterns,
+            where=where,
+            match_mode=left.match_mode,
+        )
 
     @classmethod
     def _entry(cls, operation: ReadStage | WriteStage | NextBoundary) -> PlanEntry:
@@ -341,10 +382,22 @@ class PlanBuilder:
         operators: list[str] = []
         if isinstance(stage, MatchStage):
             operators.append(PlanOperator.MATCH)
+            if any(pattern.search is not None for pattern in stage.patterns):
+                operators.append(PlanOperator.PATH_SEARCH)
+            if any(not pattern.is_simple for pattern in stage.patterns):
+                operators.append(PlanOperator.GROUP)
+            if stage.match_mode is MatchMode.DIFFERENT_EDGES:
+                operators.append(PlanOperator.DIFFERENT_EDGES)
             if stage.where is not None:
                 operators.append(PlanOperator.FILTER)
         elif isinstance(stage, OptionalMatchStage):
             operators.append(PlanOperator.OPTIONAL_MATCH)
+            if any(pattern.search is not None for pattern in stage.patterns):
+                operators.append(PlanOperator.PATH_SEARCH)
+            if any(not pattern.is_simple for pattern in stage.patterns):
+                operators.append(PlanOperator.GROUP)
+            if stage.match_mode is MatchMode.DIFFERENT_EDGES:
+                operators.append(PlanOperator.DIFFERENT_EDGES)
             if stage.where is not None:
                 operators.append(PlanOperator.FILTER)
         elif isinstance(stage, UnwindStage):

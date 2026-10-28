@@ -174,6 +174,36 @@ class TestLexer:
         assert token.kind is TokenKind.KEYWORD
         assert token.value == name
 
+    @pytest.mark.parametrize(
+        "name",
+        ["DIFFERENT", "EDGES", "REPEATABLE", "ELEMENTS"],
+    )
+    def test_match_mode_keywords_are_reserved(self, name: str) -> None:
+        token = Lexer.tokenize(name.lower())[0]
+        assert token.kind is TokenKind.KEYWORD
+        assert token.value == name
+
+    def test_match_mode_keywords_quote_as_identifiers(self) -> None:
+        tokens = Lexer.tokenize("`different` `edges` `repeatable` `elements`")
+        assert all(token.kind is TokenKind.QUOTED_IDENTIFIER for token in tokens[:-1])
+        assert [str(token.value) for token in tokens[:-1]] == [
+            "different",
+            "edges",
+            "repeatable",
+            "elements",
+        ]
+
+    @pytest.mark.parametrize("name", ["ANY", "SHORTEST"])
+    def test_search_keywords_are_reserved(self, name: str) -> None:
+        token = Lexer.tokenize(name.lower())[0]
+        assert token.kind is TokenKind.KEYWORD
+        assert token.value == name
+
+    def test_search_keywords_quote_as_identifiers(self) -> None:
+        tokens = Lexer.tokenize("`any` `shortest`")
+        assert all(token.kind is TokenKind.QUOTED_IDENTIFIER for token in tokens[:-1])
+        assert [str(token.value) for token in tokens[:-1]] == ["any", "shortest"]
+
     def test_new_keywords_quote_as_identifiers(self) -> None:
         tokens = Lexer.tokenize("`when` `then` `else` `end` `union` `intersect` `except`")
         assert len(tokens) == 8

@@ -35,6 +35,102 @@ with Graph.open(":memory:") as graph:
 
 Every Python example in this README is executed by the test suite.
 
+## Traverse without a depth cap
+
+Add `*`, `+`, or `{m,}` to a relationship to follow it without an upper bound. `TRAIL` stops when
+every relationship has been used once; an open `WALK` needs a `LIMIT` or the query budget.
+
+```python
+from pygrafito import Graph, QueryBudget, QueryBudgetExceededError
+
+with Graph.open(":memory:") as graph:
+    flynn = graph.add_node("Program", designation="Flynn")
+    tron = graph.add_node("Program", designation="Tron")
+    clu = graph.add_node("Program", designation="Clu")
+    graph.add_relationship(flynn, "TRUSTS", tron)
+    graph.add_relationship(tron, "TRUSTS", clu)
+    graph.add_relationship(clu, "TRUSTS", flynn)
+
+    trail = graph.query(
+        "MATCH TRAIL (a:Program {designation: 'Flynn'})-[:TRUSTS+]->(b) "
+        "RETURN b.designation AS name ORDER BY name"
+    )
+    print([row["name"] for row in trail])  # ['Clu', 'Flynn', 'Tron']
+
+    limited = graph.query(
+        "MATCH (a:Program {designation: 'Flynn'})-[:TRUSTS+]->(b) "
+        "RETURN b.designation AS name LIMIT 5"
+    )
+    print(len(limited.rows))  # 5
+
+    try:
+        graph.query(
+            "MATCH (a:Program {designation: 'Flynn'})-[:TRUSTS+]->(b) RETURN b",
+            budget=QueryBudget(max_expansions=10),
+        )
+    except QueryBudgetExceededError as error:
+        print(error.counter)  # expansions
+```
+
+## Choose the shortest route
+
+A path-search prefix selects among the routes one pattern matches. `ANY SHORTEST` keeps one
+shortest route per endpoint pair, `ALL SHORTEST` keeps every shortest route, and `SHORTEST k` keeps
+up to `k` routes in increasing length.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    kevin = graph.add_node("User", designation="Kevin Flynn")
+    sam = graph.add_node("User", designation="Sam Flynn")
+    quorra = graph.add_node("Program", designation="Quorra")
+    alan = graph.add_node("User", designation="Alan Bradley")
+    graph.add_relationship(kevin, "PARENT_OF", sam)
+    graph.add_relationship(kevin, "TRUSTS", quorra)
+    graph.add_relationship(sam, "TRUSTS", alan)
+    graph.add_relationship(quorra, "TRUSTS", alan)
+    graph.add_relationship(sam, "TRUSTS", quorra)
+
+    shortest = graph.query(
+        "MATCH p = ANY SHORTEST (a:User {designation: 'Kevin Flynn'})"
+        "-[:PARENT_OF|TRUSTS{1,3}]->(b:User {designation: 'Alan Bradley'}) "
+        "RETURN length(p) AS hops"
+    )
+    print(shortest.rows[0]["hops"])  # 2
+
+    routes = graph.query(
+        "MATCH p = ALL SHORTEST (a:User {designation: 'Kevin Flynn'})"
+        "-[:PARENT_OF|TRUSTS{1,3}]->(b:User {designation: 'Alan Bradley'}) "
+        "RETURN length(p) AS hops ORDER BY hops"
+    )
+    print([row["hops"] for row in routes])  # [2, 2]
+```
+
+## Repeat a path shape
+
+A grouped path repeats a whole path segment. Variables first introduced inside the group bind
+ordered lists, and a group path variable binds the complete repeated path.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    flynn = graph.add_node("Program", designation="Flynn")
+    tron = graph.add_node("Program", designation="Tron")
+    clu = graph.add_node("Program", designation="Clu")
+    graph.add_relationship(flynn, "TRUSTS", tron)
+    graph.add_relationship(tron, "TRUSTS", clu)
+    graph.add_relationship(clu, "TRUSTS", flynn)
+
+    result = graph.query(
+        "MATCH (s:Program {designation: 'Flynn'}) "
+        "(p = (a)-[r:TRUSTS]->(b)){2} "
+        "RETURN [x IN nodes(p) | x.designation] AS names"
+    )
+    print(result.rows[0]["names"])  # ['Flynn', 'Tron', 'Clu']
+```
+
 ## Features
 
 - A single embedded database file, with no server and no runtime dependencies.
