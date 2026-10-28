@@ -10,11 +10,15 @@ from pygrafito.engine.query.ast import Binary, Create, Delete, Merge, Operators,
 from pygrafito.engine.query.semantic import (
     Analysis,
     FilterStage,
+    LetStage,
     MatchStage,
+    NextBoundary,
     OptionalMatchStage,
     ReadStage,
     UnwindStage,
     WithStage,
+    WriteStage,
+    YieldStage,
 )
 
 
@@ -25,12 +29,17 @@ class PlanOperator:
     OPTIONAL_MATCH: str = "optional_match"
     UNWIND: str = "unwind"
     FILTER: str = "filter"
+    LET: str = "let"
+    YIELD: str = "yield"
+    NEXT: str = "next"
+    FINISH: str = "finish"
     CREATE: str = "create"
     MERGE: str = "merge"
     SET: str = "set"
     REMOVE: str = "remove"
     DELETE: str = "delete"
     WITH: str = "with"
+    RETURN: str = "return"
     PROJECT: str = "project"
     AGGREGATE: str = "aggregate"
     DISTINCT: str = "distinct"
@@ -56,6 +65,22 @@ class PlanStage:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class PlanEntry:
+    """One entry in the ordered operation pipeline.
+
+    Parameters
+    ----------
+    operation : ReadStage | WriteStage | NextBoundary
+        Operation this entry executes.
+    operators : tuple[str, ...]
+        Operators the entry applies, in execution order.
+    """
+
+    operation: ReadStage | WriteStage | NextBoundary
+    operators: tuple[str, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class Plan:
     """Planned operator pipeline for one analysed statement.
 
@@ -63,18 +88,57 @@ class Plan:
     ----------
     analysis : Analysis
         Static analysis that drives the operators.
-    stages : tuple[PlanStage, ...]
-        Read stages in execution order.
-    write_operators : tuple[str, ...]
-        Operators applied after every read stage, in source order.
+    entries : tuple[PlanEntry, ...]
+        Ordered operations, including write stages and segment boundaries.
     return_operators : tuple[str, ...]
-        Operators applied by the final ``RETURN`` clause.
+        Operators applied by the final ``RETURN`` or ``FINISH`` clause.
     """
 
     analysis: Analysis
-    stages: tuple[PlanStage, ...]
-    write_operators: tuple[str, ...] = ()
+    entries: tuple[PlanEntry, ...]
     return_operators: tuple[str, ...] = ()
+
+    @property
+    def stages(self) -> tuple[PlanStage, ...]:
+        """Return the planned read stages.
+
+        Returns
+        -------
+        tuple[PlanStage, ...]
+            Read-stage entries in execution order.
+        """
+        return tuple(
+            PlanStage(stage=entry.operation, operators=entry.operators)
+            for entry in self.entries
+            if isinstance(
+                entry.operation,
+                (
+                    MatchStage,
+                    OptionalMatchStage,
+                    UnwindStage,
+                    WithStage,
+                    FilterStage,
+                    LetStage,
+                    YieldStage,
+                ),
+            )
+        )
+
+    @property
+    def write_operators(self) -> tuple[str, ...]:
+        """Return the write operators in execution order.
+
+        Returns
+        -------
+        tuple[str, ...]
+            One operator per write stage.
+        """
+        return tuple(
+            operator
+            for entry in self.entries
+            if isinstance(entry.operation, WriteStage)
+            for operator in entry.operators
+        )
 
     @property
     def operators(self) -> tuple[str, ...]:
@@ -83,10 +147,12 @@ class Plan:
         Returns
         -------
         tuple[str, ...]
-            Stage operators followed by write and return operators.
+            Entry operators followed by the final result operators.
         """
-        stage_operators = tuple(operator for stage in self.stages for operator in stage.operators)
-        return stage_operators + self.write_operators + self.return_operators
+        return (
+            tuple(operator for entry in self.entries for operator in entry.operators)
+            + self.return_operators
+        )
 
     def includes(self, operator: str) -> bool:
         """Report whether the plan contains an operator.
@@ -127,50 +193,48 @@ class PlanBuilder:
         Returns
         -------
         Plan
-            Read stages, trailing write operators, and final projection
-            operators.
+            Ordered operations and final projection operators.
         """
-        stages = cls._build_stages(analysis.stages)
-        write_operators = tuple(
-            operator
-            for clause in analysis.write_clauses
-            if (operator := cls._MUTATIONS.get(type(clause))) is not None
+        entries = cls._build_entries(analysis.operations)
+        return_operators = (
+            (PlanOperator.FINISH,) if analysis.finish else cls._return_operators(analysis)
         )
-        return_operators = cls._return_operators(analysis)
         return Plan(
             analysis=analysis,
-            stages=stages,
-            write_operators=write_operators,
+            entries=entries,
             return_operators=return_operators,
         )
 
     @classmethod
-    def _build_stages(cls, stages: tuple[ReadStage, ...]) -> tuple[PlanStage, ...]:
-        """Fuse adjacent mandatory matches and plan every read stage.
+    def _build_entries(
+        cls,
+        operations: tuple[ReadStage | WriteStage | NextBoundary, ...],
+    ) -> tuple[PlanEntry, ...]:
+        """Fuse adjacent mandatory matches and plan every operation.
 
         Parameters
         ----------
-        stages : tuple[ReadStage, ...]
-            Analysed read stages in source order.
+        operations : tuple[ReadStage | WriteStage | NextBoundary, ...]
+            Analysed operations in source order.
 
         Returns
         -------
-        tuple[PlanStage, ...]
-            Planned read stages.
+        tuple[PlanEntry, ...]
+            Planned operation entries.
         """
-        planned: list[PlanStage] = []
+        entries: list[PlanEntry] = []
         pending: MatchStage | None = None
-        for stage in stages:
-            if isinstance(stage, MatchStage):
-                pending = cls._merge_match(pending, stage)
+        for operation in operations:
+            if isinstance(operation, MatchStage):
+                pending = cls._merge_match(pending, operation)
                 continue
             if pending is not None:
-                planned.append(cls._stage(pending))
+                entries.append(cls._entry(pending))
                 pending = None
-            planned.append(cls._stage(stage))
+            entries.append(cls._entry(operation))
         if pending is not None:
-            planned.append(cls._stage(pending))
-        return tuple(planned)
+            entries.append(cls._entry(pending))
+        return tuple(entries)
 
     @classmethod
     def _merge_match(cls, left: MatchStage | None, right: MatchStage) -> MatchStage:
@@ -200,7 +264,28 @@ class PlanBuilder:
         return MatchStage(patterns=left.patterns + right.patterns, where=where)
 
     @classmethod
-    def _stage(cls, stage: ReadStage) -> PlanStage:
+    def _entry(cls, operation: ReadStage | WriteStage | NextBoundary) -> PlanEntry:
+        """Build the operators for one operation.
+
+        Parameters
+        ----------
+        operation : ReadStage | WriteStage | NextBoundary
+            Operation to plan.
+
+        Returns
+        -------
+        PlanEntry
+            Planned operation.
+        """
+        if isinstance(operation, NextBoundary):
+            return PlanEntry(operation=operation, operators=(PlanOperator.NEXT,))
+        if isinstance(operation, WriteStage):
+            operator = cls._MUTATIONS[type(operation.clause)]
+            return PlanEntry(operation=operation, operators=(operator,))
+        return PlanEntry(operation=operation, operators=cls._stage_operators(operation))
+
+    @classmethod
+    def _stage_operators(cls, stage: ReadStage) -> tuple[str, ...]:
         """Build the operators for one read stage.
 
         Parameters
@@ -210,8 +295,8 @@ class PlanBuilder:
 
         Returns
         -------
-        PlanStage
-            Planned read stage.
+        tuple[str, ...]
+            Operators the stage applies.
         """
         operators: list[str] = []
         if isinstance(stage, MatchStage):
@@ -226,10 +311,14 @@ class PlanBuilder:
             operators.append(PlanOperator.UNWIND)
         elif isinstance(stage, FilterStage):
             operators.append(PlanOperator.FILTER)
+        elif isinstance(stage, LetStage):
+            operators.append(PlanOperator.LET)
+        elif isinstance(stage, YieldStage):
+            operators.append(PlanOperator.YIELD)
         elif isinstance(stage, WithStage):
-            operators.append(PlanOperator.WITH)
+            operators.append(PlanOperator.RETURN if stage.segment_return else PlanOperator.WITH)
             operators.append(PlanOperator.PROJECT)
-            if stage.has_aggregates:
+            if stage.has_aggregates or stage.grouping_explicit:
                 operators.append(PlanOperator.AGGREGATE)
             if stage.distinct:
                 operators.append(PlanOperator.DISTINCT)
@@ -239,7 +328,7 @@ class PlanBuilder:
                 operators.append(PlanOperator.SKIP)
             if stage.limit is not None:
                 operators.append(PlanOperator.LIMIT)
-        return PlanStage(stage=stage, operators=tuple(operators))
+        return tuple(operators)
 
     @classmethod
     def _return_operators(cls, analysis: Analysis) -> tuple[str, ...]:
@@ -260,7 +349,7 @@ class PlanBuilder:
         if return_clause is None:
             return ()
         operators: list[str] = [PlanOperator.PROJECT]
-        if analysis.has_aggregates:
+        if analysis.has_aggregates or analysis.grouping_explicit:
             operators.append(PlanOperator.AGGREGATE)
         if return_clause.distinct:
             operators.append(PlanOperator.DISTINCT)
@@ -276,6 +365,7 @@ class PlanBuilder:
 __all__ = [
     "Plan",
     "PlanBuilder",
+    "PlanEntry",
     "PlanOperator",
     "PlanStage",
 ]

@@ -81,6 +81,8 @@ class Keyword(Enum):
     NEXT = "NEXT"
     GROUP = "GROUP"
     ORDINALITY = "ORDINALITY"
+    YIELD = "YIELD"
+    FINISH = "FINISH"
 
 
 class KeywordIndex:

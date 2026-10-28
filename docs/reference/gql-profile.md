@@ -7,24 +7,23 @@ follow.
 
 :::{note}
 This page is both the language profile and its conformance status board. Canonical spellings are
-executable except the rows marked **gated**; a gated construct raises a positioned error that names
-the follow-up change. The [query-language reference](query-language.md) describes the executable
-dialect.
+executable except the rows marked **deferred**; a deferred construct raises a positioned error that
+names the follow-up change. The [query-language reference](query-language.md) describes the
+executable dialect.
 :::
 
 ## Current status
 
-Path semantics and the query budget are implemented. The remaining gap is the composition
-surface (`LET`, `NEXT`, `GROUP BY`) and the expression vocabulary, which follow in separate
-changes.
+Path semantics, the query budget, and the composition surface are implemented. The remaining
+language gap is the expression vocabulary, which follows in a separate change.
 
 | Area | Implemented | Target |
 | --- | --- | --- |
 | Data modification | `INSERT`, `SET`, `REMOVE`, `DELETE`, `DETACH DELETE`, `NODETACH DELETE`; `CREATE` alias; `MERGE` extension | `INSERT` canonical, `CREATE` alias, `MERGE` extension |
-| Iteration | `FOR`; `UNWIND` alias; ordinality gated | `FOR` canonical, `UNWIND` alias |
+| Iteration | `FOR`; `UNWIND` alias; `WITH ORDINALITY` and `WITH OFFSET` | `FOR` canonical, `UNWIND` alias |
 | Filtering | `FILTER`, stage `WHERE` alias, `MATCH ... WHERE` | `FILTER` canonical, stage `WHERE` alias, `MATCH ... WHERE` canonical |
-| Binding and composition | `WITH` extension; `LET` and `NEXT` gated | `LET` and `NEXT` canonical, `WITH` extension |
-| Grouping | Implicit grouping; `GROUP BY` gated | `GROUP BY` canonical, implicit grouping extension |
+| Binding and composition | `LET`, `NEXT` with `YIELD`, `FINISH`; `WITH` extension | `LET`, `NEXT`, and `FINISH` canonical, `WITH` extension |
+| Grouping | `GROUP BY`, including `GROUP BY ()`; implicit grouping extension | `GROUP BY` canonical, implicit grouping extension |
 | Quantifiers | Closed `{n}`, `{m,n}`, `{,n}`; legacy `*n..m` with `TRAIL`; open bounds deferred | `{n,m}` canonical, legacy `*n..m` compatibility construct |
 | Edge directions | `->`, `<-`, `-`, `~`, `<->`, `<~`, `~>`; `-->` and `<--` aliases; `--` is a comment | GQL directions canonical, double-dash forms aliases |
 | Comments | `//`, `--`, and `/* ... */` | `//`, `--`, and `/* ... */` |
@@ -62,9 +61,9 @@ entry.
 | Iteration | `FOR value IN list [WITH ORDINALITY index]` | `WITH OFFSET index` is the GQL synonym. |
 | Filtering | `FILTER`, `MATCH ... WHERE`, inline element `WHERE` | `FILTER WHERE` is accepted as the explicit form. |
 | Binding | `LET name = expression` | Adds a binding without dropping the current scope. |
-| Composition | `NEXT` | Starts the next statement from the previous binding table. |
-| Grouping | `GROUP BY` | Explicit grouping; implicit grouping is an extension. |
-| Projection | `RETURN`, `RETURN DISTINCT`, `RETURN ALL` | `RETURN *` and `RETURN NO BINDINGS` are in scope. |
+| Composition | `NEXT [YIELD column [AS alias] [, ...]]` | Starts the next segment from the preceding `RETURN`; without `YIELD` every column passes. |
+| Grouping | `GROUP BY key [, ...]`, `GROUP BY ()` | Explicit grouping; implicit grouping is an extension. Expression keys are an extension. |
+| Projection | `RETURN`, `RETURN DISTINCT`, `RETURN ALL`, `FINISH` | `RETURN *` is canonical; `RETURN NO BINDINGS` is a pygrafito extension. |
 | Ordering and pagination | `ORDER BY`, `OFFSET`, `SKIP`, `LIMIT` | `ASC`/`ASCENDING`, `DESC`/`DESCENDING`, and `NULLS FIRST`/`NULLS LAST` are in scope. |
 | Quantifiers | `{n}`, `{m,n}`, `{,n}`, `{m,}`, `*`, `+` | Placement follows the GQL path-pattern grammar. |
 | Labels | Conjunction, disjunction, negation, wildcard | Node and edge label expressions; `IS` is accepted in place of `:`. |
@@ -194,6 +193,7 @@ are never claimed as GQL.
 | `MERGE` with `ON CREATE SET` and `ON MATCH SET` | Upsert is essential for imports and sync. | None in GQL 2024. |
 | `WITH` projection, aggregation, and pagination | A compact scope-reset stage. | `LET` + `NEXT` + `GROUP BY`. |
 | Implicit grouping | Compatibility with the transitional dialect and concise queries. | `GROUP BY`. |
+| `RETURN NO BINDINGS` | Zero-column debugging and internal result shape. | `FINISH`, or `RETURN` with the columns you need. |
 | `type()` | Returns the first sorted relationship label. | `LABELS()` returns the full sorted label list. |
 
 Extensions remain part of the supported compatibility surface. They are documented on this page
@@ -246,12 +246,14 @@ corpus case land. The corpus column is `pending` until the case exists.
 | `SET` | Canonical GQL | supported | implemented | None | set-assigns-a-property |
 | `REMOVE` | Canonical GQL | supported | implemented | None | remove-removes-a-property |
 | `DELETE`, `DETACH DELETE`, `NODETACH DELETE` | Canonical GQL | supported | implemented | None | nodetach-delete-removes-a-disconnected-node |
-| `FOR` with ordinality/offset | Canonical GQL | gated | implemented without ordinality | `WITH ORDINALITY` and `WITH OFFSET` gated | for-iterates-a-list |
+| `FOR` with ordinality/offset | Canonical GQL | supported | implemented | None | for-ordinality-binds-one-based-position |
 | `FILTER` | Canonical GQL | supported | implemented | None | filter-stage-alias |
-| `LET` | Canonical GQL | gated | not implemented | None | pending |
-| `NEXT` | Canonical GQL | gated | not implemented | One result per call; final `RETURN` only | pending |
-| `GROUP BY` | Canonical GQL | gated | implicit grouping only | Explicit grouping target | pending |
-| `RETURN` with `DISTINCT`/`ALL` or `*` | Canonical GQL | supported | implemented | `RETURN NO BINDINGS` gated | return-all-is-the-default |
+| `LET` | Canonical GQL | supported | implemented | None | let-adds-a-binding |
+| `NEXT` | Canonical GQL | supported | implemented | `YIELD` supported; no-`YIELD` and write-only segments accepted for Cypher compatibility | next-carries-an-intermediate-return |
+| `FINISH` | Canonical GQL | supported | implemented | None | finish-ends-a-read-without-a-result |
+| `GROUP BY` | Canonical GQL | supported | implemented | Expression keys are a pygrafito extension; `RETURN DISTINCT` is accepted | group-by-groups-and-counts |
+| `RETURN` with `DISTINCT`/`ALL` or `*` | Canonical GQL | supported | implemented | `RETURN NO BINDINGS` is a pygrafito extension | return-all-is-the-default |
+| `RETURN NO BINDINGS` | pygrafito extension | supported | implemented | Zero columns, one empty row per input binding; final-only | return-no-bindings-projects-empty-rows |
 | `ORDER BY` with null ordering | Canonical GQL | supported | implemented | None | nulls-first-explicit |
 | `OFFSET` and `SKIP` | Canonical GQL | supported | implemented | None | offset-paginates |
 | `LIMIT` | Canonical GQL | supported | implemented | None | limit-bounds-the-result |
@@ -346,6 +348,7 @@ surface, so migration can be incremental.
 | `WHERE` after `WITH` | `FILTER` | Stage `WHERE` remains an alias. |
 | `WITH` | `LET`, `NEXT`, `GROUP BY` | `WITH` remains an extension. |
 | Implicit grouping | `GROUP BY` | Implicit grouping remains an extension. |
+| `RETURN NO BINDINGS` | `FINISH` | `RETURN NO BINDINGS` remains a zero-column extension. |
 | `*1..3` | `{1,3}` | The legacy form keeps `TRAIL`; the canonical form uses `WALK`. |
 | `-->`, `<--`, `--` | `->`, `<-`, `-` | Double-dash forms remain aliases. |
 | No path mode | `WALK` default | Use `MATCH TRAIL` for the old trail behavior. |

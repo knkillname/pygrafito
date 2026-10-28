@@ -55,15 +55,14 @@ pygrafito grid.db -f examples/tours/04-paths.gql
 
 The tours use the canonical GQL spellings the release supports. The
 [GQL profile](../reference/gql-profile.md) records every construct and its tier; each tour is
-catalogued with its tier in `examples/tours/README.md`, and a tour that still relies on a gated
-construct names the follow-up change that implements it. `MERGE`, `WITH`, implicit grouping, and
+catalogued with its tier in `examples/tours/README.md`. `MERGE`, `WITH`, implicit grouping, and
 `type()` are pygrafito extensions, not canonical GQL.
 
 | Tour | Focus | Migrated by |
 | --- | --- | --- |
 | `01-match.gql` | `MATCH`, `OPTIONAL MATCH`, filtering, and ordering | `adopt-gql-query-frontend` (migrated) |
 | `02-write.gql` | `INSERT`, `MERGE` extension, labels, and deletion | `adopt-gql-query-frontend` (migrated) |
-| `03-compose.gql` | `UNWIND` alias, `WITH`, and grouping | `add-gql-composition` |
+| `03-compose.gql` | `LET`, `GROUP BY`, `NEXT`/`YIELD`, `FINISH`, and ordinality | `add-gql-composition` (implemented) |
 | `04-paths.gql` | closed quantifiers, path modes, directions, and path variables | implemented |
 
 ## Analysis recipes

@@ -1,21 +1,28 @@
-// 03-compose.gql - UNWIND alias, WITH aggregation, implicit grouping, and MERGE extension.
-// Current transitional dialect. UNWIND is an alias for canonical FOR; WITH and implicit grouping
-// are pygrafito extensions.
+// 03-compose.gql - canonical composition: FOR, LET, GROUP BY, NEXT/YIELD, and FINISH.
+// The tour also exercises the UNWIND alias, WITH ORDINALITY, and the MERGE extension.
 
 UNWIND [36, 37, 39, 40] AS cycles
 RETURN cycles ORDER BY cycles;
 
-UNWIND ['Tron', 'Quorra', 'Ares'] AS name
+FOR name IN ['Tron', 'Quorra', 'Ares'] WITH ORDINALITY position
 MATCH (p:Program {designation: name})
-RETURN name, p.cycles AS cycles ORDER BY name;
+RETURN name, position, p.cycles AS cycles ORDER BY position;
+
+LET base = 36, following = base + 1
+RETURN following;
 
 MATCH (entity)-[:APPEARS_IN]->(f:Film)
-WITH f.designation AS film, count(*) AS entities
+RETURN f.designation AS film, count(*) AS entities
+GROUP BY f.designation
+NEXT YIELD film, entities
 RETURN film, entities ORDER BY entities DESC, film;
 
 MATCH (p:Program)
-WITH p.designation AS name, p.cycles AS cycles
-WHERE cycles >= 40
+LET name = p.designation, cycles = p.cycles
+RETURN name, cycles
+GROUP BY name, cycles
+NEXT YIELD name, cycles
+FILTER cycles >= 40
 RETURN name, cycles ORDER BY name;
 
 .param rows=[{"designation":"Example A","cycles":10},{"designation":"Example B","cycles":11}]
@@ -25,4 +32,4 @@ MERGE (p:Program {designation: row.designation})
 ON CREATE SET p.cycles = row.cycles
 RETURN p.designation AS name, p.cycles AS cycles ORDER BY name;
 
-MATCH (p:Program) WHERE p.designation STARTS WITH 'Example ' DETACH DELETE p;
+MATCH (p:Program) WHERE p.designation STARTS WITH 'Example ' DETACH DELETE p FINISH;

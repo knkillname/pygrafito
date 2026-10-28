@@ -10,14 +10,18 @@ from pygrafito.engine.query.ast import (
     Create,
     Delete,
     EdgeDirection,
+    Finish,
     FunctionCall,
     IsNull,
     LabelOr,
+    Let,
     ListLiteral,
     Literal,
     Match,
     Merge,
+    Next,
     Operators,
+    OrdinalityKind,
     Parameter,
     PathMode,
     Property,
@@ -29,6 +33,7 @@ from pygrafito.engine.query.ast import (
     Unwind,
     Variable,
     With,
+    Yield,
 )
 from pygrafito.engine.query.parser import Parser
 from pygrafito.model import QuerySemanticError, QuerySyntaxError
@@ -681,3 +686,147 @@ class TestPathModes:
         """Reject a path mode where a data pattern is expected."""
         with pytest.raises(QuerySyntaxError):
             Parser.parse_statement("CREATE WALK (n:Program)")
+
+
+class TestCompositionSyntax:
+    """Verify the parsed shape of the composition clauses."""
+
+    def test_let_assignments_are_ordered(self) -> None:
+        statement = Parser.parse_statement("LET base = 36, following = base + 1 RETURN following")
+        clause = statement.clauses[0]
+        if not isinstance(clause, Let):
+            raise AssertionError("expected a LET clause")
+        assert [assignment.name for assignment in clause.assignments] == ["base", "following"]
+
+    def test_let_can_follow_a_match(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (n:Program) LET following = n.cycles + 1 RETURN following"
+        )
+        assert isinstance(statement.clauses[1], Let)
+
+    def test_let_after_a_write_is_rejected(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="write clause"):
+            Parser.parse_statement("MATCH (n:Program) SET n.cycles = 1 LET value = 1 RETURN value")
+
+    def test_let_after_return_is_rejected(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="RETURN"):
+            Parser.parse_statement("MATCH (n:Program) RETURN n LET value = 1")
+
+    def test_for_ordinality(self) -> None:
+        statement = Parser.parse_statement("FOR value IN [1] WITH ORDINALITY index RETURN index")
+        clause = statement.clauses[0]
+        if not isinstance(clause, Unwind):
+            raise AssertionError("expected an UNWIND clause")
+        assert clause.index == "index"
+        assert clause.ordinality is OrdinalityKind.ORDINALITY
+
+    def test_for_offset(self) -> None:
+        statement = Parser.parse_statement("FOR value IN [1] WITH OFFSET index RETURN index")
+        clause = statement.clauses[0]
+        if not isinstance(clause, Unwind):
+            raise AssertionError("expected an UNWIND clause")
+        assert clause.ordinality is OrdinalityKind.OFFSET
+
+    def test_unwind_accepts_ordinality(self) -> None:
+        statement = Parser.parse_statement("UNWIND [1] AS value WITH ORDINALITY index RETURN index")
+        clause = statement.clauses[0]
+        if not isinstance(clause, Unwind):
+            raise AssertionError("expected an UNWIND clause")
+        assert clause.index == "index"
+
+    def test_ordinality_and_offset_are_exclusive(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="cannot be combined"):
+            Parser.parse_statement(
+                "FOR value IN [1] WITH ORDINALITY index WITH OFFSET other RETURN index"
+            )
+
+    def test_group_by_is_a_return_suffix(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) RETURN n GROUP BY n")
+        clause = statement.clauses[-1]
+        if not isinstance(clause, Return):
+            raise AssertionError("expected a RETURN clause")
+        assert clause.group_by is not None
+        assert len(clause.group_by) == 1
+
+    def test_group_by_empty_key_list(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) RETURN count(*) GROUP BY ()")
+        clause = statement.clauses[-1]
+        if not isinstance(clause, Return):
+            raise AssertionError("expected a RETURN clause")
+        assert clause.group_by == ()
+
+    def test_group_by_rejects_return_star(self) -> None:
+        with pytest.raises(QuerySyntaxError, match=r"RETURN \*"):
+            Parser.parse_statement("MATCH (n:Program) RETURN * GROUP BY n")
+
+    def test_no_bindings_is_parsed(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) RETURN NO BINDINGS")
+        clause = statement.clauses[-1]
+        if not isinstance(clause, Return):
+            raise AssertionError("expected a RETURN clause")
+        assert clause.no_bindings is True
+        assert clause.items == ()
+
+    def test_no_bindings_rejects_modifiers(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="modifiers"):
+            Parser.parse_statement("MATCH (n:Program) RETURN NO BINDINGS LIMIT 1")
+
+    def test_finish_is_parsed(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) FINISH")
+        assert isinstance(statement.clauses[-1], Finish)
+
+    def test_finish_alone_is_rejected(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="read or write clause"):
+            Parser.parse_statement("FINISH")
+
+    def test_next_and_yield_are_parsed(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (n:Program) RETURN n AS element NEXT YIELD element RETURN element"
+        )
+        assert [type(clause).__name__ for clause in statement.clauses] == [
+            "Match",
+            "Return",
+            "Next",
+            "Yield",
+            "Return",
+        ]
+        assert isinstance(statement.clauses[2], Next)
+        assert isinstance(statement.clauses[3], Yield)
+
+    def test_next_can_precede_finish(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) NEXT FINISH")
+        assert [type(clause).__name__ for clause in statement.clauses] == [
+            "Match",
+            "Next",
+            "Finish",
+        ]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "NEXT MATCH (n:Program) RETURN n",
+            "MATCH (n:Program) RETURN n NEXT",
+            "MATCH (n:Program) RETURN n NEXT NEXT RETURN n",
+            "MATCH (n:Program) NEXT RETURN n",
+            "MATCH (n:Program) FINISH NEXT MATCH (m:Program) RETURN m",
+        ],
+    )
+    def test_next_placement_is_rejected(self, text: str) -> None:
+        with pytest.raises(QuerySyntaxError):
+            Parser.parse_statement(text)
+
+    def test_yield_outside_next_is_rejected(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="YIELD must follow NEXT"):
+            Parser.parse_statement("MATCH (n:Program) YIELD n RETURN n")
+
+    def test_finish_can_close_a_write_segment(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) DETACH DELETE n FINISH")
+        assert isinstance(statement.clauses[-1], Finish)
+
+    def test_finish_rejects_a_following_return(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="FINISH"):
+            Parser.parse_statement("MATCH (n:Program) FINISH RETURN n")
+
+    def test_finish_rejects_a_following_next(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="FINISH"):
+            Parser.parse_statement("MATCH (n:Program) FINISH NEXT RETURN n")

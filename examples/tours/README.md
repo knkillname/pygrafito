@@ -17,13 +17,14 @@ change that implements it.
 | --- | --- | --- | --- | --- |
 | `01-match.gql` | `MATCH`, `OPTIONAL MATCH`, `MATCH ... WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `type()` | canonical GQL; `type()` is a pygrafito extension | Canonical surface; Extensions | `adopt-gql-query-frontend` (migrated) |
 | `02-write.gql` | `INSERT`, `MERGE`, `SET`, `DETACH DELETE`, `labels()`, `type()` | `INSERT` and `SET` are canonical GQL; `MERGE`, `labels()`, and `type()` are pygrafito extensions | Data modification; Extensions | `adopt-gql-query-frontend` (migrated) |
-| `03-compose.gql` | `UNWIND`, `WITH`, implicit grouping, `MERGE` | `UNWIND` is a synthetic alias for `FOR`; `WITH`, implicit grouping, and `MERGE` are pygrafito extensions | Synthetic aliases; Extensions | `add-gql-composition` |
+| `03-compose.gql` | `FOR`, `WITH ORDINALITY`, `LET`, `GROUP BY`, `NEXT`, `YIELD`, `FINISH`, `UNWIND`, `MERGE` | canonical GQL composition; `UNWIND`, `WITH`, and `MERGE` are pygrafito extensions | Canonical surface; Synthetic aliases; Extensions | `add-gql-composition` (implemented) |
 | `04-paths.gql` | `{n,m}`, `MATCH TRAIL`, `<->`, `~>`, path variables, `type()` | canonical GQL; `type()` is a pygrafito extension | Canonical surface; Path modes; Edge directions | implemented |
 
-The tours still avoid the gated composition surface: no `LET`, `NEXT`, `GROUP BY`, or
-`RETURN NO BINDINGS`. They use `//` and `--` comments, the single-dash arrows are canonical, and
-the path tour uses the closed `{n,m}` quantifier and explicit path modes. A test enforces the
-forbidden set.
+The tours use the composition surface now that `LET`, `NEXT`, `YIELD`, `GROUP BY`, `FINISH`, and
+`WITH ORDINALITY` are implemented. They still avoid open-ended quantifiers and the expression
+vocabulary. They use `//` and `--` comments, the single-dash arrows are canonical, and the path
+tour uses the closed `{n,m}` quantifier and explicit path modes. A test enforces the remaining
+deferred set.
 
 `03-compose.gql` binds its `UNWIND` rows with `.param`, because the current release does not accept
 map literals as list elements. That is a limitation of the current dialect, not of the profile.

@@ -484,10 +484,11 @@ class TestTours:
         for construct in ("MERGE", "WITH", "type()"):
             assert construct in catalog
 
-    def test_target_only_syntax_is_absent(self) -> None:
-        """Reject syntax that the current release cannot execute."""
+    def test_deferred_syntax_is_absent(self) -> None:
+        """Reject syntax that the current release still cannot execute."""
         forbidden = re.compile(
-            r"\b(?:LET|NEXT)\b|\bGROUP\s+BY\b|\bRETURN\s+NO\s+BINDINGS\b",
+            r"\b(?:CASE|CALL)\b|\bEXISTS\s*\{|\bWITH\s*\*"
+            r"|\[\s*\*\s*\]|\[\s*\+\s*\]|\{\s*\d+\s*,\s*\}|\{\s*,\s*\d+\s*\}",
             flags=re.MULTILINE,
         )
         for path in sorted(self.DIRECTORY.glob("*.gql")):

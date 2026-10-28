@@ -481,21 +481,6 @@
       ]
     },
     {
-      "name": "for-ordinality-is-gated",
-      "feature": "for-with-ordinality-offset",
-      "fixture": "tron-labels",
-      "query": "FOR value IN [1, 2] WITH ORDINALITY index RETURN index",
-      "expect": {
-        "error": {
-          "type": "QuerySemanticError",
-          "contains": "add-gql-composition"
-        }
-      },
-      "tags": [
-        "gated"
-      ]
-    },
-    {
       "name": "filter-stage-keeps-true-rows",
       "feature": "filter",
       "fixture": "tron-labels",
@@ -1068,21 +1053,6 @@
       ]
     },
     {
-      "name": "return-no-bindings-is-gated",
-      "feature": "return-with-distinct-all-or",
-      "fixture": "tron-labels",
-      "query": "MATCH (n) RETURN NO BINDINGS",
-      "expect": {
-        "error": {
-          "type": "QuerySemanticError",
-          "contains": "add-gql-composition"
-        }
-      },
-      "tags": [
-        "gated"
-      ]
-    },
-    {
       "name": "nulls-first-explicit",
       "feature": "order-by-with-null-ordering",
       "fixture": "tron-labels",
@@ -1534,6 +1504,638 @@
       },
       "tags": [
         "canonical"
+      ]
+    },
+    {
+      "name": "for-ordinality-binds-one-based-position",
+      "feature": "for-with-ordinality-offset",
+      "fixture": "tron-labels",
+      "query": "FOR value IN [1, 2] WITH ORDINALITY index RETURN value, index ORDER BY value",
+      "expect": {
+        "rows": [
+          {
+            "value": 1,
+            "index": 1
+          },
+          {
+            "value": 2,
+            "index": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "for-offset-binds-zero-based-position",
+      "feature": "for-with-ordinality-offset",
+      "fixture": "tron-labels",
+      "query": "FOR value IN [1, 2] WITH OFFSET index RETURN value, index ORDER BY value",
+      "expect": {
+        "rows": [
+          {
+            "value": 1,
+            "index": 0
+          },
+          {
+            "value": 2,
+            "index": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "unwind-accepts-ordinality",
+      "feature": "for-with-ordinality-offset",
+      "fixture": "tron-labels",
+      "query": "UNWIND [10, 20] AS value WITH ORDINALITY index RETURN value, index ORDER BY value",
+      "expect": {
+        "rows": [
+          {
+            "value": 10,
+            "index": 1
+          },
+          {
+            "value": 20,
+            "index": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "let-adds-a-binding",
+      "feature": "let",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) LET following = n.cycles + 1 RETURN following",
+      "expect": {
+        "rows": [
+          {
+            "following": 38
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "let-definitions-evaluate-left-to-right",
+      "feature": "let",
+      "fixture": "tron-labels",
+      "query": "LET base = 36, following = base + 1 RETURN following",
+      "expect": {
+        "rows": [
+          {
+            "following": 37
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "let-is-a-row-source",
+      "feature": "let",
+      "fixture": "tron-labels",
+      "query": "LET value = 1 RETURN value",
+      "expect": {
+        "rows": [
+          {
+            "value": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "let-direct-variable-keeps-its-kind",
+      "feature": "let",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) LET element = n MATCH (element)-[:TRUSTS]->(m) RETURN m.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "let-shadowing-is-rejected",
+      "feature": "let",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) LET n = 1 RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "already bound"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-carries-an-intermediate-return",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) RETURN n AS element NEXT RETURN element.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-yield-selects-and-renames",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles NEXT YIELD name AS designation RETURN designation ORDER BY designation",
+      "expect": {
+        "rows": [
+          {
+            "designation": "Master Control Program"
+          },
+          {
+            "designation": "Quorra"
+          },
+          {
+            "designation": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-without-yield-passes-all-columns",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles NEXT RETURN name, cycles ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program",
+            "cycles": 50
+          },
+          {
+            "name": "Quorra",
+            "cycles": 37
+          },
+          {
+            "name": "Tron",
+            "cycles": 40
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-write-only-segment-passes-bindings",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "CREATE (n:Program {designation: 'Rinzler'}) NEXT MATCH (n) RETURN n.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Rinzler"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-segment-reads-an-earlier-write",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "CREATE (n:Program {designation: 'Clu'}) NEXT MATCH (m:Program {designation: 'Clu'}) RETURN m.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Clu"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-supports-mid-query-grouping",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.cycles AS cycles, count(*) AS total GROUP BY n.cycles NEXT FILTER total >= 1 RETURN cycles, total ORDER BY cycles",
+      "expect": {
+        "rows": [
+          {
+            "cycles": 37,
+            "total": 1
+          },
+          {
+            "cycles": 40,
+            "total": 1
+          },
+          {
+            "cycles": 50,
+            "total": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-read-segment-requires-a-result",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) NEXT RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "read segment"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "next-cannot-follow-finish",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) FINISH NEXT MATCH (m:Program) RETURN m",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "NEXT cannot follow FINISH"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "yield-unknown-column-is-rejected",
+      "feature": "next",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name NEXT YIELD missing RETURN name",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "not bound"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "finish-ends-a-write-without-a-result",
+      "feature": "finish",
+      "fixture": "tron-labels",
+      "query": "CREATE (n:Program {designation: 'Clu'}) FINISH",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "finish-ends-a-read-without-a-result",
+      "feature": "finish",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) FINISH",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "finish-follows-a-write-segment",
+      "feature": "finish",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) NEXT FINISH",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "finish-alone-is-rejected",
+      "feature": "finish",
+      "fixture": "tron-labels",
+      "query": "FINISH",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "read or write clause"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-groups-and-counts",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.cycles AS cycles, count(*) AS total GROUP BY n.cycles ORDER BY cycles",
+      "expect": {
+        "rows": [
+          {
+            "cycles": 37,
+            "total": 1
+          },
+          {
+            "cycles": 40,
+            "total": 1
+          },
+          {
+            "cycles": 50,
+            "total": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-key-need-not-be-returned",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN count(*) AS total GROUP BY n.cycles ORDER BY total",
+      "expect": {
+        "rows": [
+          {
+            "total": 1
+          },
+          {
+            "total": 1
+          },
+          {
+            "total": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-without-aggregates-deduplicates",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.cycles GROUP BY n.cycles ORDER BY n.cycles",
+      "expect": {
+        "rows": [
+          {
+            "n.cycles": 37
+          },
+          {
+            "n.cycles": 40
+          },
+          {
+            "n.cycles": 50
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-empty-key-list",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN count(*) AS total GROUP BY ()",
+      "expect": {
+        "rows": [
+          {
+            "total": 3
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-empty-input-has-no-groups",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Missing) RETURN n.cycles AS cycles, count(*) AS total GROUP BY n.cycles",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-empty-input-with-empty-key-list",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Missing) RETURN count(*) AS total GROUP BY ()",
+      "expect": {
+        "rows": [
+          {
+            "total": 0
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-distinct-is-accepted",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN DISTINCT n.cycles GROUP BY n.cycles ORDER BY n.cycles",
+      "expect": {
+        "rows": [
+          {
+            "n.cycles": 37
+          },
+          {
+            "n.cycles": 40
+          },
+          {
+            "n.cycles": 50
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-uses-a-let-binding",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) LET cycles = n.cycles RETURN count(*) AS total GROUP BY cycles ORDER BY total",
+      "expect": {
+        "rows": [
+          {
+            "total": 1
+          },
+          {
+            "total": 1
+          },
+          {
+            "total": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-return-star-is-rejected",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN * GROUP BY n.cycles",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "RETURN *"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-no-bindings-is-rejected",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN NO BINDINGS GROUP BY n.cycles",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "NO BINDINGS"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "group-by-non-key-expression-is-rejected",
+      "feature": "group-by",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation, count(*) AS total GROUP BY n.cycles",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "grouping key"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "return-no-bindings-projects-empty-rows",
+      "feature": "return-no-bindings",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN NO BINDINGS",
+      "expect": {
+        "rows": [
+          {},
+          {},
+          {}
+        ]
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "return-no-bindings-empty-input",
+      "feature": "return-no-bindings",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Missing) RETURN NO BINDINGS",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "return-no-bindings-in-a-write",
+      "feature": "return-no-bindings",
+      "fixture": "tron-labels",
+      "query": "CREATE (n:Program {designation: 'Clu'}) RETURN NO BINDINGS",
+      "expect": {
+        "rows": [
+          {}
+        ]
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "return-no-bindings-rejects-modifiers",
+      "feature": "return-no-bindings",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN NO BINDINGS ORDER BY n.designation",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "modifiers"
+        }
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "return-no-bindings-must-be-final",
+      "feature": "return-no-bindings",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN NO BINDINGS NEXT RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "final clause"
+        }
+      },
+      "tags": [
+        "extension"
       ]
     }
   ]

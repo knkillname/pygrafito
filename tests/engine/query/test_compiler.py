@@ -500,3 +500,59 @@ class TestDynamicPatternValues:
         )
         assert "0" in compiled.sql
         assert compiled.arguments == ("Program",)
+
+
+class TestCompositionPlanPipeline:
+    """Verify composition operators preserve the source pipeline order."""
+
+    def plan(self, text: str) -> Plan:
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        return PlanBuilder.build(analysis)
+
+    def test_interleaved_write_and_read(self) -> None:
+        plan = self.plan(
+            "CREATE (n:Program {designation: 'Rinzler'}) "
+            "NEXT MATCH (m:Program {designation: 'Rinzler'}) RETURN m"
+        )
+        assert plan.operators == (
+            PlanOperator.CREATE,
+            PlanOperator.NEXT,
+            PlanOperator.MATCH,
+            PlanOperator.PROJECT,
+        )
+        assert [type(entry.operation).__name__ for entry in plan.entries] == [
+            "WriteStage",
+            "NextBoundary",
+            "MatchStage",
+        ]
+
+    def test_segment_return_and_yield_boundaries(self) -> None:
+        plan = self.plan("MATCH (n:Program) RETURN n AS element NEXT YIELD element RETURN element")
+        assert plan.operators == (
+            PlanOperator.MATCH,
+            PlanOperator.RETURN,
+            PlanOperator.PROJECT,
+            PlanOperator.NEXT,
+            PlanOperator.YIELD,
+            PlanOperator.PROJECT,
+        )
+
+    def test_let_operator(self) -> None:
+        plan = self.plan("MATCH (n:Program) LET cycles = n.cycles RETURN cycles")
+        assert plan.operators == (
+            PlanOperator.MATCH,
+            PlanOperator.LET,
+            PlanOperator.PROJECT,
+        )
+
+    def test_group_by_adds_an_aggregate_operator(self) -> None:
+        plan = self.plan("MATCH (n:Program) RETURN n.cycles GROUP BY n.cycles")
+        assert plan.operators == (
+            PlanOperator.MATCH,
+            PlanOperator.PROJECT,
+            PlanOperator.AGGREGATE,
+        )
+
+    def test_finish_operator(self) -> None:
+        plan = self.plan("MATCH (n:Program) FINISH")
+        assert plan.operators == (PlanOperator.MATCH, PlanOperator.FINISH)

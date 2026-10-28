@@ -10,11 +10,13 @@ from pygrafito.engine.query.ast import (
     Literal,
     Match,
     NodePattern,
+    OrdinalityKind,
     Parameter,
     PathMode,
     PathPattern,
     Return,
     ReturnItem,
+    Set,
     Statement,
     Variable,
 )
@@ -22,11 +24,16 @@ from pygrafito.engine.query.parser import Parser
 from pygrafito.engine.query.plan import PlanBuilder
 from pygrafito.engine.query.semantic import (
     Analysis,
+    LetStage,
     MatchStage,
+    NextBoundary,
     OptionalMatchStage,
     SemanticAnalyzer,
     UnwindStage,
     VariableKind,
+    WithStage,
+    WriteStage,
+    YieldStage,
 )
 from pygrafito.model import QuerySemanticError, QuerySyntaxError
 
@@ -808,3 +815,90 @@ class TestPlanCarriesPathModes:
         if not isinstance(stage, MatchStage):
             raise AssertionError("expected a match stage")
         assert stage.patterns[0].mode is PathMode.TRAIL
+
+
+class TestOperationPipeline:
+    """Verify the analysed operations preserve source order and composition."""
+
+    def analyze(self, text: str) -> Analysis:
+        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    def test_write_stage_sits_between_read_stages(self) -> None:
+        analysis = self.analyze(
+            "MATCH (n:Program) SET n.cycles = 1 NEXT MATCH (m:Program) RETURN m"
+        )
+        assert [type(operation).__name__ for operation in analysis.operations] == [
+            "MatchStage",
+            "WriteStage",
+            "NextBoundary",
+            "MatchStage",
+        ]
+        write = analysis.operations[1]
+        if not isinstance(write, WriteStage):
+            raise AssertionError("expected a write stage")
+        assert isinstance(write.clause, Set)
+        assert len(analysis.stages) == 2
+        assert len(analysis.write_clauses) == 1
+
+    def test_intermediate_return_is_a_segment_projection(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) RETURN n AS element NEXT RETURN element")
+        stage = analysis.stages[1]
+        if not isinstance(stage, WithStage):
+            raise AssertionError("expected a projection stage")
+        assert stage.segment_return is True
+        assert stage.items[0].name == "element"
+        assert analysis.columns == ("element",)
+
+    def test_yield_stage_resets_the_scope(self) -> None:
+        analysis = self.analyze(
+            "MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles "
+            "NEXT YIELD name RETURN name"
+        )
+        stage = analysis.stages[2]
+        if not isinstance(stage, YieldStage):
+            raise AssertionError("expected a yield stage")
+        assert [item.name for item in stage.items] == ["name"]
+        assert set(analysis.variable_kinds) == {"name"}
+
+    def test_let_stage_preserves_a_direct_variable_kind(self) -> None:
+        analysis = self.analyze(
+            "MATCH (n:Program) LET element = n MATCH (element)-[:TRUSTS]->(m) RETURN m"
+        )
+        stage = analysis.stages[1]
+        if not isinstance(stage, LetStage):
+            raise AssertionError("expected a LET stage")
+        assert stage.assignments[0].name == "element"
+        assert analysis.variable_kinds["element"] is VariableKind.NODE
+
+    def test_unwind_stage_carries_the_ordinality(self) -> None:
+        analysis = self.analyze("FOR value IN [1, 2] WITH ORDINALITY index RETURN value, index")
+        stage = analysis.stages[0]
+        if not isinstance(stage, UnwindStage):
+            raise AssertionError("expected an UNWIND stage")
+        assert stage.index == "index"
+        assert stage.ordinality is OrdinalityKind.ORDINALITY
+
+    def test_explicit_grouping_is_recorded(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) RETURN n.cycles GROUP BY n.cycles")
+        assert analysis.grouping_explicit is True
+        assert len(analysis.grouping) == 1
+
+    def test_finish_has_no_result_projection(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) FINISH")
+        assert analysis.finish is True
+        assert analysis.return_clause is None
+        assert analysis.columns == ()
+        assert analysis.items == ()
+
+    def test_no_bindings_has_an_empty_projection(self) -> None:
+        analysis = self.analyze("MATCH (n:Program) RETURN NO BINDINGS")
+        assert analysis.columns == ()
+        assert analysis.items == ()
+        assert analysis.return_clause is not None
+        assert analysis.return_clause.no_bindings is True
+
+    def test_next_boundary_is_part_of_the_pipeline(self) -> None:
+        analysis = self.analyze(
+            "MATCH (n:Program) RETURN n AS element NEXT YIELD element RETURN element"
+        )
+        assert any(isinstance(operation, NextBoundary) for operation in analysis.operations)

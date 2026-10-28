@@ -40,6 +40,13 @@ database, single process, warm connection.
 | Label filter (no bound endpoint) | 0.81 ms | 0.65 ms | 1.2x |
 | Direction filter (indexed start) | 42.53 ms | 0.41 ms | 104.9x |
 | `find_nodes` lookup | 9.84 ms | 0.20 ms | 49.2x |
+| Composition (`LET` + `GROUP BY` + `NEXT`) | 22.57 ms | 20.28 ms | 1.1x |
+
+The composition row exercises a `LET`, an intermediate `RETURN ... GROUP BY`, and a
+`NEXT YIELD` segment in one statement. It is one extra operation per segment and
+one grouped scan, so the measured cost is within run-to-run noise of the
+equivalent `WITH` pipeline; the ordered pipeline does not add a second
+transaction or a second budget.
 
 | Write | No index | Indexed |
 | --- | ---: | ---: |

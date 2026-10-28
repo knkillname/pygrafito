@@ -21,6 +21,7 @@ from pygrafito.engine.query.ast import (
     Literal,
     Match,
     NodePattern,
+    OrdinalityKind,
     Parameter,
     PathPattern,
     Property,
@@ -41,12 +42,16 @@ from pygrafito.engine.query.plan import Plan
 from pygrafito.engine.query.results import QueryResult, Row
 from pygrafito.engine.query.semantic import (
     FilterStage,
+    LetStage,
     MatchStage,
+    NextBoundary,
     OptionalMatchStage,
     ReturnColumn,
     SortSpec,
     UnwindStage,
     WithStage,
+    WriteStage,
+    YieldStage,
 )
 from pygrafito.engine.query.values import (
     Aggregates,
@@ -360,19 +365,42 @@ class QueryExecutor:
         """
         analysis = plan.analysis
         analysis.require_parameters(parameters)
-        if not plan.stages:
+        if not plan.entries:
             return ()
         snapshots = RepositorySnapshots(self._nodes, self._relationships)
         evaluator = ExpressionEvaluator(ScalarFunctions(snapshots))
         resolver = PatternValueResolver(evaluator, parameters, lenient=True)
         lines: list[str] = []
-        for plan_stage in plan.stages:
-            lines.extend(self._explain_stage(plan_stage.stage, parameters, resolver))
+        for entry in plan.entries:
+            operation = entry.operation
+            if isinstance(operation, NextBoundary):
+                lines.append("NEXT")
+                continue
+            if isinstance(operation, LetStage):
+                lines.append("LET")
+                continue
+            if isinstance(operation, YieldStage):
+                lines.append("YIELD")
+                continue
+            if isinstance(operation, WriteStage):
+                continue
+            if isinstance(operation, WithStage) and operation.segment_return:
+                lines.append("RETURN")
+                continue
+            lines.extend(self._explain_stage(operation, parameters, resolver))
+        if plan.analysis.finish:
+            lines.append("FINISH")
         return tuple(lines)
 
     def _explain_stage(
         self,
-        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage,
+        stage: MatchStage
+        | OptionalMatchStage
+        | UnwindStage
+        | WithStage
+        | FilterStage
+        | LetStage
+        | YieldStage,
         parameters: Mapping[str, QueryValue],
         resolver: PatternValueResolver,
     ) -> tuple[str, ...]:
@@ -399,6 +427,8 @@ class QueryExecutor:
         """
         if isinstance(stage, UnwindStage):
             return (f"UNWIND {stage.variable}",)
+        if isinstance(stage, (LetStage, YieldStage)):
+            return ()
         if isinstance(stage, WithStage):
             return ()
         if isinstance(stage, FilterStage):
@@ -708,10 +738,28 @@ class QueryExecutor:
         functions = ScalarFunctions(snapshots)
         evaluator = ExpressionEvaluator(functions)
         bindings: list[dict[str, QueryValue]] = [{}]
-        for plan_stage in plan.stages:
+        mutations = MutationExecutor(self._nodes, self._relationships)
+        matcher = functools.partial(
+            self._match_merge,
+            evaluator=evaluator,
+            parameters=parameters,
+        )
+        for operation in analysis.operations:
             tracker.check_time()
+            if isinstance(operation, NextBoundary):
+                continue
+            if isinstance(operation, WriteStage):
+                bindings = mutations.apply(
+                    (operation.clause,),
+                    bindings,
+                    evaluator,
+                    parameters,
+                    matcher,
+                )
+                tracker.consume_rows(len(bindings))
+                continue
             bindings = self._run_stage(
-                plan_stage.stage,
+                operation,
                 bindings,
                 evaluator,
                 functions,
@@ -719,21 +767,6 @@ class QueryExecutor:
                 tracker,
             )
             tracker.check_time()
-        mutations = MutationExecutor(self._nodes, self._relationships)
-        if analysis.is_write:
-            matcher = functools.partial(
-                self._match_merge,
-                evaluator=evaluator,
-                parameters=parameters,
-            )
-            bindings = mutations.apply(
-                analysis.write_clauses,
-                bindings,
-                evaluator,
-                parameters,
-                matcher,
-            )
-            tracker.consume_rows(len(bindings))
         if return_clause is None:
             return QueryResult(
                 columns=(),
@@ -762,7 +795,13 @@ class QueryExecutor:
 
     def _run_stage(
         self,
-        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage,
+        stage: MatchStage
+        | OptionalMatchStage
+        | UnwindStage
+        | WithStage
+        | FilterStage
+        | LetStage
+        | YieldStage,
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         functions: ScalarFunctions,
@@ -805,6 +844,10 @@ class QueryExecutor:
             return self._run_unwind_stage(stage, bindings, evaluator, parameters, tracker)
         if isinstance(stage, FilterStage):
             return self._run_filter_stage(stage, bindings, evaluator, parameters, tracker)
+        if isinstance(stage, LetStage):
+            return self._run_let_stage(stage, bindings, evaluator, parameters, tracker)
+        if isinstance(stage, YieldStage):
+            return self._run_yield_stage(stage, bindings, tracker)
         if isinstance(stage, WithStage):
             return self._run_with_stage(
                 stage,
@@ -858,9 +901,13 @@ class QueryExecutor:
             if isinstance(value, str) or not isinstance(value, Sequence):
                 message = "UNWIND requires a list value"
                 raise QueryExecutionError(message)
-            for item in value:
+            for index, item in enumerate(value):
                 tracker.consume_rows()
-                results.append({**binding, stage.variable: item})
+                row = {**binding, stage.variable: item}
+                if stage.index is not None:
+                    position = index if stage.ordinality is OrdinalityKind.OFFSET else index + 1
+                    row[stage.index] = position
+                results.append(row)
         return results
 
     def _run_match_stage(
@@ -1018,6 +1065,86 @@ class QueryExecutor:
         tracker.consume_rows(len(results))
         return results
 
+    def _run_let_stage(
+        self,
+        stage: LetStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+    ) -> list[dict[str, QueryValue]]:
+        """Add row-wise ``LET`` bindings in evaluation order.
+
+        Parameters
+        ----------
+        stage : LetStage
+            Stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            One output row per input row with the new bindings.
+        """
+        results: list[dict[str, QueryValue]] = []
+        for binding in bindings:
+            row = dict(binding)
+            for assignment in stage.assignments:
+                row[assignment.name] = evaluator.evaluate(
+                    assignment.expression,
+                    row,
+                    parameters,
+                )
+            results.append(row)
+        tracker.consume_rows(len(results))
+        return results
+
+    @staticmethod
+    def _run_yield_stage(
+        stage: YieldStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        tracker: BudgetTracker,
+    ) -> list[dict[str, QueryValue]]:
+        """Select and rename columns for a ``YIELD`` stage.
+
+        Parameters
+        ----------
+        stage : YieldStage
+            Stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        tracker : BudgetTracker
+            Budget counters of this execution.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            Rows containing only the yielded columns.
+
+        Raises
+        ------
+        QueryExecutionError
+            If a source column is missing from an input row.
+        """
+        results: list[dict[str, QueryValue]] = []
+        for binding in bindings:
+            row: dict[str, QueryValue] = {}
+            for item in stage.items:
+                if item.source not in binding:
+                    message = f"YIELD column {item.source!r} is not bound"
+                    raise QueryExecutionError(message)
+                row[item.name] = binding[item.source]
+            results.append(row)
+        tracker.consume_rows(len(results))
+        return results
+
     def _run_with_stage(
         self,
         stage: WithStage,
@@ -1049,7 +1176,7 @@ class QueryExecutor:
         list[dict[str, QueryValue]]
             Rows projected into the stage's output scope.
         """
-        if stage.has_aggregates:
+        if stage.has_aggregates or stage.grouping_explicit:
             aggregate_rows = self._aggregate_project(
                 stage.items,
                 stage.grouping,
@@ -1545,7 +1672,7 @@ class QueryExecutor:
             Projected rows before distinct, ordering, and pagination.
         """
         analysis = plan.analysis
-        if analysis.has_aggregates:
+        if analysis.has_aggregates or analysis.grouping_explicit:
             return self._aggregate_project(
                 analysis.items,
                 analysis.grouping,

@@ -49,14 +49,14 @@ rather than ignored.
 ### Requirement: Canonical GQL surface
 
 The profile SHALL designate GQL spellings as canonical for data modification, iteration,
-filtering, binding, composition, grouping, pagination, path quantifiers, label expressions, edge
-directions, and comments. New documentation examples SHALL use the canonical spelling where the
-current release supports it.
+filtering, binding, composition, grouping, projection, pagination, path quantifiers, label
+expressions, edge directions, and comments. New documentation examples SHALL use the canonical
+spelling where the current release supports it.
 
 #### Scenario: Canonical spellings are listed
 
 - **WHEN** a reader inspects the canonical table
-- **THEN** it lists `INSERT`, `FOR`, `FILTER`, `LET`, `NEXT`, `GROUP BY`, `OFFSET`, `SKIP`, `{n,m}`, label expressions, the GQL edge-direction forms, and both GQL comment forms
+- **THEN** it lists `INSERT`, `FOR`, `FILTER`, `LET`, `NEXT`, `YIELD`, `GROUP BY`, `FINISH`, `OFFSET`, `SKIP`, `{n,m}`, label expressions, the GQL edge-direction forms, and both GQL comment forms
 
 #### Scenario: Canonical examples lead
 
@@ -163,9 +163,10 @@ documented default.
 
 ### Requirement: Extensions
 
-The profile SHALL designate `MERGE`, `WITH` aggregation and scope, implicit grouping, and `type()`
-as pygrafito extensions with no GQL equivalent. The profile SHALL state that extensions are not
-claimed as GQL and remain part of the supported compatibility surface.
+The profile SHALL designate `MERGE`, `WITH` aggregation and scope, implicit grouping, `type()`, and
+`RETURN NO BINDINGS` as pygrafito extensions with no GQL equivalent. The profile SHALL state that
+extensions are not claimed as GQL and remain part of the supported compatibility surface.
+`RETURN NO BINDINGS` SHALL name `FINISH` as its canonical no-result alternative.
 
 #### Scenario: Extensions are labeled
 
@@ -174,7 +175,7 @@ claimed as GQL and remain part of the supported compatibility surface.
 
 #### Scenario: Canonical alternative is shown
 
-- **WHEN** an extension has a canonical GQL alternative, such as `GROUP BY` for implicit grouping
+- **WHEN** an extension has a canonical GQL alternative, such as `FINISH` for `RETURN NO BINDINGS` or `GROUP BY` for implicit grouping
 - **THEN** the canonical alternative is documented alongside the extension
 
 ### Requirement: Out-of-profile GQL

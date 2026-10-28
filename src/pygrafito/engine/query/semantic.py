@@ -10,19 +10,25 @@ from types import MappingProxyType
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Clause,
     Create,
     Delete,
     EdgeDirection,
     Expression,
     Filter,
+    Finish,
     FunctionCall,
     IsNull,
+    Let,
+    LetAssignment,
     ListLiteral,
     Literal,
     Match,
     Merge,
+    Next,
     NodePattern,
     Operators,
+    OrdinalityKind,
     Parameter,
     PathMode,
     PathPattern,
@@ -40,6 +46,7 @@ from pygrafito.engine.query.ast import (
     Unwind,
     Variable,
     With,
+    Yield,
 )
 from pygrafito.engine.query.labels import LabelExpressions
 from pygrafito.engine.query.tokens import Span
@@ -159,9 +166,15 @@ class WithStage:
     limit : Expression | None
         Pagination limit expression, or ``None``.
     grouping : tuple[Expression, ...]
-        Implicit grouping-key expressions.
+        Grouping-key expressions of the stage.
     has_aggregates : bool
         Whether any projected expression contains an aggregate.
+    grouping_explicit : bool, optional
+        Whether the grouping keys came from an explicit ``GROUP BY``, by
+        default ``False``.
+    segment_return : bool, optional
+        Whether the stage came from a non-final ``RETURN``, by default
+        ``False``.
     """
 
     items: tuple[ReturnColumn, ...]
@@ -172,6 +185,50 @@ class WithStage:
     limit: Expression | None
     grouping: tuple[Expression, ...]
     has_aggregates: bool
+    grouping_explicit: bool = False
+    segment_return: bool = False
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LetStage:
+    """One ``LET`` stage that adds row-wise bindings.
+
+    Parameters
+    ----------
+    assignments : tuple[LetAssignment, ...]
+        Assignments in evaluation order.
+    """
+
+    assignments: tuple[LetAssignment, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class YieldColumn:
+    """One column selected by a ``YIELD`` stage.
+
+    Parameters
+    ----------
+    source : str
+        Column name in the preceding result.
+    name : str
+        Output column name.
+    """
+
+    source: str
+    name: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class YieldStage:
+    """One ``YIELD`` stage that narrows the visible scope.
+
+    Parameters
+    ----------
+    items : tuple[YieldColumn, ...]
+        Selected columns in output order.
+    """
+
+    items: tuple[YieldColumn, ...]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -184,10 +241,16 @@ class UnwindStage:
         List-valued expression to evaluate per input row.
     variable : str
         Variable bound to each expanded element.
+    index : str | None, optional
+        Variable bound to the element position, by default ``None``.
+    ordinality : OrdinalityKind | None, optional
+        Whether the position is one-based or zero-based, by default ``None``.
     """
 
     expression: Expression
     variable: str
+    index: str | None = None
+    ordinality: OrdinalityKind | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -203,8 +266,31 @@ class FilterStage:
     where: Expression
 
 
-type ReadStage = MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage
+type ReadStage = (
+    MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage | LetStage | YieldStage
+)
 type WriteClause = Create | Merge | Set | Remove | Delete
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class WriteStage:
+    """One write clause in the ordered operation pipeline.
+
+    Parameters
+    ----------
+    clause : WriteClause
+        Write clause applied by the stage.
+    """
+
+    clause: WriteClause
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class NextBoundary:
+    """A segment boundary introduced by ``NEXT``."""
+
+
+type Operation = ReadStage | WriteStage | NextBoundary
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -218,7 +304,7 @@ class Analysis:
     stages : tuple[ReadStage, ...]
         Read stages in source order.
     write_clauses : tuple[WriteClause, ...]
-        Trailing write clauses in source order.
+        Write clauses in source order.
     return_clause : Return | None
         Final return clause of the statement, if any.
     is_write : bool
@@ -234,9 +320,16 @@ class Analysis:
     has_aggregates : bool
         Whether any final projected expression contains an aggregate.
     grouping : tuple[Expression, ...]
-        Implicit grouping-key expressions of the final projection.
+        Grouping-key expressions of the final projection.
     sorts : tuple[SortSpec, ...]
         Resolved final ordering keys in significance order.
+    operations : tuple[Operation, ...]
+        Read stages, writes, and segment boundaries in source order.
+    finish : bool, optional
+        Whether the statement ends with ``FINISH``, by default ``False``.
+    grouping_explicit : bool, optional
+        Whether the final projection uses an explicit ``GROUP BY``, by default
+        ``False``.
     """
 
     statement: Statement
@@ -251,6 +344,9 @@ class Analysis:
     has_aggregates: bool
     grouping: tuple[Expression, ...]
     sorts: tuple[SortSpec, ...]
+    operations: tuple[Operation, ...] = ()
+    finish: bool = False
+    grouping_explicit: bool = False
 
     def require_parameters(self, parameters: Mapping[str, object]) -> None:
         """Reject a parameter mapping that omits a referenced parameter.
@@ -312,10 +408,32 @@ class SemanticAnalyzer:
         Analysis
             Output contract and resolved ordering keys.
         """
-        stages: list[ReadStage] = []
+        operations: list[Operation] = []
         write_clauses: list[WriteClause] = []
         return_clause: Return | None = None
-        for clause in self._statement.clauses:
+        finish = False
+        items: tuple[ReturnColumn, ...] = ()
+        grouping: tuple[Expression, ...] = ()
+        grouping_explicit = False
+        sorts: tuple[SortSpec, ...] = ()
+        has_aggregates = False
+        segment_ended_with_return = False
+        yield_allowed = False
+        clauses = self._statement.clauses
+        for index, clause in enumerate(clauses):
+            if isinstance(clause, Next):
+                operations.append(NextBoundary())
+                yield_allowed = segment_ended_with_return
+                segment_ended_with_return = False
+                continue
+            if isinstance(clause, Yield):
+                if not yield_allowed:
+                    message = "YIELD must follow a segment that ends with RETURN"
+                    raise QuerySemanticError(message)
+                stage = self._bind_yield(clause)
+                operations.append(stage)
+                yield_allowed = False
+                continue
             if isinstance(clause, Match):
                 before = frozenset(self._kinds)
                 for pattern in clause.patterns:
@@ -324,65 +442,85 @@ class SemanticAnalyzer:
                     self._validate_expression(clause.where, aggregates_allowed=False)
                 patterns = self._resolve_path_modes(clause)
                 if clause.optional:
-                    stages.append(
-                        OptionalMatchStage(
-                            patterns=patterns,
-                            where=clause.where,
-                            introduced=frozenset(set(self._kinds) - before),
-                        )
+                    stage = OptionalMatchStage(
+                        patterns=patterns,
+                        where=clause.where,
+                        introduced=frozenset(set(self._kinds) - before),
                     )
                 else:
-                    stages.append(
-                        MatchStage(
-                            patterns=patterns,
-                            where=clause.where,
-                        )
+                    stage = MatchStage(
+                        patterns=patterns,
+                        where=clause.where,
                     )
+                operations.append(stage)
             elif isinstance(clause, With):
-                stages.append(self._bind_with(clause))
+                operations.append(self._bind_with(clause))
             elif isinstance(clause, Unwind):
-                stages.append(self._bind_unwind(clause))
+                operations.append(self._bind_unwind(clause))
             elif isinstance(clause, Filter):
                 self._validate_expression(clause.where, aggregates_allowed=False)
-                stages.append(FilterStage(where=clause.where))
+                operations.append(FilterStage(where=clause.where))
+            elif isinstance(clause, Let):
+                operations.append(self._bind_let(clause))
             elif isinstance(clause, Create):
                 self._bind_create(clause.pattern)
                 write_clauses.append(clause)
+                operations.append(WriteStage(clause))
             elif isinstance(clause, Merge):
                 self._bind_merge(clause)
                 write_clauses.append(clause)
+                operations.append(WriteStage(clause))
             elif isinstance(clause, Set):
                 self._validate_set(clause)
                 write_clauses.append(clause)
+                operations.append(WriteStage(clause))
             elif isinstance(clause, Remove):
                 self._validate_remove(clause)
                 write_clauses.append(clause)
+                operations.append(WriteStage(clause))
             elif isinstance(clause, Delete):
                 self._validate_delete(clause)
                 write_clauses.append(clause)
+                operations.append(WriteStage(clause))
             elif isinstance(clause, Return):
+                if self._is_followed_by_next(clauses, index):
+                    operations.append(self._bind_return_stage(clause))
+                    segment_ended_with_return = True
+                    continue
+                items, grouping, grouping_explicit, sorts, has_aggregates = self._analyze_return(
+                    clause
+                )
                 return_clause = clause
+                segment_ended_with_return = True
+            elif isinstance(clause, Finish):
+                finish = True
+                items = ()
+                grouping = ()
+                grouping_explicit = False
+                sorts = ()
+                has_aggregates = False
             else:
                 message = f"unsupported clause form: {type(clause).__name__}"
                 raise QuerySemanticError(message)
-        items = self._return_columns(return_clause)
-        has_aggregates = any(item.aggregate for item in items)
-        grouping = tuple(item.expression for item in items if not item.aggregate)
-        if has_aggregates:
-            self._validate_grouping(items, grouping)
-        sorts: tuple[SortSpec, ...] = ()
-        if return_clause is not None:
-            self._validate_pagination(return_clause.skip, "SKIP")
-            self._validate_pagination(return_clause.limit, "LIMIT")
-            sorts = self._resolve_sorts(
-                return_clause.order_by,
-                items,
-                grouping,
-                has_aggregates,
+        read_stages = tuple(
+            operation
+            for operation in operations
+            if isinstance(
+                operation,
+                (
+                    MatchStage,
+                    OptionalMatchStage,
+                    UnwindStage,
+                    WithStage,
+                    FilterStage,
+                    LetStage,
+                    YieldStage,
+                ),
             )
+        )
         return Analysis(
             statement=self._statement,
-            stages=tuple(stages),
+            stages=read_stages,
             write_clauses=tuple(write_clauses),
             return_clause=return_clause,
             is_write=bool(write_clauses),
@@ -393,7 +531,28 @@ class SemanticAnalyzer:
             has_aggregates=has_aggregates,
             grouping=grouping,
             sorts=sorts,
+            operations=tuple(operations),
+            finish=finish,
+            grouping_explicit=grouping_explicit,
         )
+
+    @staticmethod
+    def _is_followed_by_next(clauses: tuple[Clause, ...], index: int) -> bool:
+        """Report whether a clause is followed by ``NEXT``.
+
+        Parameters
+        ----------
+        clauses : tuple[Clause, ...]
+            Statement clauses.
+        index : int
+            Position of the clause being checked.
+
+        Returns
+        -------
+        bool
+            ``True`` when the next clause is ``NEXT``.
+        """
+        return index + 1 < len(clauses) and isinstance(clauses[index + 1], Next)
 
     def _return_columns(self, clause: Return | None) -> tuple[ReturnColumn, ...]:
         """Analyse the projection of an optional ``RETURN`` clause.
@@ -410,6 +569,8 @@ class SemanticAnalyzer:
         """
         if clause is None:
             return ()
+        if clause.no_bindings:
+            return ()
         if clause.star:
             items = tuple(
                 ReturnColumn(
@@ -425,6 +586,264 @@ class SemanticAnalyzer:
         items = tuple(self._column(item) for item in clause.items)
         self._require_unique_columns(items)
         return items
+
+    def _analyze_return(
+        self,
+        clause: Return,
+    ) -> tuple[
+        tuple[ReturnColumn, ...],
+        tuple[Expression, ...],
+        bool,
+        tuple[SortSpec, ...],
+        bool,
+    ]:
+        """Analyse one final ``RETURN`` projection.
+
+        Parameters
+        ----------
+        clause : Return
+            Clause to analyse.
+
+        Returns
+        -------
+        tuple[tuple[ReturnColumn, ...], tuple[Expression, ...], bool, tuple[SortSpec, ...], bool]
+            Projection columns, grouping keys, whether grouping is explicit,
+            ordering keys, and whether the projection contains aggregates.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the projection or its grouping is invalid.
+        """
+        if clause.no_bindings:
+            if clause.distinct or clause.star or clause.group_by is not None:
+                message = "RETURN NO BINDINGS does not accept modifiers or GROUP BY"
+                raise QuerySemanticError(message)
+            if clause.order_by or clause.skip is not None or clause.limit is not None:
+                message = "RETURN NO BINDINGS does not accept ordering or pagination"
+                raise QuerySemanticError(message)
+            return (), (), False, (), False
+        items = self._return_columns(clause)
+        has_aggregates = any(item.aggregate for item in items)
+        grouping, grouping_explicit = self._grouping_for(clause, items)
+        self._validate_projection_grouping(
+            clause,
+            items,
+            grouping,
+            grouping_explicit,
+            has_aggregates,
+        )
+        self._validate_pagination(clause.skip, "SKIP")
+        self._validate_pagination(clause.limit, "LIMIT")
+        sorts = self._resolve_sorts(
+            clause.order_by,
+            items,
+            grouping,
+            has_aggregates,
+        )
+        return items, grouping, grouping_explicit, sorts, has_aggregates
+
+    def _bind_return_stage(self, clause: Return) -> WithStage:
+        """Analyse a non-final ``RETURN`` as a projection stage.
+
+        Parameters
+        ----------
+        clause : Return
+            Return clause followed by ``NEXT``.
+
+        Returns
+        -------
+        WithStage
+            Projection stage that resets the visible scope.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the projection, grouping, or pagination is invalid.
+        """
+        if clause.no_bindings:
+            message = "RETURN NO BINDINGS must be the final clause"
+            raise QuerySemanticError(message)
+        items, grouping, grouping_explicit, sorts, has_aggregates = self._analyze_return(clause)
+        self._kinds = self._projected_kinds(items)
+        return WithStage(
+            items=items,
+            where=None,
+            distinct=clause.distinct,
+            order_by=sorts,
+            skip=clause.skip,
+            limit=clause.limit,
+            grouping=grouping,
+            has_aggregates=has_aggregates,
+            grouping_explicit=grouping_explicit,
+            segment_return=True,
+        )
+
+    def _grouping_for(
+        self,
+        clause: Return,
+        items: tuple[ReturnColumn, ...],
+    ) -> tuple[tuple[Expression, ...], bool]:
+        """Resolve the grouping keys of one ``RETURN`` projection.
+
+        Parameters
+        ----------
+        clause : Return
+            Return clause being analysed.
+        items : tuple[ReturnColumn, ...]
+            Analysed projection columns.
+
+        Returns
+        -------
+        tuple[tuple[Expression, ...], bool]
+            Grouping keys and whether they came from an explicit clause.
+        """
+        if clause.group_by is None:
+            return tuple(item.expression for item in items if not item.aggregate), False
+        keys: list[Expression] = []
+        seen: set[tuple[object, ...]] = set()
+        for key in clause.group_by:
+            marker = self._expression_key(key)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            keys.append(key)
+        return tuple(keys), True
+
+    def _validate_projection_grouping(
+        self,
+        clause: Return,
+        items: tuple[ReturnColumn, ...],
+        grouping: tuple[Expression, ...],
+        grouping_explicit: bool,
+        has_aggregates: bool,
+    ) -> None:
+        """Validate explicit and implicit grouping for a projection.
+
+        Parameters
+        ----------
+        clause : Return
+            Return clause being analysed.
+        items : tuple[ReturnColumn, ...]
+            Analysed projection columns.
+        grouping : tuple[Expression, ...]
+            Grouping-key expressions.
+        grouping_explicit : bool
+            Whether the keys came from an explicit ``GROUP BY``.
+        has_aggregates : bool
+            Whether the projection contains aggregates.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the grouping and projection do not agree.
+        """
+        if clause.group_by is not None and (clause.star or clause.no_bindings):
+            message = "RETURN * and RETURN NO BINDINGS cannot be combined with GROUP BY"
+            raise QuerySemanticError(message)
+        if grouping_explicit:
+            for key in grouping:
+                self._validate_expression(key, aggregates_allowed=False)
+            if not grouping and (not has_aggregates or any(not item.aggregate for item in items)):
+                message = "GROUP BY () requires at least one aggregate and no non-aggregate item"
+                raise QuerySemanticError(message)
+            keys = {self._expression_key(key) for key in grouping}
+            for item in items:
+                if item.aggregate:
+                    continue
+                if self._expression_key(item.expression) not in keys:
+                    message = "a non-aggregate RETURN expression must be a grouping key"
+                    raise QuerySemanticError(message)
+        if has_aggregates:
+            self._validate_grouping(items, grouping)
+
+    def _bind_let(self, clause: Let) -> LetStage:
+        """Analyse a ``LET`` clause and extend the visible scope.
+
+        Parameters
+        ----------
+        clause : Let
+            Clause to analyse.
+
+        Returns
+        -------
+        LetStage
+            Analysed stage carrying the ordered assignments.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a name is already bound, repeated in the clause, or the
+            expression contains an aggregate.
+        """
+        seen: set[str] = set()
+        for assignment in clause.assignments:
+            if assignment.name in self._kinds or assignment.name in seen:
+                message = f"variable {assignment.name!r} is already bound"
+                raise QuerySemanticError(message)
+            seen.add(assignment.name)
+            self._validate_expression(assignment.expression, aggregates_allowed=False)
+            if isinstance(assignment.expression, Variable):
+                kind = self._kinds.get(assignment.expression.name, VariableKind.SCALAR)
+            else:
+                kind = VariableKind.SCALAR
+            self._kinds[assignment.name] = kind
+        return LetStage(assignments=clause.assignments)
+
+    def _bind_yield(self, clause: Yield) -> YieldStage:
+        """Analyse a ``YIELD`` projection and reset the visible scope.
+
+        Parameters
+        ----------
+        clause : Yield
+            Clause to analyse.
+
+        Returns
+        -------
+        YieldStage
+            Analysed projection stage.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a column is unknown or an output name is repeated.
+        """
+        columns: list[YieldColumn] = []
+        seen: set[str] = set()
+        for item in clause.items:
+            if item.name not in self._kinds:
+                message = f"YIELD column {item.name!r} is not bound"
+                raise QuerySemanticError(message)
+            name = item.name if item.alias is None else item.alias
+            if name in seen:
+                message = f"duplicate YIELD column {name!r}"
+                raise QuerySemanticError(message)
+            seen.add(name)
+            columns.append(YieldColumn(source=item.name, name=name))
+        self._kinds = {column.name: self._kinds[column.source] for column in columns}
+        return YieldStage(items=tuple(columns))
+
+    def _projected_kinds(self, items: tuple[ReturnColumn, ...]) -> dict[str, VariableKind]:
+        """Return the scope introduced by a projection.
+
+        Parameters
+        ----------
+        items : tuple[ReturnColumn, ...]
+            Projected columns.
+
+        Returns
+        -------
+        dict[str, VariableKind]
+            Column name to preserved kind.
+        """
+        return {
+            item.name: (
+                self._kinds.get(item.expression.name, VariableKind.SCALAR)
+                if isinstance(item.expression, Variable)
+                else VariableKind.SCALAR
+            )
+            for item in items
+        }
 
     def _bind_with(self, clause: With) -> WithStage:
         """Analyse a ``WITH`` stage and replace the visible scope.
@@ -506,12 +925,26 @@ class SemanticAnalyzer:
         if clause.variable in self._kinds:
             message = f"variable {clause.variable!r} is already bound"
             raise QuerySemanticError(message)
+        if clause.index is not None:
+            if clause.index == clause.variable:
+                message = "the ordinality variable must differ from the element variable"
+                raise QuerySemanticError(message)
+            if clause.index in self._kinds:
+                message = f"variable {clause.index!r} is already bound"
+                raise QuerySemanticError(message)
         if isinstance(clause.expression, Literal) and clause.expression.value is not None:
             message = "UNWIND requires a list expression"
             raise QuerySemanticError(message)
         self._validate_expression(clause.expression, aggregates_allowed=False)
         self._kinds[clause.variable] = VariableKind.SCALAR
-        return UnwindStage(expression=clause.expression, variable=clause.variable)
+        if clause.index is not None:
+            self._kinds[clause.index] = VariableKind.SCALAR
+        return UnwindStage(
+            expression=clause.expression,
+            variable=clause.variable,
+            index=clause.index,
+            ordinality=clause.ordinality,
+        )
 
     def _bind_merge(self, clause: Merge) -> None:
         """Analyse a ``MERGE`` clause and bind its pattern variables.
@@ -1609,13 +2042,19 @@ class SemanticAnalyzer:
 __all__ = [
     "Analysis",
     "FilterStage",
+    "LetStage",
     "MatchStage",
+    "NextBoundary",
     "OptionalMatchStage",
     "ReadStage",
     "ReturnColumn",
     "SemanticAnalyzer",
     "SortSpec",
+    "UnwindStage",
     "VariableKind",
     "WithStage",
     "WriteClause",
+    "WriteStage",
+    "YieldColumn",
+    "YieldStage",
 ]

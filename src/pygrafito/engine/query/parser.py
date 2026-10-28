@@ -14,6 +14,7 @@ from pygrafito.engine.query.ast import (
     EdgeDirection,
     Expression,
     Filter,
+    Finish,
     FunctionCall,
     IsNull,
     LabelAnd,
@@ -24,12 +25,16 @@ from pygrafito.engine.query.ast import (
     LabelOr,
     LabelRemoval,
     LabelWildcard,
+    Let,
+    LetAssignment,
     ListLiteral,
     Literal,
     Match,
     Merge,
+    Next,
     NodePattern,
     Operators,
+    OrdinalityKind,
     Parameter,
     PathMode,
     PathPattern,
@@ -49,6 +54,8 @@ from pygrafito.engine.query.ast import (
     Unwind,
     Variable,
     With,
+    Yield,
+    YieldItem,
 )
 from pygrafito.engine.query.gated import Gated
 from pygrafito.engine.query.labels import LabelExpressions
@@ -87,6 +94,8 @@ class Parser:
         self._tokens = tuple(tokens)
         self._source = source
         self._position = 0
+        self._previous_segment_has_return = False
+        self._segment_has_input = False
 
     @classmethod
     def parse_statement(cls, text: str) -> Statement:
@@ -121,8 +130,24 @@ class Parser:
         """
         clauses: list[Clause] = []
         first = self._current()
+        segment_start = 0
+        self._previous_segment_has_return = False
         while not self._at_statement_end():
-            clauses.append(self._next_clause(clauses))
+            if self._current().is_keyword(Keyword.NEXT):
+                self._parse_next(clauses, segment_start)
+                self._advance()
+                clauses.append(Next())
+                segment_start = len(clauses)
+                self._segment_has_input = True
+                if self._match_keyword(Keyword.YIELD):
+                    if not self._previous_segment_has_return:
+                        self._fail_syntax(
+                            "YIELD requires a preceding RETURN",
+                            self._tokens[self._position - 1],
+                        )
+                    clauses.append(self._yield_clause())
+                continue
+            clauses.append(self._next_clause(clauses[segment_start:]))
         self._validate_clause_shape(clauses, first)
         self._match_punctuation(";")
         if self._current().kind is not TokenKind.EOF:
@@ -133,6 +158,44 @@ class Parser:
                 )
             self._fail_syntax("unexpected token after the statement", self._current())
         return Statement(clauses=tuple(clauses))
+
+    def _parse_next(self, clauses: Sequence[Clause], segment_start: int) -> None:
+        """Validate the segment before ``NEXT`` and record its result shape.
+
+        Parameters
+        ----------
+        clauses : Sequence[Clause]
+            Clauses parsed before the separator.
+        segment_start : int
+            Index of the first clause in the current segment.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If ``NEXT`` is misplaced or the segment cannot pass bindings.
+        """
+        token = self._current()
+        segment = clauses[segment_start:]
+        if not segment:
+            self._fail_syntax("NEXT must follow a segment", token)
+        last = segment[-1]
+        if isinstance(last, Finish):
+            self._fail_syntax("NEXT cannot follow FINISH", token)
+        if isinstance(last, Return):
+            if last.no_bindings:
+                self._fail_syntax("RETURN NO BINDINGS must be the final clause", token)
+            self._previous_segment_has_return = True
+            return
+        if any(isinstance(clause, (Create, Merge, Set, Remove, Delete)) for clause in segment):
+            self._previous_segment_has_return = False
+            return
+        if self._peek_is_keyword(Keyword.FINISH):
+            self._previous_segment_has_return = False
+            return
+        self._fail_syntax(
+            "a read segment must end with RETURN or FINISH before NEXT",
+            token,
+        )
 
     def _at_statement_end(self) -> bool:
         """Report whether the clause loop reached the end of the statement.
@@ -162,6 +225,10 @@ class Parser:
         """
         current = self._current()
         self._reject_unsupported_clause(current)
+        if self._has_clause(parsed, (Finish,)):
+            self._fail_syntax("FINISH must be the final clause", current)
+        if current.is_keyword(Keyword.YIELD):
+            self._fail_syntax("YIELD must follow NEXT", current)
         if current.is_keyword(Keyword.OPTIONAL):
             self._advance()
             if not self._current().is_keyword(Keyword.MATCH):
@@ -230,11 +297,13 @@ class Parser:
             self._advance()
             return self._return_clause()
         if current.is_keyword(Keyword.LET):
-            self._reject_gated(Gated.LET, current)
-        if current.is_keyword(Keyword.NEXT):
-            self._reject_gated(Gated.NEXT, current)
-        if current.is_keyword(Keyword.GROUP):
-            self._reject_gated(Gated.GROUP_BY, current)
+            self._guard_let_position(parsed, current)
+            self._advance()
+            return self._let_clause()
+        if current.is_keyword(Keyword.FINISH):
+            self._guard_finish_position(parsed, current)
+            self._advance()
+            return Finish()
         self._fail_syntax(f"unexpected token {current.text!r}", current)
 
     @staticmethod
@@ -261,55 +330,51 @@ class Parser:
         Parameters
         ----------
         parsed : Sequence[Clause]
-            Clauses already parsed.
+            Clauses already parsed in the current segment.
         token : Token
             Offending keyword.
         """
         if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
             self._fail_syntax("a MATCH clause must precede every write clause", token)
-        if self._has_clause(parsed, (Return,)):
-            self._fail_syntax("RETURN must be the final clause", token)
+        self._reject_after_result(parsed, token)
 
     def _guard_write_position(self, parsed: Sequence[Clause], token: Token) -> None:
-        """Reject a write clause that follows ``RETURN``.
+        """Reject a write clause that follows ``RETURN`` or ``FINISH``.
 
         Parameters
         ----------
         parsed : Sequence[Clause]
-            Clauses already parsed.
+            Clauses already parsed in the current segment.
         token : Token
             Offending keyword.
         """
-        if self._has_clause(parsed, (Return,)):
-            self._fail_syntax("RETURN must be the final clause", token)
+        self._reject_after_result(parsed, token)
 
     def _guard_with_position(self, parsed: Sequence[Clause], token: Token) -> None:
-        """Reject a ``WITH`` clause after a write or ``RETURN``.
+        """Reject a ``WITH`` clause after a write, ``RETURN``, or ``FINISH``.
 
         Parameters
         ----------
         parsed : Sequence[Clause]
-            Clauses already parsed.
+            Clauses already parsed in the current segment.
         token : Token
             Offending keyword.
         """
-        if self._has_clause(parsed, (Return,)):
-            self._fail_syntax("RETURN must be the final clause", token)
+        self._reject_after_result(parsed, token)
         if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
             self._fail_syntax("a WITH clause must precede every write clause", token)
 
     def _guard_unwind_position(self, parsed: Sequence[Clause], token: Token) -> None:
-        """Reject an ``UNWIND`` clause after a write or ``RETURN``.
+        """Reject an ``UNWIND`` clause after a write, ``RETURN``, or ``FINISH``.
 
         Parameters
         ----------
         parsed : Sequence[Clause]
-            Clauses already parsed.
+            Clauses already parsed in the current segment.
         token : Token
             Offending keyword.
         """
-        if self._has_clause(parsed, (Return,)):
-            self._fail_syntax("RETURN must be the final clause", token)
+        self._reject_after_result(parsed, token)
         if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
             self._fail_syntax("an UNWIND clause must precede every write clause", token)
 
@@ -319,32 +384,76 @@ class Parser:
         Parameters
         ----------
         parsed : Sequence[Clause]
-            Clauses already parsed.
+            Clauses already parsed in the current segment.
+        token : Token
+            Offending keyword.
+        """
+        self._reject_after_result(parsed, token)
+        if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
+            self._fail_syntax("a FILTER clause must precede every write clause", token)
+        if not self._has_clause(parsed, (Match, Unwind, With, Filter, Let)) and not (
+            self._segment_has_input
+        ):
+            self._fail_syntax("a FILTER clause must follow a read stage", token)
+
+    def _guard_let_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a ``LET`` clause after a write, ``RETURN``, or ``FINISH``.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed in the current segment.
+        token : Token
+            Offending keyword.
+        """
+        self._reject_after_result(parsed, token)
+        if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
+            self._fail_syntax("a LET clause must precede every write clause", token)
+
+    def _guard_finish_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a ``FINISH`` after another result clause.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed in the current segment.
+        token : Token
+            Offending keyword.
+        """
+        self._reject_after_result(parsed, token)
+
+    def _guard_return_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a second ``RETURN`` clause in the same segment.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed in the current segment.
+        token : Token
+            Offending keyword.
+        """
+        if self._has_clause(parsed, (Finish,)):
+            self._fail_syntax("FINISH must be the final clause", token)
+        if self._has_clause(parsed, (Return,)):
+            self._fail_syntax("a segment may contain only one RETURN clause", token)
+
+    def _reject_after_result(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a clause that follows ``RETURN`` or ``FINISH``.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed in the current segment.
         token : Token
             Offending keyword.
         """
         if self._has_clause(parsed, (Return,)):
             self._fail_syntax("RETURN must be the final clause", token)
-        if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
-            self._fail_syntax("a FILTER clause must precede every write clause", token)
-        if not self._has_clause(parsed, (Match, Unwind, With, Filter)):
-            self._fail_syntax("a FILTER clause must follow a read stage", token)
-
-    def _guard_return_position(self, parsed: Sequence[Clause], token: Token) -> None:
-        """Reject a second ``RETURN`` clause.
-
-        Parameters
-        ----------
-        parsed : Sequence[Clause]
-            Clauses already parsed.
-        token : Token
-            Offending keyword.
-        """
-        if self._has_clause(parsed, (Return,)):
-            self._fail_syntax("a statement may contain only one RETURN clause", token)
+        if self._has_clause(parsed, (Finish,)):
+            self._fail_syntax("FINISH must be the final clause", token)
 
     def _validate_clause_shape(self, clauses: Sequence[Clause], first: Token) -> None:
-        """Require a read statement to carry both ``MATCH`` and ``RETURN``.
+        """Require every segment and the statement as a whole to be complete.
 
         Parameters
         ----------
@@ -356,22 +465,37 @@ class Parser:
         Raises
         ------
         QuerySyntaxError
-            If the statement has no clause, or has no write clause and omits
-            ``MATCH`` or ``RETURN``.
+            If a segment has no result and no write, a trailing ``NEXT`` is
+            present, or the statement has no row source.
         """
         if not clauses:
             self._fail_syntax("expected a MATCH clause", first)
-        is_write = any(
+        last_next = -1
+        for index, clause in enumerate(clauses):
+            if isinstance(clause, Next):
+                last_next = index
+        segment = clauses[last_next + 1 :]
+        if not segment:
+            self._fail_syntax("NEXT requires a following segment", self._current())
+        last = segment[-1]
+        has_write = any(
             isinstance(clause, (Create, Merge, Set, Remove, Delete)) for clause in clauses
         )
-        has_row_source = any(isinstance(clause, (Match, Unwind)) for clause in clauses)
-        has_return = any(isinstance(clause, Return) for clause in clauses)
-        if is_write:
+        has_row_source = any(isinstance(clause, (Match, Unwind, Let)) for clause in clauses)
+        if isinstance(last, Finish):
+            if not has_write and not has_row_source:
+                self._fail_syntax("FINISH requires a read or write clause", first)
             return
-        if not has_row_source:
-            self._fail_syntax("expected a MATCH or UNWIND clause", first)
-        if not has_return:
-            self._fail_syntax("expected a RETURN clause", self._current())
+        if isinstance(last, Return):
+            if not has_write and not has_row_source:
+                self._fail_syntax("expected a MATCH or UNWIND clause", first)
+            return
+        if any(isinstance(clause, (Create, Merge, Set, Remove, Delete)) for clause in segment):
+            return
+        self._fail_syntax(
+            "expected a RETURN clause or FINISH",
+            self._current(),
+        )
 
     def _require_not_after_return(self, seen_return: bool, token: Token) -> None:
         """Reject a clause that follows ``RETURN``.
@@ -466,8 +590,13 @@ class Parser:
         self._advance()
         self._expect_keyword(Keyword.IN, "expected IN after the FOR variable")
         expression = self._expression()
-        self._reject_ordinality()
-        return Unwind(expression=expression, variable=self._identifier_text(token))
+        index, ordinality = self._ordinality_suffix()
+        return Unwind(
+            expression=expression,
+            variable=self._identifier_text(token),
+            index=index,
+            ordinality=ordinality,
+        )
 
     def _filter_clause(self) -> Filter:
         """Parse a ``FILTER`` or ``FILTER WHERE`` clause.
@@ -499,8 +628,13 @@ class Parser:
         if not self._is_identifier(token):
             self._fail_syntax("expected a variable after AS", token)
         self._advance()
-        self._reject_ordinality()
-        return Unwind(expression=expression, variable=self._identifier_text(token))
+        index, ordinality = self._ordinality_suffix()
+        return Unwind(
+            expression=expression,
+            variable=self._identifier_text(token),
+            index=index,
+            ordinality=ordinality,
+        )
 
     def _merge_clause(self) -> Merge:
         """Parse a ``MERGE`` clause and its optional conditional updates.
@@ -670,7 +804,7 @@ class Parser:
         )
 
     def _return_clause(self) -> Return:
-        """Parse a ``RETURN`` clause and its pagination.
+        """Parse a ``RETURN`` clause and its grouping and pagination.
 
         Returns
         -------
@@ -678,7 +812,21 @@ class Parser:
             Parsed return clause.
         """
         if self._check_no_bindings():
-            self._reject_gated(Gated.NO_BINDINGS, self._current())
+            self._advance()
+            self._advance()
+            if (
+                self._current().is_keyword(Keyword.ORDER)
+                or self._current().is_keyword(Keyword.OFFSET)
+                or self._current().is_keyword(Keyword.SKIP)
+                or self._current().is_keyword(Keyword.LIMIT)
+                or self._current().is_keyword(Keyword.GROUP)
+                or self._current().is_keyword(Keyword.DISTINCT)
+            ):
+                self._fail_syntax(
+                    "RETURN NO BINDINGS does not accept modifiers",
+                    self._current(),
+                )
+            return Return(items=(), no_bindings=True)
         star = False
         distinct = False
         items: tuple[ReturnItem, ...] = ()
@@ -688,10 +836,18 @@ class Parser:
         else:
             self._match_keyword(Keyword.ALL)
             distinct = self._match_keyword(Keyword.DISTINCT)
+            if self._check_no_bindings():
+                self._fail_syntax(
+                    "RETURN NO BINDINGS cannot be combined with ALL or DISTINCT",
+                    self._current(),
+                )
             parsed = [self._return_item()]
             while self._match_punctuation(","):
                 parsed.append(self._return_item())
             items = tuple(parsed)
+        group_by = self._group_by()
+        if group_by is not None and star:
+            self._fail_syntax("RETURN * cannot be combined with GROUP BY", self._current())
         order_by = self._order_by()
         skip: Expression | None = None
         limit: Expression | None = None
@@ -706,7 +862,108 @@ class Parser:
             skip=skip,
             limit=limit,
             star=star,
+            group_by=group_by,
         )
+
+    def _group_by(self) -> tuple[Expression, ...] | None:
+        """Parse an optional ``GROUP BY`` suffix.
+
+        Returns
+        -------
+        tuple[Expression, ...] | None
+            Grouping keys, an empty tuple for ``GROUP BY ()``, or ``None`` when
+            the suffix is absent.
+        """
+        if not self._match_keyword(Keyword.GROUP):
+            return None
+        self._expect_keyword(Keyword.BY, "expected BY after GROUP")
+        if self._match_punctuation("("):
+            if self._match_punctuation(")"):
+                return ()
+            keys = [self._expression()]
+            self._expect_punctuation(")", "expected ')' to close GROUP BY")
+            while self._match_punctuation(","):
+                keys.append(self._expression())
+            return tuple(keys)
+        keys = [self._expression()]
+        while self._match_punctuation(","):
+            keys.append(self._expression())
+        return tuple(keys)
+
+    def _let_clause(self) -> Let:
+        """Parse a ``LET`` clause with one or more assignments.
+
+        Returns
+        -------
+        Let
+            Parsed ``LET`` clause.
+        """
+        assignments: list[LetAssignment] = []
+        while True:
+            token = self._current()
+            if not self._is_identifier(token):
+                self._fail_syntax("expected a variable after LET", token)
+            name = self._identifier_text(self._advance())
+            self._expect_operator("=", "expected '=' in a LET assignment")
+            assignments.append(LetAssignment(name=name, expression=self._expression()))
+            if not self._match_punctuation(","):
+                break
+        return Let(assignments=tuple(assignments))
+
+    def _yield_clause(self) -> Yield:
+        """Parse the column projection attached to ``NEXT``.
+
+        Returns
+        -------
+        Yield
+            Parsed ``YIELD`` clause.
+        """
+        items: list[YieldItem] = []
+        while True:
+            token = self._current()
+            if not self._is_identifier(token):
+                self._fail_syntax("expected a column name after YIELD", token)
+            name = self._identifier_text(self._advance())
+            alias: str | None = None
+            if self._match_keyword(Keyword.AS):
+                if not self._is_identifier(self._current()):
+                    self._fail_syntax("expected an alias after AS", self._current())
+                alias = self._identifier_text(self._advance())
+            items.append(YieldItem(name=name, alias=alias))
+            if not self._match_punctuation(","):
+                break
+        return Yield(items=tuple(items))
+
+    def _ordinality_suffix(self) -> tuple[str | None, OrdinalityKind | None]:
+        """Parse an optional ``WITH ORDINALITY`` or ``WITH OFFSET`` suffix.
+
+        Returns
+        -------
+        tuple[str | None, OrdinalityKind | None]
+            Position variable and its base, or two ``None`` values.
+        """
+        if not self._current().is_keyword(Keyword.WITH):
+            return None, None
+        if self._peek_is_keyword(Keyword.ORDINALITY):
+            kind = OrdinalityKind.ORDINALITY
+        elif self._peek_is_keyword(Keyword.OFFSET):
+            kind = OrdinalityKind.OFFSET
+        else:
+            return None, None
+        self._advance()
+        self._advance()
+        token = self._current()
+        if not self._is_identifier(token):
+            self._fail_syntax("expected a variable after the ordinality modifier", token)
+        name = self._identifier_text(self._advance())
+        if self._current().is_keyword(Keyword.WITH) and (
+            self._peek_is_keyword(Keyword.ORDINALITY) or self._peek_is_keyword(Keyword.OFFSET)
+        ):
+            self._fail_syntax(
+                "WITH ORDINALITY and WITH OFFSET cannot be combined",
+                self._current(),
+            )
+        return name, kind
 
     def _variable_reference(self, clause: str) -> tuple[str, Span | None]:
         """Parse the variable named by a write clause.
@@ -1896,19 +2153,6 @@ bool, LabelExpression | None, Expression | None]
             token.kind is TokenKind.PUNCTUATION and token.value == ","
         )
 
-    def _reject_ordinality(self) -> None:
-        """Reject ``WITH ORDINALITY`` and ``WITH OFFSET`` as gated.
-
-        Raises
-        ------
-        QuerySemanticError
-            If the next clause is the gated ordinality modifier.
-        """
-        if self._current().is_keyword(Keyword.WITH) and (
-            self._peek_is_keyword(Keyword.ORDINALITY) or self._peek_is_keyword(Keyword.OFFSET)
-        ):
-            self._reject_gated(Gated.ORDINALITY, self._current())
-
     def _reject_catalog_graph(self) -> None:
         """Reject ``CREATE GRAPH`` and ``INSERT GRAPH`` as out of profile.
 
@@ -1920,23 +2164,6 @@ bool, LabelExpression | None, Expression | None]
         token = self._current()
         if token.kind is TokenKind.IDENTIFIER and str(token.value).upper() == "GRAPH":
             self._reject_unsupported(token, "catalog statements are out of profile")
-
-    def _reject_gated(self, key: str, token: Token) -> typing.Never:
-        """Raise a positioned error for one gated construct.
-
-        Parameters
-        ----------
-        key : str
-            Gated construct key.
-        token : Token
-            Token that starts the construct.
-
-        Raises
-        ------
-        QuerySemanticError
-            Always.
-        """
-        self._reject_unsupported(token, Gated.message(key))
 
     def _peek_is_operator(self, text: str) -> bool:
         """Report whether the next token is an operator.

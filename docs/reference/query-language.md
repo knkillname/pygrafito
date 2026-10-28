@@ -3,8 +3,7 @@
 :::{note}
 This page describes the dialect the current release executes. GQL spellings are canonical; the
 compatibility aliases in the [GQL profile](gql-profile.md) are accepted with identical semantics.
-Constructs the profile lists but this release cannot execute are rejected with a positioned error
-that names the follow-up change; see [Gated constructs](#gated-constructs).
+Open-ended traversal is the only remaining gated construct; see [Gated constructs](#gated-constructs).
 :::
 
 This page is the complete reference for the `pygrafito` query dialect: grammar, pattern
@@ -39,25 +38,24 @@ write and runs in its own transaction.
 
 ## Core dialect profile
 
-A statement is a non-empty ordered sequence of clauses:
+A statement is one or more linear segments separated by `NEXT`:
 
 ```text
-{ [OPTIONAL] MATCH <path pattern> [, <path pattern> ...] [WHERE <expression>]
-  | FOR <identifier> IN <expression>
-  | UNWIND <expression> AS <identifier>
-  | FILTER [WHERE] <expression>
-  | WITH [DISTINCT] <projection> [WHERE <expression>]
-    [ORDER BY <sort item> [, <sort item> ...]] [OFFSET|SKIP <expression>] [LIMIT <expression>] }
-[{INSERT <path pattern>
-  | CREATE <path pattern>
-  | MERGE <path pattern> [ON CREATE SET <assignments>] [ON MATCH SET <assignments>]
-  | SET | REMOVE | DELETE | DETACH DELETE | NODETACH DELETE} ...]
-[RETURN [ALL | DISTINCT] <projection> [, <projection> ...]
- | RETURN *]
- [ORDER BY <sort item> [, <sort item> ...]]
- [OFFSET|SKIP <expression>]
- [LIMIT <expression>]]
-[;]
+statement        = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment } [;]
+segment          = { [OPTIONAL] MATCH <path pattern> [, ...] [WHERE <expression>]
+                   | FOR <identifier> IN <expression> [ordinality]
+                   | UNWIND <expression> AS <identifier> [ordinality]
+                   | FILTER [WHERE] <expression>
+                   | WITH [DISTINCT] <projection> [WHERE <expression>]
+                   | LET <identifier> "=" <expression> { "," <identifier> "=" <expression> } }
+                 [ {INSERT | CREATE | MERGE | SET | REMOVE | DELETE | DETACH DELETE
+                    | NODETACH DELETE} ... ]
+                 [ RETURN ... [GROUP BY ...] [ORDER BY ...] [OFFSET|SKIP ...] [LIMIT ...]
+                 | RETURN "*"
+                 | FINISH ]
+ordinality       = "WITH" ( "ORDINALITY" | "OFFSET" ) <identifier>
+group-by         = "GROUP" "BY" ( "(" ")" | <expression> { "," <expression> } )
+yield-item       = <identifier> [ "AS" <identifier> ]
 ```
 
 A `MATCH` clause carries one or more comma-separated path patterns and an
@@ -65,11 +63,21 @@ optional `WHERE`; `OPTIONAL MATCH` uses the same shape with left-join semantics.
 A statement may contain several `MATCH` clauses: each clause is a stage joined
 against the rows produced by the previous one. `FOR` (with `UNWIND` as its
 alias) is another read stage and a row source, and `FILTER` (with a stage-level
-`WHERE` as its alias) keeps only rows whose predicate is true. `MATCH` and
-`FOR` are optional when the statement contains a write clause, and `RETURN` is
-optional in that case too. A read statement requires at least one row source
-and a `RETURN`. Every read stage precedes every write clause, and `RETURN` is
-at most once and always last. Multiple statements are rejected.
+`WHERE` as its alias) keeps only rows whose predicate is true. `LET` is a
+row-wise read stage that adds bindings without dropping the current scope.
+`MATCH`, `FOR`, and `LET` are row sources; `MATCH` and `FOR` are optional when
+the statement contains a write clause.
+
+Within one segment, every read stage precedes every write clause, `RETURN` or
+`FINISH` is last, and a segment contains at most one result clause. A read
+segment must end with `RETURN` or `FINISH`; a write segment may omit the result
+clause. `NEXT` starts a new segment from the preceding `RETURN` table. An
+optional `YIELD` selects and renames the columns that pass; without `YIELD`,
+every preceding column remains in scope. A non-final `RETURN` is a projection
+and scope reset, so it can aggregate, group, order, and paginate. Only the final
+segment's `RETURN` or `FINISH` produces the call result, and `FINISH` is always
+final. A read statement requires at least one row source and a final result
+clause. Multiple statements are rejected.
 
 ## FOR
 
@@ -94,7 +102,18 @@ graph.query("FOR value IN [1, 2, 3] RETURN value")
 ```
 
 A row can be a mapping, so `row.designation` reads a field from the current row.
-`WITH ORDINALITY` and `WITH OFFSET` are gated until `add-gql-composition`.
+`WITH ORDINALITY index` binds a one-based position and `WITH OFFSET index` binds
+a zero-based position. The suffix is accepted after both `FOR ... IN ...` and
+`UNWIND ... AS ...`:
+
+```text
+FOR value IN [10, 20] WITH ORDINALITY index RETURN value, index  -- (10, 1), (20, 2)
+FOR value IN [10, 20] WITH OFFSET index RETURN value, index      -- (10, 0), (20, 1)
+UNWIND ['Tron', 'Quorra'] AS name WITH ORDINALITY position RETURN name, position
+```
+
+The index name must be fresh, must differ from the element variable, and the
+two suffix forms cannot be combined.
 
 ## FILTER
 
@@ -356,6 +375,25 @@ null never satisfies a filter, so a later stage either drops the row or sees
 `null` in its projection. A statement may start with `OPTIONAL MATCH`; when
 nothing matches it returns one null row.
 
+## LET
+
+`LET` adds row-wise bindings without dropping the current scope. Definitions
+evaluate left to right, so a later definition may reference an earlier one. A
+direct variable assignment keeps that variable's kind; any other expression
+binds a scalar. `LET` can lead a statement and counts as a row source.
+
+```text
+LET base = 36, following = base + 1 RETURN following
+MATCH (n:Program {designation: 'Kevin Flynn'})
+LET next_cycle = n.cycles + 1
+RETURN n.designation AS name, next_cycle
+MATCH (n:Program) LET element = n MATCH (element)-[:TRUSTS]->(m) RETURN m
+```
+
+A `LET` name must be fresh: shadowing an existing variable or repeating a name
+in the same clause is a semantic error. Aggregates are not allowed in a `LET`
+expression, and `LET` cannot be the final clause of a statement.
+
 ## WITH
 
 `WITH` ends a read stage and projects its rows into a new scope. Only the names
@@ -381,6 +419,60 @@ WHERE friends > 2 RETURN a
 `WHERE` after `WITH` sees only the projected scope. A `MATCH` may follow a
 `WITH`, and a write clause may follow one too. A statement cannot end with
 `WITH`: it must be followed by another read stage, a write clause, or `RETURN`.
+
+`WITH` remains a pygrafito extension. The canonical composition form is `LET`
+plus `RETURN`/`NEXT` plus `GROUP BY`.
+
+## NEXT and YIELD
+
+`NEXT` starts a new linear segment from the preceding `RETURN` table. A read
+segment must end with `RETURN` (or `FINISH` as the statement's final segment);
+a write-only segment passes its bindings unchanged, which is the
+Cypher-compatible form. Only the final segment produces the result.
+
+`YIELD` after `NEXT` selects and renames columns from the preceding result. An
+unknown column or duplicate output name is rejected. Without `YIELD`, every
+preceding column remains in scope:
+
+```text
+MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles
+NEXT YIELD name RETURN name
+
+MATCH (n:Program) RETURN n AS element
+NEXT MATCH (element)-[:TRUSTS]->(m) RETURN m.designation AS name
+
+MATCH (n:Program) RETURN n.cycles AS cycles, count(*) AS total
+GROUP BY n.cycles
+NEXT FILTER total > 1 RETURN cycles, total
+
+CREATE (n:Program {designation: 'Rinzler'})
+NEXT MATCH (n) RETURN n.designation AS name
+```
+
+A non-final `RETURN` is a projection and scope reset: it may aggregate, group,
+order, and paginate, so mid-query grouping does not require `WITH`. `NEXT` cannot
+start or end a statement, cannot repeat, and cannot follow `FINISH`. `YIELD`
+cannot appear outside `NEXT` or after a segment that does not end in `RETURN`.
+
+The whole statement is one transaction and one query budget; a failure in a
+later segment rolls back the earlier writes.
+
+## FINISH
+
+`FINISH` ends a statement without producing a result. It applies every preceding
+read and write clause and returns an empty result with the mutation summary.
+`FINISH` is final: it cannot be followed by another clause or `NEXT`, and it
+cannot be the only clause of a statement.
+
+```text
+CREATE (n:Program {designation: 'Clu'}) FINISH
+MATCH (n:Program) FINISH
+MATCH (n:Program) NEXT FINISH
+```
+
+A write statement may also omit the result clause; `CREATE (n:Program)` has the
+same no-result shape as `CREATE (n:Program) FINISH`. `FINISH` is the canonical
+no-result form; `RETURN NO BINDINGS` is a separate zero-column extension.
 
 ## Pattern match row semantics
 
@@ -600,8 +692,7 @@ execution error rather than returning a coerced value.
 `RETURN` projects expressions, aliases, and node, relationship, or path values.
 A column takes its alias when present and otherwise its source expression text.
 `RETURN ALL` is the explicit default, and `RETURN *` projects every variable in
-scope in introduction order. `RETURN NO BINDINGS` is gated until
-`add-gql-composition`:
+scope in introduction order:
 
 ```text
 RETURN n.designation AS name, n.cycles
@@ -613,6 +704,19 @@ produces columns `name` and `n.cycles` in that order. Duplicate column names
 raise a semantic error. `DISTINCT` removes duplicate projected rows and applies
 after projection and before ordering.
 
+As a pygrafito extension, `RETURN NO BINDINGS` returns zero columns and one
+empty row per input binding. It is final-only and does not accept `DISTINCT`,
+`ALL`, `*`, `GROUP BY`, `ORDER BY`, `OFFSET`, `SKIP`, or `LIMIT`:
+
+```python
+result = graph.query("MATCH (n:Program) RETURN NO BINDINGS")
+print(result.columns)  # ()
+print(len(result.rows))  # one per matched node
+```
+
+Use `FINISH` when no result is wanted; `RETURN NO BINDINGS` is useful when the
+row cardinality itself is the observable value.
+
 Entity projections return immutable snapshots. A later write does not change a
 value obtained from an earlier result.
 
@@ -620,11 +724,34 @@ value obtained from an earlier result.
 
 Supported aggregates are `count`, `collect`, `sum`, `avg`, `min`, and `max`,
 including `DISTINCT` variants. Non-aggregate `RETURN` expressions form implicit
-grouping keys.
+grouping keys when there is no explicit `GROUP BY`:
 
 ```text
 MATCH (n:Program) RETURN labels(n) AS labels, count(*) AS total
 ```
+
+`GROUP BY` is a suffix of `RETURN`. It groups by the listed keys and produces one
+row per distinct key combination. A non-aggregate return item must be one of the
+keys; a key may be a direct in-scope variable and need not be returned. `GROUP
+BY` without aggregates deduplicates the keys. `RETURN DISTINCT ... GROUP BY ...`
+is accepted; `DISTINCT` applies after grouping. `RETURN *` and `RETURN NO
+BINDINGS` cannot be combined with `GROUP BY`.
+
+```text
+MATCH (n:Program)
+RETURN n.cycles AS cycles, count(*) AS total
+GROUP BY n.cycles ORDER BY cycles
+
+MATCH (n:Program) RETURN count(*) AS total GROUP BY n.cycles
+MATCH (n:Program) RETURN n.cycles GROUP BY n.cycles
+MATCH (n:Program) RETURN count(*) AS total GROUP BY ()
+```
+
+GQL grouping keys are direct variable references. pygrafito additionally accepts
+expressions as a labeled extension, for example `GROUP BY n.cycles + 0`.
+`GROUP BY ()` groups every input row into one group and requires at least one
+aggregate and no non-aggregate return item. Null keys form one group. Empty input
+produces no groups unless `GROUP BY ()` is used.
 
 `count(*)` counts input rows; `count(expr)` counts non-null values. `collect`
 preserves input order. Empty input yields:
@@ -762,12 +889,11 @@ deletion, a missing element, or an invalid stored value is raised as
 
 A construct that the GQL profile lists but this release cannot execute is
 rejected with a positioned `QuerySemanticError` that names the construct and the
-follow-up change. For example, an open-ended upper bound (`*`, `+`, `*n..`, or
-`{m,}`) reports `add-gql-unbounded-traversal`; `LET`, `NEXT`, `GROUP BY`,
-`WITH ORDINALITY`, `WITH OFFSET`, and `RETURN NO BINDINGS` report
-`add-gql-composition`. A gated construct stops the whole statement before
-execution, so a gated clause never writes data. Constructs the profile does not
-list remain out of profile and keep their existing explicit rejection.
+follow-up change. An open-ended upper bound (`*`, `+`, `*n..`, or `{m,}`)
+reports `add-gql-unbounded-traversal`. A gated construct stops the whole
+statement before execution, so a gated clause never writes data. Constructs the
+profile does not list remain out of profile and keep their existing explicit
+rejection.
 
 ## Consistent execution snapshot
 
@@ -783,11 +909,19 @@ captured before deletion. A write executed through an active transaction
 includes that transaction's uncommitted writes and excludes writes from other
 connections.
 
+A statement with `NEXT` segments is still one transaction and one query budget.
+A later segment sees the writes of an earlier segment, and a failure in any
+segment rolls back every mutation of the statement.
+
 ## Identifier casing and quoting
 
 Keywords and function names are case-insensitive. Variable names, labels, and
 property keys are case-sensitive, so `Program` and `program` are different
-labels.
+labels. `LET`, `NEXT`, `YIELD`, `GROUP`, `ORDINALITY`, and `FINISH` are reserved
+keywords; quote a name with backticks when it collides with one, as in
+```text
+LET `next` = 1 RETURN `next`
+```
 
 Backtick-quoted identifiers may contain spaces, dots, and escaped backticks
 (written as doubled backticks) in labels, property keys, and variables.
@@ -795,18 +929,23 @@ Backtick-quoted identifiers may contain spaces, dots, and escaped backticks
 ## Grammar summary
 
 ```text
-statement        = { clause } [";"]
-clause           = match-clause | for-clause | unwind-clause | filter-clause
-                 | with-clause | insert-clause | create-clause | merge-clause
-                 | set-clause | remove-clause | delete-clause | return-clause
+statement        = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment } [";"]
+segment          = { match-clause | for-clause | unwind-clause | filter-clause
+                 | with-clause | let-clause | insert-clause | create-clause
+                 | merge-clause | set-clause | remove-clause | delete-clause }
+                 [ return-clause | finish-clause ]
+yield-item       = identifier [ "AS" identifier ]
 path-mode        = "WALK" | "TRAIL" | "SIMPLE" | "ACYCLIC"
 match-clause     = [ "OPTIONAL" ] "MATCH" [path-mode] [path-mode] path-pattern
                    { "," [path-mode] path-pattern } [where-clause]
-for-clause       = "FOR" identifier "IN" expression
-unwind-clause    = "UNWIND" expression "AS" identifier
+for-clause       = "FOR" identifier "IN" expression [ordinality]
+unwind-clause    = "UNWIND" expression "AS" identifier [ordinality]
+ordinality       = "WITH" ( "ORDINALITY" | "OFFSET" ) identifier
 filter-clause    = "FILTER" [ "WHERE" ] expression
 with-clause      = "WITH" [ "DISTINCT" ] return-item { "," return-item }
                    [where-clause] [order-clause] [offset-clause] [limit-clause]
+let-clause       = "LET" assignment { "," assignment }
+assignment       = identifier "=" expression
 insert-clause    = "INSERT" path-pattern
 create-clause    = "CREATE" path-pattern
 merge-clause     = "MERGE" path-pattern [on-create] [on-match]
@@ -820,8 +959,11 @@ remove-item      = identifier "." key
                  | identifier { ":" label }
 delete-clause    = [ "DETACH" | "NODETACH" ] "DELETE" identifier { "," identifier }
 return-clause    = "RETURN" [ "ALL" | "DISTINCT" ] return-item { "," return-item }
-                   [order-clause] [offset-clause] [limit-clause]
+                   [group-by] [order-clause] [offset-clause] [limit-clause]
                  | "RETURN" "*" [order-clause] [offset-clause] [limit-clause]
+                 | "RETURN" "NO" "BINDINGS"
+group-by         = "GROUP" "BY" ( "(" ")" | expression { "," expression } )
+finish-clause    = "FINISH"
 path-pattern     = [identifier "="] node-pattern
                    { relationship-pattern node-pattern }
 node-pattern     = "(" [identifier] [label-spec] [property-map] [where-clause] ")"
@@ -850,8 +992,9 @@ limit-clause     = "LIMIT" expression
 An identifier is a plain name or a backtick-quoted name. A label, key, or alias
 may be backtick-quoted. Keywords are reserved, but a keyword used where a name
 is expected — an alias, a label, or a property key — is read as that name. A
-write clause may omit `MATCH` and `RETURN`, and `RETURN` is always the final
-clause. Expression precedence is listed in
+write segment may omit `MATCH` and `RETURN`, `RETURN` or `FINISH` ends its
+segment, and only the final segment produces the result. `FINISH` is always
+final. Expression precedence is listed in
 [Filtering expressions](#filtering-expressions).
 
 ## Comments
@@ -877,9 +1020,6 @@ change, and the statement does not execute:
 | Construct | Follow-up change |
 | --- | --- |
 | Open-ended quantifiers `*`, `+`, `*n..`, `{m,}` | `add-gql-unbounded-traversal` |
-| `WITH ORDINALITY`, `WITH OFFSET` | `add-gql-composition` |
-| `LET`, `NEXT`, `GROUP BY` | `add-gql-composition` |
-| `RETURN NO BINDINGS` | `add-gql-composition` |
 
 ## Unsupported constructs
 

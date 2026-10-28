@@ -127,3 +127,21 @@ class TestExplainUnwindAndDynamicValues(_ExplainTestCase):
         )
         assert any("UNWIND row" in line for line in plan)
         assert any("n0" in line for line in plan)
+
+
+class TestExplainComposition(_ExplainTestCase):
+    """Verify composition boundaries appear in plan inspection."""
+
+    def test_next_and_yield_are_reported(self, graph: Graph) -> None:
+        plan = graph.explain(
+            "MATCH (n:Program) RETURN n AS element NEXT YIELD element RETURN element"
+        )
+        assert "RETURN" in plan
+        assert "NEXT" in plan
+        assert "YIELD" in plan
+
+    def test_let_and_finish_are_reported(self, graph: Graph) -> None:
+        let_plan = graph.explain("MATCH (n:Program) LET cycles = n.cycles RETURN cycles")
+        finish_plan = graph.explain("MATCH (n:Program) FINISH")
+        assert "LET" in let_plan
+        assert "FINISH" in finish_plan

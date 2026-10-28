@@ -178,6 +178,81 @@ a creation made by one row is visible to later rows in the same statement. See
 [FOR](../reference/query-language.md#for), [WITH](../reference/query-language.md#with), and
 [MERGE](../reference/query-language.md#merge).
 
+`LET` adds a binding without dropping the current scope. `GROUP BY` is the
+canonical explicit grouping suffix, and `NEXT` composes segments from the
+preceding `RETURN` table:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    yori = graph.add_node("Program", designation="Yori", cycles=37)
+    dumont = graph.add_node("Program", designation="Dumont", cycles=39)
+    ram = graph.add_node("Program", designation="Ram", cycles=36)
+    graph.add_relationship(yori, "ALLIES_WITH", dumont)
+    graph.add_relationship(yori, "ALLIES_WITH", ram)
+
+    result = graph.query(
+        "MATCH (n:Program {designation: 'Yori'}) "
+        "LET following = n.cycles + 1 "
+        "RETURN n.designation AS name, following"
+    )
+    print([tuple(row.values()) for row in result])  # [('Yori', 38)]
+
+    grouped = graph.query(
+        "MATCH (a:Program)-[:ALLIES_WITH]->(b:Program) "
+        "RETURN a.designation AS name, count(*) AS allies "
+        "GROUP BY a.designation "
+        "NEXT FILTER allies > 1 RETURN name, allies"
+    )
+    print([tuple(row.values()) for row in grouped])  # [('Yori', 2)]
+```
+
+`NEXT YIELD` selects and renames the columns that pass to the next segment. It is
+useful when a later segment should not see every column of an intermediate
+result:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    graph.add_node("Program", designation="Quorra", cycles=37)
+    result = graph.query(
+        "MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles "
+        "NEXT YIELD name RETURN name"
+    )
+    print([row["name"] for row in result])  # ['Quorra']
+```
+
+`WITH ORDINALITY` and `WITH OFFSET` bind a position while expanding a list:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    result = graph.query(
+        "FOR name IN ['Tron', 'Quorra'] WITH ORDINALITY position "
+        "RETURN name, position"
+    )
+    print([tuple(row.values()) for row in result])  # [('Tron', 1), ('Quorra', 2)]
+```
+
+`FINISH` ends a statement without a result. A write statement may omit the
+result clause instead:
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    result = graph.query("CREATE (n:Program {designation: 'Clu'}) FINISH")
+    print(result.rows)  # ()
+    print(result.summary.created_nodes)  # 1
+```
+
+The [query language reference](../reference/query-language.md#next-and-yield)
+covers segment placement, write-only segments, grouping edge cases, and the
+`RETURN NO BINDINGS` extension.
+
 ## Prepare a statement
 
 Use `Graph.prepare` when the same statement runs repeatedly. The parsed plan is reused, the columns

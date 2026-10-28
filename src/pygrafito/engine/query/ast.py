@@ -279,6 +279,13 @@ class PathMode(Enum):
     ACYCLIC = "acyclic"
 
 
+class OrdinalityKind(Enum):
+    """Base used by an iteration position variable."""
+
+    ORDINALITY = "ordinality"
+    OFFSET = "offset"
+
+
 class EdgeDirection(Enum):
     """Storage directions one relationship position admits."""
 
@@ -631,6 +638,15 @@ class Return:
         Skip expression, by default ``None``.
     limit : Expression | None, optional
         Limit expression, by default ``None``.
+    star : bool, optional
+        Whether the clause projects every variable in scope, by default
+        ``False``.
+    group_by : tuple[Expression, ...] | None, optional
+        Explicit grouping keys, an empty tuple for ``GROUP BY ()``, or ``None``
+        when the clause has no explicit grouping, by default ``None``.
+    no_bindings : bool, optional
+        Whether the pygrafito ``RETURN NO BINDINGS`` extension was requested,
+        by default ``False``.
     """
 
     items: tuple[ReturnItem, ...]
@@ -639,6 +655,8 @@ class Return:
     skip: Expression | None = None
     limit: Expression | None = None
     star: bool = False
+    group_by: tuple[Expression, ...] | None = None
+    no_bindings: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -692,10 +710,16 @@ class Unwind:
         List-valued expression to expand.
     variable : str
         Variable bound to each expanded element.
+    index : str | None, optional
+        Variable bound to the element position, by default ``None``.
+    ordinality : OrdinalityKind | None, optional
+        Whether the position is one-based or zero-based, by default ``None``.
     """
 
     expression: Expression
     variable: str
+    index: str | None = None
+    ordinality: OrdinalityKind | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -717,7 +741,90 @@ class Merge:
     on_match: Set | None = None
 
 
-type Clause = Match | With | Unwind | Filter | Create | Merge | Set | Remove | Delete | Return
+@dataclasses.dataclass(frozen=True, slots=True)
+class LetAssignment:
+    """One ``LET name = expression`` assignment.
+
+    Parameters
+    ----------
+    name : str
+        Variable introduced by the assignment.
+    expression : Expression
+        Row-wise expression supplying the value.
+    """
+
+    name: str
+    expression: Expression
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Let:
+    """A ``LET`` clause that adds row-wise bindings.
+
+    Parameters
+    ----------
+    assignments : tuple[LetAssignment, ...]
+        Assignments in evaluation order.
+    """
+
+    assignments: tuple[LetAssignment, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Next:
+    """The ``NEXT`` separator between two linear segments."""
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class YieldItem:
+    """One column selected by ``NEXT YIELD``.
+
+    Parameters
+    ----------
+    name : str
+        Column name from the preceding result.
+    alias : str | None, optional
+        Output name, by default the source name.
+    """
+
+    name: str
+    alias: str | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Yield:
+    """A ``YIELD`` projection attached to ``NEXT``.
+
+    Parameters
+    ----------
+    items : tuple[YieldItem, ...]
+        Selected columns in output order.
+    """
+
+    items: tuple[YieldItem, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Finish:
+    """A ``FINISH`` clause that ends a statement without a result."""
+
+
+type Clause = (
+    Match
+    | With
+    | Unwind
+    | Filter
+    | Create
+    | Merge
+    | Set
+    | Remove
+    | Delete
+    | Return
+    | Let
+    | Next
+    | Yield
+    | Finish
+)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -741,16 +848,21 @@ __all__ = [
     "EdgeDirection",
     "Expression",
     "Filter",
+    "Finish",
     "FunctionCall",
     "IsNull",
     "LabelAssignment",
     "LabelRemoval",
+    "Let",
+    "LetAssignment",
     "ListLiteral",
     "Literal",
     "Match",
     "Merge",
+    "Next",
     "NodePattern",
     "Operators",
+    "OrdinalityKind",
     "Parameter",
     "PathMode",
     "PathPattern",
@@ -770,4 +882,6 @@ __all__ = [
     "Unwind",
     "Variable",
     "With",
+    "Yield",
+    "YieldItem",
 ]

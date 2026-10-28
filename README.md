@@ -42,6 +42,8 @@ Every Python example in this README is executed by the test suite.
 - Labeled relationships with properties, either directed or undirected.
 - A GQL-first query language with writes, aggregation, path modes, a query budget, and
   prepared statements.
+- GQL composition with `LET`, `NEXT`/`YIELD`, `GROUP BY`, and `FINISH`, keeping one transaction
+  and one query budget per statement.
 - Bounded traversal, shortest paths, and relationship-unique trail enumeration in the Python API.
 - Property indexes and uniqueness constraints enforced by the database.
 - CSV and JSONL import, versioned JSONL export/restore, and read-only SQL views.

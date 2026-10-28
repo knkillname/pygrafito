@@ -10,22 +10,11 @@ class Gated:
     """Name each gated construct and the follow-up change that implements it."""
 
     OPEN_BOUND: str = "open-bound"
-    ORDINALITY: str = "ordinality"
-    NO_BINDINGS: str = "no-bindings"
-    LET: str = "let"
-    NEXT: str = "next"
-    GROUP_BY: str = "group-by"
 
     UNBOUNDED: str = "add-gql-unbounded-traversal"
-    COMPOSITION: str = "add-gql-composition"
 
     ENTRIES: typing.ClassVar[dict[str, tuple[str, str]]] = {
         OPEN_BOUND: ("an open-ended quantifier", UNBOUNDED),
-        ORDINALITY: ("WITH ORDINALITY and WITH OFFSET", COMPOSITION),
-        NO_BINDINGS: ("RETURN NO BINDINGS", COMPOSITION),
-        LET: ("LET", COMPOSITION),
-        NEXT: ("NEXT", COMPOSITION),
-        GROUP_BY: ("GROUP BY", COMPOSITION),
     }
 
     @classmethod

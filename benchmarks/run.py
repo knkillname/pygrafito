@@ -126,6 +126,15 @@ class Scenarios:
             "MATCH TRAIL (a:Program {cycles: 36})-[r]->(b)-[s]->(c) RETURN count(*) AS total"
         )
 
+    @staticmethod
+    def composition(graph: Graph) -> None:
+        """Exercise LET, an intermediate grouped RETURN, and a NEXT chain."""
+        graph.query(
+            "MATCH (n:Program) LET bucket = n.cycles % 10 "
+            "RETURN bucket, count(*) AS total GROUP BY bucket "
+            "NEXT YIELD bucket, total RETURN bucket, total ORDER BY bucket"
+        )
+
 
 class Runner:
     """Run the benchmark and print its tables.
@@ -150,6 +159,7 @@ class Runner:
             "quantified": Scenarios.quantified,
             "walk path": Scenarios.walk_path,
             "trail path": Scenarios.trail_path,
+            "composition": Scenarios.composition,
         }
 
     def run(self) -> None:

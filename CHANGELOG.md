@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GQL composition: `LET` additive bindings, `NEXT` segments with optional `YIELD` selection and
+  renaming, `FINISH` for no-result statements, and explicit `GROUP BY` with `GROUP BY ()`,
+  `RETURN DISTINCT ... GROUP BY ...`, and expression keys as a labeled pygrafito extension.
+  `RETURN NO BINDINGS` is supported as a final-only zero-column extension.
+- `FOR ... WITH ORDINALITY` and `WITH OFFSET`, also accepted after the `UNWIND` alias, with
+  one-based and zero-based position variables.
+- One ordered read/write operation pipeline so later `NEXT` segments observe earlier writes while
+  keeping one transaction and one query budget per statement.
 - `QueryBudget` and `QueryBudgetExceededError` bound every query with relationship-expansion and
   intermediate-row counters plus an optional wall-clock limit. `Graph.open` sets the default, and
   `Graph.query`, `Transaction.query`, and `PreparedQuery.execute` accept a per-execution override.
@@ -39,8 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A published GQL language profile at `docs/reference/gql-profile.md`, covering the five-tier
   construct classification, canonical surface, compatibility aliases and constructs, pygrafito
   extensions, path-mode and query-budget decisions, conformance matrix, corpus contract, and
-  migration guidance. The current release continues to use the transitional Cypher-flavored
-  dialect; the profile marks unimplemented canonical forms as target or gated.
+  migration guidance. The profile marks the remaining open-ended traversal forms as deferred.
 - A documentation contract test that keeps the GQL profile page, tier headings, and conformance
   matrix statuses consistent.
 - Relationships carry zero or more labels, can be directed or undirected, and expose a sorted
@@ -53,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `LET`, `NEXT` with `YIELD`, `GROUP BY`, `FINISH`, `WITH ORDINALITY`, `WITH OFFSET`, and the
+  `RETURN NO BINDINGS` extension now execute; only open-ended traversal remains gated. The GQL
+  profile matrix, status board, and conformance corpus reflect the implemented composition surface.
 - The frontend recognizes the target GQL vocabulary. Constructs the profile lists but this
   release cannot execute now raise a positioned semantic error naming the construct and the
   follow-up change, instead of a generic unexpected-token error.

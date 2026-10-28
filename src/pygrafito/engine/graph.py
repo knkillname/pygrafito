@@ -491,8 +491,8 @@ class Graph:
         Returns
         -------
         tuple[str, ...]
-            One detail line per plan row, in plan order. A statement without a
-            ``MATCH`` clause returns an empty tuple.
+            One detail line per plan row, in plan order. A statement with only
+            write clauses returns an empty tuple.
 
         Raises
         ------
