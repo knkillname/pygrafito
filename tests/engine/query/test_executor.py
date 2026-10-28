@@ -1250,6 +1250,60 @@ class TestQuerySurfaceExecution(_QueryGraph):
         )
         assert self.values(result) == [(1,), (3,)]
 
+    def test_intersect_all_keeps_the_smaller_count(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1, 1, 1] AS x RETURN x AS n INTERSECT ALL UNWIND [1, 1, 2] AS x RETURN x AS n"
+        )
+        assert self.values(result) == [(1,), (1,)]
+
+    def test_except_all_subtracts_counts(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1, 1, 1, 2] AS x RETURN x AS n EXCEPT ALL UNWIND [1, 1] AS x RETURN x AS n"
+        )
+        assert self.values(result) == [(1,), (2,)]
+
+    def test_except_all_keeps_unmatched_duplicates(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1, 1] AS x RETURN x AS n EXCEPT ALL UNWIND [2] AS x RETURN x AS n"
+        )
+        assert self.values(result) == [(1,), (1,)]
+
+    def test_set_all_forms_use_numeric_equality(self, graph: Graph) -> None:
+        intersect = graph.query(
+            "UNWIND [36] AS x RETURN x AS n INTERSECT ALL UNWIND [36.0] AS x RETURN x AS n"
+        )
+        except_ = graph.query(
+            "UNWIND [36] AS x RETURN x AS n EXCEPT ALL UNWIND [36.0] AS x RETURN x AS n"
+        )
+        assert self.values(intersect) == [(36,)]
+        assert self.values(except_) == []
+
+    def test_set_quantifiers_are_left_associative(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1, 1, 2] AS x RETURN x AS n "
+            "INTERSECT ALL UNWIND [1, 2, 2] AS x RETURN x AS n "
+            "EXCEPT ALL UNWIND [1] AS x RETURN x AS n"
+        )
+        assert self.values(result) == [(2,)]
+
+    def test_set_all_forms_preserve_first_seen_order(self, graph: Graph) -> None:
+        intersect = graph.query(
+            "UNWIND [2, 1, 2, 2] AS x RETURN x AS n "
+            "INTERSECT ALL UNWIND [2, 1, 2] AS x RETURN x AS n"
+        )
+        except_ = graph.query(
+            "UNWIND [2, 1, 2] AS x RETURN x AS n EXCEPT ALL UNWIND [2] AS x RETURN x AS n"
+        )
+        assert self.values(intersect) == [(2,), (1,), (2,)]
+        assert self.values(except_) == [(1,), (2,)]
+
+    def test_explicit_distinct_matches_the_bare_form(self, graph: Graph) -> None:
+        distinct = graph.query(
+            "UNWIND [1, 1] AS x RETURN x AS n UNION DISTINCT UNWIND [1] AS x RETURN x AS n"
+        )
+        bare = graph.query("UNWIND [1, 1] AS x RETURN x AS n UNION UNWIND [1] AS x RETURN x AS n")
+        assert self.values(distinct) == self.values(bare) == [(1,)]
+
     def test_set_operation_columns_must_match(self, graph: Graph) -> None:
         with pytest.raises(QuerySemanticError, match="same names"):
             graph.query(

@@ -38,7 +38,7 @@ the profile are rejected with a positioned query error, and the matrix records t
 | Path modes | `WALK` default; `TRAIL`, `SIMPLE`, `ACYCLIC` explicit; match modes `REPEATABLE ELEMENTS` and `DIFFERENT EDGES`; path search `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | Same modes plus grouped quantified paths |
 | Expressions | Current operators, property access, list literals, `CASE`, map literals, list indexing and slicing, list comprehensions, string concatenation, path functions, core and extended scalar functions, aggregates | Same surface |
 | Subqueries | Read-only `EXISTS { ... }` and `COUNT { ... }` | Same surface |
-| Set operations | `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT` | Same surface |
+| Set operations | `UNION`, `INTERSECT`, `EXCEPT`, each with optional `ALL` or `DISTINCT` | Same surface |
 | Query budget | Expansion, row, and optional time counters with per-query override | Same surface |
 | Out of profile | Rejected with an explicit query error | Rejected with an explicit query error |
 
@@ -88,7 +88,7 @@ entry.
 | Expressions | `CASE`, map literals, list indexing and slicing, list comprehensions, string concatenation, function calls | Supported. |
 | Path functions | `nodes(path)`, `relationships(path)`, `length(path)` | Supported. |
 | Subqueries | `EXISTS { ... }`, `COUNT { ... }` | Read-only, correlated or uncorrelated. |
-| Set operations | `UNION`, `UNION ALL`, `INTERSECT`, `EXCEPT` | Read-only compound queries. |
+| Set operations | `UNION`, `INTERSECT`, `EXCEPT`, each with optional `ALL` or `DISTINCT` | Read-only compound queries; `ALL` keeps duplicate copies and `DISTINCT` is the explicit default. |
 | Path search | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | Supported; whole-path selection per endpoint pair. |
 | Match modes | `DIFFERENT EDGES`, `REPEATABLE ELEMENTS` | Supported; `REPEATABLE ELEMENTS` is the default. |
 | Grouped quantified paths | Repetition of a grouped path pattern, with list bindings and inner modes | Supported. |
@@ -121,6 +121,7 @@ form.
 | `-->`, `<--` | `->`, `<-` | Pattern arrows. `--` is a comment, not an edge. |
 | `:A:B` | `:A&B` | Node label conjunction. |
 | `+` on string operands | Canonical string concatenation | Compatibility alias for string operands only; numeric operands keep arithmetic `+`. |
+| `DISTINCT` after a set operator | The bare set operator | Explicit set quantifier; same as omitting it. |
 
 The canonical string concatenation operator is `||`. The `+` alias applies only to string operands;
 numeric operands keep arithmetic `+` and mixed operands are rejected.
@@ -620,10 +621,12 @@ the previous table, not a matrix status.
 | `WITH *` | pygrafito extension | supported | `WITH *` | Part of the `WITH` extension. |
 | `EXISTS { ... }` | Canonical GQL | supported | `EXISTS { ... }` | Correlated and uncorrelated read-only subquery. |
 | `COUNT { ... }` | Canonical GQL | supported | `COUNT { ... }` | Correlated and uncorrelated read-only subquery. |
-| `UNION` | Canonical GQL | supported | `UNION` | Set operation. |
+| `UNION` | Canonical GQL | supported | `UNION` | Set operation; `DISTINCT` is the explicit default. |
 | `UNION ALL` | Canonical GQL | supported | `UNION ALL` | Set operation preserving duplicates. |
-| `INTERSECT` | Canonical GQL | supported | `INTERSECT` | Set operation. |
-| `EXCEPT` | Canonical GQL | supported | `EXCEPT` | Set operation. |
+| `INTERSECT` | Canonical GQL | supported | `INTERSECT` | Set operation; `DISTINCT` is the explicit default. |
+| `INTERSECT ALL` | Canonical GQL | supported | `INTERSECT ALL` | Set operation keeping `min(left, right)` copies. |
+| `EXCEPT` | Canonical GQL | supported | `EXCEPT` | Set operation; `DISTINCT` is the explicit default. |
+| `EXCEPT ALL` | Canonical GQL | supported | `EXCEPT ALL` | Set operation keeping `max(left - right, 0)` copies. |
 | `DIFFERENT EDGES` | Canonical GQL | supported | `DIFFERENT EDGES` | Clause-wide edge uniqueness. |
 | `REPEATABLE ELEMENTS` | Canonical GQL | supported | `REPEATABLE ELEMENTS` | Default; no extra constraint. |
 | Grouped quantified path pattern | Canonical GQL | supported | `Grouped quantified paths` | Repeated path terms with group variable lists and inner modes. |
@@ -722,10 +725,12 @@ rows have no query case.
 | `WITH *` | pygrafito extension | supported | implemented | Part of the `WITH` extension | — | with-star-preserves-scope |
 | `EXISTS { ... }` | Canonical GQL | supported | implemented | Read-only correlated and uncorrelated subquery | — | exists-correlated-programs |
 | `COUNT { ... }` | Canonical GQL | supported | implemented | Read-only correlated and uncorrelated subquery | — | count-correlated-trusts |
-| `UNION` | Canonical GQL | supported | implemented | Set operation | — | union-deduplicates-program-and-user |
+| `UNION` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | — | union-deduplicates-program-and-user |
 | `UNION ALL` | Canonical GQL | supported | implemented | Set operation with duplicates | — | union-all-preserves-duplicates |
-| `INTERSECT` | Canonical GQL | supported | implemented | Set operation | — | intersect-keeps-program-names |
-| `EXCEPT` | Canonical GQL | supported | implemented | Set operation | — | except-removes-program-names |
+| `INTERSECT` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | — | intersect-keeps-program-names |
+| `INTERSECT ALL` | Canonical GQL | supported | implemented | Multiset intersection keeping `min(left, right)` copies | — | intersect-all-keeps-the-smaller-count, intersect-all-uses-canonical-equality |
+| `EXCEPT` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | — | except-removes-program-names |
+| `EXCEPT ALL` | Canonical GQL | supported | implemented | Multiset difference keeping `max(left - right, 0)` copies | — | except-all-subtracts-counts, except-all-returns-nothing-when-right-is-larger, except-all-keeps-unmatched-duplicates, set-quantifiers-chain-left-to-right |
 | `DIFFERENT EDGES` | Canonical GQL | supported | implemented | Match mode; applies across every path of one clause | — | different-edges-shared-edge, different-edges-quantified, different-edges-two-patterns, different-edges-parallel |
 | `REPEATABLE ELEMENTS` | Canonical GQL | supported | implemented | Match mode; default and no extra constraint | — | repeatable-elements-shared-edge |
 | Grouped quantified paths | Canonical GQL | supported | implemented | Parenthesized path repetition with list bindings, nested flattening, zero iterations, and inner modes | — | grouped-fixed-repetition, grouped-bounded-diamond, grouped-list-bindings, grouped-zero-iterations, grouped-nested, grouped-inner-mode |

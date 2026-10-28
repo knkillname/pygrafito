@@ -46,7 +46,7 @@ A statement is one or more linear segments separated by `NEXT`:
 ```text
 statement        = query-term { set-operator query-term } [order-clause] [offset-clause] [limit-clause] [;]
 query-term       = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment }
-set-operator     = "UNION" [ "ALL" ] | "INTERSECT" | "EXCEPT"
+set-operator     = ("UNION" | "INTERSECT" | "EXCEPT") [ "ALL" | "DISTINCT" ]
 segment          = { [OPTIONAL] MATCH <path pattern> [, ...] [WHERE <expression>]
                    | FOR <identifier> IN <expression> [ordinality]
                    | UNWIND <expression> AS <identifier> [ordinality]
@@ -64,11 +64,13 @@ yield-item       = <identifier> [ "AS" <identifier> ]
 ```
 
 A compound query combines two or more read-only linear queries with `UNION`,
-`UNION ALL`, `INTERSECT`, or `EXCEPT`. Every operand must return the same number
-of columns in the same order with the same names; the first operand names the
-result columns. A trailing `ORDER BY`, `OFFSET`, or `LIMIT` applies to the
-combined result, and an operand's final `RETURN` cannot carry those clauses.
-Operators are left-associative. See [Set operations](#set-operations).
+`INTERSECT`, or `EXCEPT`. Each operator accepts an optional `ALL` or `DISTINCT`
+quantifier; the bare operator and `DISTINCT` both use set semantics. Every
+operand must return the same number of columns in the same order with the same
+names; the first operand names the result columns. A trailing `ORDER BY`,
+`OFFSET`, or `LIMIT` applies to the combined result, and an operand's final
+`RETURN` cannot carry those clauses. Operators are left-associative. See
+[Set operations](#set-operations).
 
 A `MATCH` clause carries one or more comma-separated path patterns and an
 optional `WHERE`; `OPTIONAL MATCH` uses the same shape with left-join semantics.
@@ -969,11 +971,15 @@ inside a subquery.
 
 ## Set operations
 
-A compound query combines read-only linear queries with `UNION`, `UNION ALL`,
-`INTERSECT`, or `EXCEPT`. `UNION ALL` preserves duplicate rows; the other forms
-use set semantics and keep the first occurrence. Operators are left-associative.
-The first operand defines the result column names, and every operand must return
-the same number of columns in the same order with the same names:
+A compound query combines read-only linear queries with `UNION`, `INTERSECT`,
+or `EXCEPT`. Each operator accepts an optional `ALL` or `DISTINCT` quantifier.
+The bare operator and `DISTINCT` use set semantics and emit each distinct row
+once; `ALL` uses multiset semantics and keeps duplicate copies. Operators are
+left-associative, and each operator applies its own quantifier to the pair on
+its left, so `A INTERSECT ALL B EXCEPT ALL C` means
+`(A INTERSECT ALL B) EXCEPT ALL C`. The first operand defines the result column
+names, and every operand must return the same number of columns in the same
+order with the same names:
 
 ```text
 MATCH (n:Program) RETURN n.designation AS name
@@ -986,10 +992,44 @@ EXCEPT
 MATCH (n:Program) RETURN n.designation AS name
 ```
 
+Duplicate counts use the same canonical row equality as `UNION` and
+`RETURN DISTINCT`, so the integer `36` and the float `36.0` count as the same
+row. For `left = [1, 1, 1]` and `right = [1, 1]`, each form produces:
+
+| Operator | Result |
+| --- | --- |
+| `UNION` | one row `1` |
+| `UNION DISTINCT` | one row `1` |
+| `UNION ALL` | five rows `1` |
+| `INTERSECT` | one row `1` |
+| `INTERSECT DISTINCT` | one row `1` |
+| `INTERSECT ALL` | two rows `1`, because `min(3, 2) = 2` |
+| `EXCEPT` | no rows |
+| `EXCEPT DISTINCT` | no rows |
+| `EXCEPT ALL` | one row `1`, because `max(3 - 2, 0) = 1` |
+
+A multiset form makes the counting explicit:
+
+```text
+UNWIND [1, 1, 1] AS x RETURN x AS n
+INTERSECT ALL
+UNWIND [1, 1] AS x RETURN x AS n
+
+UNWIND [1, 1, 1] AS x RETURN x AS n
+EXCEPT ALL
+UNWIND [1, 1] AS x RETURN x AS n
+```
+
+The first query returns two copies of `1`; the second returns one copy. When
+the right operand has no copy of a row, `EXCEPT ALL` keeps every copy from the
+left operand. A second quantifier, as in `INTERSECT ALL DISTINCT`, is a syntax
+error.
+
 `ORDER BY`, `OFFSET`, and `LIMIT` after the compound apply to the combined
-result. A compound `ORDER BY` key must be an output column name. An operand's
-final `RETURN` cannot carry ordering or pagination. A compound query cannot
-contain a write, `FINISH`, or `RETURN NO BINDINGS`.
+result. A compound `ORDER BY` key must be an output column name. Without a
+compound `ORDER BY`, row order is unspecified. An operand's final `RETURN`
+cannot carry ordering or pagination. A compound query cannot contain a write,
+`FINISH`, or `RETURN NO BINDINGS`.
 
 ## Projection and result columns
 
@@ -1240,7 +1280,7 @@ Backtick-quoted identifiers may contain spaces, dots, and escaped backticks
 ```text
 statement        = query-term { set-operator query-term } [order-clause] [offset-clause] [limit-clause] [";"]
 query-term       = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment }
-set-operator     = "UNION" [ "ALL" ] | "INTERSECT" | "EXCEPT"
+set-operator     = ("UNION" | "INTERSECT" | "EXCEPT") [ "ALL" | "DISTINCT" ]
 segment          = { match-clause | for-clause | unwind-clause | filter-clause
                  | with-clause | let-clause | insert-clause | create-clause
                  | merge-clause | set-clause | remove-clause | delete-clause }

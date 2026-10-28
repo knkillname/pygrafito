@@ -1313,7 +1313,9 @@ class SetOperation(Enum):
     UNION = "UNION"
     UNION_ALL = "UNION ALL"
     INTERSECT = "INTERSECT"
+    INTERSECT_ALL = "INTERSECT ALL"
     EXCEPT = "EXCEPT"
+    EXCEPT_ALL = "EXCEPT ALL"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

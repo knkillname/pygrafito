@@ -1049,3 +1049,37 @@ class TestExpressionSurfaceParsing:
             Parser.parse_statement(
                 "MATCH (n:Program) RETURN n ORDER BY n UNION MATCH (m:Program) RETURN m"
             )
+
+    def test_set_quantifiers(self) -> None:
+        statement = Parser.parse_statement(
+            "UNWIND [1] AS x RETURN x AS n "
+            "UNION ALL UNWIND [1] AS x RETURN x AS n "
+            "INTERSECT ALL UNWIND [1] AS x RETURN x AS n "
+            "EXCEPT ALL UNWIND [1] AS x RETURN x AS n"
+        )
+        assert isinstance(statement, CompoundStatement)
+        assert statement.operators == (
+            SetOperation.UNION_ALL,
+            SetOperation.INTERSECT_ALL,
+            SetOperation.EXCEPT_ALL,
+        )
+
+    def test_explicit_distinct_is_the_bare_operator(self) -> None:
+        statement = Parser.parse_statement(
+            "UNWIND [1] AS x RETURN x AS n "
+            "UNION DISTINCT UNWIND [1] AS x RETURN x AS n "
+            "INTERSECT DISTINCT UNWIND [1] AS x RETURN x AS n "
+            "EXCEPT DISTINCT UNWIND [1] AS x RETURN x AS n"
+        )
+        assert isinstance(statement, CompoundStatement)
+        assert statement.operators == (
+            SetOperation.UNION,
+            SetOperation.INTERSECT,
+            SetOperation.EXCEPT,
+        )
+
+    def test_set_operator_takes_one_quantifier(self) -> None:
+        with pytest.raises(QuerySyntaxError):
+            Parser.parse_statement(
+                "UNWIND [1] AS x RETURN x AS n INTERSECT ALL DISTINCT UNWIND [1] AS x RETURN x AS n"
+            )

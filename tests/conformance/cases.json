@@ -2449,6 +2449,120 @@
       ]
     },
     {
+      "name": "union-distinct-is-the-bare-form",
+      "feature": "union",
+      "fixture": "tron-cycle",
+      "query": "UNWIND [1, 1] AS x RETURN x AS n UNION DISTINCT UNWIND [1] AS x RETURN x AS n",
+      "expect": {
+        "rows": [
+          {
+            "n": 1
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "intersect-all-keeps-the-smaller-count",
+      "feature": "intersect-all",
+      "fixture": "tron-cycle",
+      "query": "UNWIND [1, 1, 1] AS x RETURN x AS n INTERSECT ALL UNWIND [1, 1] AS x RETURN x AS n",
+      "expect": {
+        "rows": [
+          {
+            "n": 1
+          },
+          {
+            "n": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "intersect-all-uses-canonical-equality",
+      "feature": "intersect-all",
+      "fixture": "tron-cycle",
+      "query": "UNWIND [36] AS x RETURN x AS n INTERSECT ALL UNWIND [36.0] AS x RETURN x AS n",
+      "expect": {
+        "rows": [
+          {
+            "n": 36
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "except-all-subtracts-counts",
+      "feature": "except-all",
+      "fixture": "tron-cycle",
+      "query": "UNWIND [1, 1, 1] AS x RETURN x AS n EXCEPT ALL UNWIND [1, 1] AS x RETURN x AS n",
+      "expect": {
+        "rows": [
+          {
+            "n": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "except-all-returns-nothing-when-right-is-larger",
+      "feature": "except-all",
+      "fixture": "tron-cycle",
+      "query": "UNWIND [1] AS x RETURN x AS n EXCEPT ALL UNWIND [1, 1] AS x RETURN x AS n",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "except-all-keeps-unmatched-duplicates",
+      "feature": "except-all",
+      "fixture": "tron-cycle",
+      "query": "UNWIND [1, 1] AS x RETURN x AS n EXCEPT ALL UNWIND [] AS x RETURN x AS n",
+      "expect": {
+        "rows": [
+          {
+            "n": 1
+          },
+          {
+            "n": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "set-quantifiers-chain-left-to-right",
+      "feature": "except-all",
+      "fixture": "tron-cycle",
+      "query": "UNWIND [1, 1, 2] AS x RETURN x AS n INTERSECT ALL UNWIND [1, 2, 2] AS x RETURN x AS n EXCEPT ALL UNWIND [1] AS x RETURN x AS n",
+      "expect": {
+        "rows": [
+          {
+            "n": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
       "name": "union-order-and-limit",
       "feature": "union",
       "fixture": "tron-cycle",

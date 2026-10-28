@@ -181,3 +181,23 @@ class TestExplainComposition(_ExplainTestCase):
         finish_plan = graph.explain("MATCH (n:Program) FINISH")
         assert "LET" in let_plan
         assert "FINISH" in finish_plan
+
+
+class TestExplainSetOperations(_ExplainTestCase):
+    """Verify compound operators appear in plan inspection."""
+
+    def test_all_quantifiers_are_reported(self, graph: Graph) -> None:
+        plan = graph.explain(
+            "UNWIND [1] AS x RETURN x AS n "
+            "INTERSECT ALL UNWIND [1] AS x RETURN x AS n "
+            "EXCEPT ALL UNWIND [2] AS x RETURN x AS n"
+        )
+        assert plan.count("INTERSECT ALL") == 1
+        assert plan.count("EXCEPT ALL") == 1
+
+    def test_explicit_distinct_renders_the_bare_operator(self, graph: Graph) -> None:
+        plan = graph.explain(
+            "UNWIND [1] AS x RETURN x AS n UNION DISTINCT UNWIND [1] AS x RETURN x AS n"
+        )
+        assert "UNION" in plan
+        assert "UNION DISTINCT" not in plan

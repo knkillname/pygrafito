@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correlated forms that refer to the current row.
 - Queries can now combine read-only results with `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`,
   with ordering and pagination over the combined rows.
+- Queries can now use `INTERSECT ALL` and `EXCEPT ALL` to keep duplicate rows when combining
+  results, and can write `DISTINCT` explicitly after `UNION`, `INTERSECT`, or `EXCEPT` as the same
+  default behavior. `INTERSECT ALL` keeps as many copies as both sides share, and `EXCEPT ALL`
+  removes one copy from the left for each copy on the right.
 - `WITH *` now keeps the full current scope without listing every variable.
 - The GQL profile now publishes the complete 1.0 target, including the expression, subquery,
   set-operation, and path surfaces, and distinguishes what works today, what is planned for 1.0,

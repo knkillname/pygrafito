@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Execute planned queries against SQLite and assemble results."""
 
+import collections
 import contextlib
 import dataclasses
 import functools
@@ -1842,30 +1843,61 @@ LetStage | YieldStage
         -------
         list[ProjectedRow]
             Combined rows.
+
+        Notes
+        -----
+        Bare operators and their explicit ``DISTINCT`` spelling use set
+        semantics, emitting each distinct row once in first-seen order.
+        ``ALL`` variants use multiset semantics: ``INTERSECT ALL`` keeps
+        ``min(left, right)`` copies of a row and ``EXCEPT ALL`` keeps
+        ``max(left - right, 0)`` copies.
         """
         if operation is SetOperation.UNION_ALL:
             return [*left, *right]
         if operation is SetOperation.UNION:
             return self._distinct([*left, *right])
-        right_keys = {tuple(ValueKey(value) for value in row.values) for row in right}
+        right_counts: collections.Counter[tuple[ValueKey, ...]] = collections.Counter(
+            self._row_key(row) for row in right
+        )
         if operation is SetOperation.INTERSECT:
-            return self._distinct(
-                [
-                    row
-                    for row in left
-                    if tuple(ValueKey(value) for value in row.values) in right_keys
-                ]
-            )
+            return self._distinct([row for row in left if right_counts[self._row_key(row)] > 0])
+        if operation is SetOperation.INTERSECT_ALL:
+            intersect_all: list[ProjectedRow] = []
+            for row in left:
+                key = self._row_key(row)
+                if right_counts[key] > 0:
+                    intersect_all.append(row)
+                    right_counts[key] -= 1
+            return intersect_all
         if operation is SetOperation.EXCEPT:
-            return self._distinct(
-                [
-                    row
-                    for row in left
-                    if tuple(ValueKey(value) for value in row.values) not in right_keys
-                ]
-            )
+            return self._distinct([row for row in left if right_counts[self._row_key(row)] == 0])
+        if operation is SetOperation.EXCEPT_ALL:
+            except_all: list[ProjectedRow] = []
+            for row in left:
+                key = self._row_key(row)
+                if right_counts[key] > 0:
+                    right_counts[key] -= 1
+                    continue
+                except_all.append(row)
+            return except_all
         message = f"unsupported set operator {operation.value}"
         raise QueryExecutionError(message)
+
+    @staticmethod
+    def _row_key(row: ProjectedRow) -> tuple[ValueKey, ...]:
+        """Return the canonical equality key of one projected row.
+
+        Parameters
+        ----------
+        row : ProjectedRow
+            Projected row to key.
+
+        Returns
+        -------
+        tuple[ValueKey, ...]
+            Canonical values in column order.
+        """
+        return tuple(ValueKey(value) for value in row.values)
 
     def _count_subquery(
         self,

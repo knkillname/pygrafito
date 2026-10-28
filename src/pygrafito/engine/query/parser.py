@@ -304,26 +304,26 @@ class Parser:
         ------
         QuerySyntaxError
             If the token is not a set operator.
-        QuerySemanticError
-            If an out-of-profile ``ALL`` form is used.
+
+        Notes
+        -----
+        ``ALL`` selects multiset semantics. ``DISTINCT`` is the explicit spelling
+        of the bare operator's set semantics and produces the same enum member.
         """
         if self._match_keyword(Keyword.UNION):
             if self._match_keyword(Keyword.ALL):
                 return SetOperation.UNION_ALL
+            self._match_keyword(Keyword.DISTINCT)
             return SetOperation.UNION
         if self._match_keyword(Keyword.INTERSECT):
-            if self._current().is_keyword(Keyword.ALL):
-                self._reject_unsupported(
-                    self._current(),
-                    "INTERSECT ALL is out of profile",
-                )
+            if self._match_keyword(Keyword.ALL):
+                return SetOperation.INTERSECT_ALL
+            self._match_keyword(Keyword.DISTINCT)
             return SetOperation.INTERSECT
         if self._match_keyword(Keyword.EXCEPT):
-            if self._current().is_keyword(Keyword.ALL):
-                self._reject_unsupported(
-                    self._current(),
-                    "EXCEPT ALL is out of profile",
-                )
+            if self._match_keyword(Keyword.ALL):
+                return SetOperation.EXCEPT_ALL
+            self._match_keyword(Keyword.DISTINCT)
             return SetOperation.EXCEPT
         self._fail_syntax("expected a set operator", self._current())
 
