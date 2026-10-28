@@ -71,7 +71,8 @@ Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do n
 - `CHANGELOG.md` is required. It follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Every change affecting behavior, the public API, dependencies, packaging, or the development workflow MUST add an entry under `## [Unreleased]` in the same task group as the code.
 - Use the Keep a Changelog categories: `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, and `Security`. Omit empty categories.
-- Releases move the `[Unreleased]` entries into a new `## [X.Y.Z] - YYYY-MM-DD` section, then run `hatch version <version>`.
+- Write every changelog entry for end users: short, friendly, and outcome-focused. Use one or two sentences per user-visible change, say what changed and what the user can now do, and omit internal class or function names, SQL details, test names, file paths, and implementation mechanics. Mark breaking changes plainly and state the migration step when one is needed.
+- Releases rewrite and move the `[Unreleased]` entries into a new `## [X.Y.Z] - YYYY-MM-DD` section using the end-user rule above, then run `hatch version <version>`.
 - `hatch version` is the only supported way to change the version; `pyproject.toml` reads it dynamically from `src/pygrafito/__about__.py`.
 - Keep an empty `## [Unreleased]` section at the top after every release.
 

@@ -7,95 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-27
+
+This is a pre-1.0 release focused on GQL composition and path control. It adds multi-step
+queries, grouping, path modes, query budgets, richer relationship labels and directions, and
+version 2 snapshots and views. The GQL profile is not complete yet: open-ended traversal, match
+modes, grouped quantified paths, path search, and parts of the expression vocabulary remain
+deferred; the [published GQL
+profile](https://knkillname.github.io/pygrafito/reference/gql-profile.html) explains what is ready
+and what is not.
+
+This release also includes breaking changes: paths now default to `WALK`, element ids are not
+reused, relationship uniqueness is label-scoped, relationships use labels and direction, `--` is a
+comment, and storage moves to version 2.
+
+**Upgrading from 0.8:** this release writes database and snapshot version 2 and refuses version 1
+files. There is no in-place upgrade. Export any 0.8 data with 0.8 before moving it.
+
 ### Added
 
-- GQL composition: `LET` additive bindings, `NEXT` segments with optional `YIELD` selection and
-  renaming, `FINISH` for no-result statements, and explicit `GROUP BY` with `GROUP BY ()`,
-  `RETURN DISTINCT ... GROUP BY ...`, and expression keys as a labeled pygrafito extension.
-  `RETURN NO BINDINGS` is supported as a final-only zero-column extension.
-- `FOR ... WITH ORDINALITY` and `WITH OFFSET`, also accepted after the `UNWIND` alias, with
-  one-based and zero-based position variables.
-- One ordered read/write operation pipeline so later `NEXT` segments observe earlier writes while
-  keeping one transaction and one query budget per statement.
-- `QueryBudget` and `QueryBudgetExceededError` bound every query with relationship-expansion and
-  intermediate-row counters plus an optional wall-clock limit. `Graph.open` sets the default, and
-  `Graph.query`, `Transaction.query`, and `PreparedQuery.execute` accept a per-execution override.
-  Exceeding a counter raises before any result and rolls a write statement back entirely.
-- Path modes `WALK`, `TRAIL`, `SIMPLE`, and `ACYCLIC`, accepted per clause or per path. `SIMPLE`
-  allows a closed path and `ACYCLIC` does not.
-- The canonical closed quantifiers `{n}`, `{m,n}`, and `{,n}`, with the legacy `*n..m` form kept
-  as a compatibility construct.
-- The remaining canonical edge directions: `<->` for either stored direction but never an
-  undirected relationship, `<~` for incoming-or-undirected, and `~>` for outgoing-or-undirected.
-- A data-driven conformance corpus at `tests/conformance/cases.json`, executed by
-  `tests/test_conformance.py`. The matrix/corpus consistency test keeps every `supported` row
-  covered and every case tied to a matrix feature.
-- The canonical GQL surface is executable: `INSERT`, `FOR`, `FILTER`, `OFFSET`, `RETURN ALL`,
-  `RETURN *`, `NULLS FIRST`/`NULLS LAST`, `NODETACH DELETE`, the `->`, `<-`, `-`, and `~`
-  directions, label expressions with `&`, `|`, `!`, and `%`, `IS` labels, inline element
-  `WHERE`, and `--` line comments. `CREATE`, `UNWIND`, stage `WHERE`, `SKIP`, `-->`, `<--`, and
-  `:A:B` remain compatibility aliases.
-- A runnable example layer under `examples/` with a `python -m examples` front door, three
-  audience lanes, terminal tours, and a deterministic builder. It ships a curated franchise graph
-  spanning three sources, derived cast and place aggregates, and a version 2 JSONL snapshot.
-- The example cast and place datasets use weighted edges with explicit `basis` metadata, and the
-  synthetic scale generator is shared with the benchmark harness.
-- A GQL tour catalog classifies each `examples/tours/*.gql` file by profile tier and names the
-  follow-up change that will migrate it.
-- A local-only screenplay and transcript extractor that emits aggregate JSON without dialogue or
-  action text, tested with an invented fixture.
-- A published GQL language profile at `docs/reference/gql-profile.md`, covering the five-tier
-  construct classification, canonical surface, compatibility aliases and constructs, pygrafito
-  extensions, path-mode and query-budget decisions, conformance matrix, corpus contract, and
-  migration guidance. The profile marks the remaining open-ended traversal forms as deferred.
-- A documentation contract test that keeps the GQL profile page, tier headings, and conformance
-  matrix statuses consistent.
-- Relationships carry zero or more labels, can be directed or undirected, and expose a sorted
-  label tuple and a `directed` flag. The Python API, traversal, query dialect, shell, indexes,
-  constraints, and interop format use the new element model.
-- `Graph.add_labels` and `Graph.remove_labels` accept a `Relationship` snapshot as well as a
-  `Node`, so relationship labels can be added and removed directly.
-- Schema version 2 and JSONL snapshot version 2. Snapshots carry relationship `labels` and
-  `directed`, and the read-only views expose the same fields.
+- Build multi-step GQL queries with `LET`, `NEXT`, `YIELD`, and `FINISH`, including statements that
+  return no rows.
+- Group results with `GROUP BY`, including `GROUP BY ()`, `RETURN DISTINCT ... GROUP BY`, and
+  expression keys. `RETURN NO BINDINGS` remains available as a final-only zero-column result.
+- Number rows with `FOR ... WITH ORDINALITY` or `WITH OFFSET`, using one-based and zero-based
+  positions; both also work with `UNWIND`.
+- Later `NEXT` steps can see earlier writes, while the whole statement still uses one transaction
+  and one query budget.
+- Every query is bounded by a configurable budget covering relationship expansions, intermediate
+  rows, and optional wall-clock time. Set a graph-wide default or override it per query; exceeding
+  the budget stops before returning a result and rolls back writes.
+- Control path repetition with `WALK`, `TRAIL`, `SIMPLE`, and `ACYCLIC`, set per clause or per
+  path. `SIMPLE` allows a closed path; `ACYCLIC` does not.
+- Use the closed quantifiers `{n}`, `{m,n}`, and `{,n}`. The legacy `*n..m` form still works with
+  trail semantics.
+- All edge directions are available, including `<->`, `<~`, and `~>` for either-direction,
+  incoming-or-undirected, and outgoing-or-undirected relationships.
+- Canonical GQL runs end to end, including `INSERT`, `FOR`, `FILTER`, `OFFSET`, `RETURN ALL` and
+  `RETURN *`, null ordering, `NODETACH DELETE`, label expressions, `IS`, inline `WHERE`, and `--`
+  comments. The familiar `CREATE`, `UNWIND`, stage `WHERE`, `SKIP`, double-dash arrows, and
+  `:A:B` spellings still work.
+- Relationships carry zero or more labels and can be directed or undirected. The Python API,
+  traversal, query language, shell, indexes, constraints, and interop format all use the new
+  model, including sorted labels and a `directed` flag.
+- You can add or remove labels directly on relationship snapshots with the same API used for
+  nodes.
+- A new runnable example layer includes a single command-line front door, three audience lanes,
+  terminal tours, a deterministic builder that produces a database or version 2 snapshot, and a
+  curated franchise graph spanning three sources. Tours are labeled by GQL profile tier.
+- The example cast and place data include weighted relationships and source metadata. A local-only
+  extractor can turn screenplay and transcript sources into aggregate JSON without storing
+  dialogue or action text.
+- The GQL profile is published with the five-tier construct classification, canonical surface,
+  aliases, extensions, path-mode and budget rules, conformance matrix, and migration guidance.
+  Open-ended traversal is marked deferred, the profile and matrix are checked for consistency, and
+  a data-driven conformance suite backs the matrix.
 
 ### Changed
 
-- `LET`, `NEXT` with `YIELD`, `GROUP BY`, `FINISH`, `WITH ORDINALITY`, `WITH OFFSET`, and the
-  `RETURN NO BINDINGS` extension now execute; only open-ended traversal remains gated. The GQL
-  profile matrix, status board, and conformance corpus reflect the implemented composition surface.
-- The frontend recognizes the target GQL vocabulary. Constructs the profile lists but this
-  release cannot execute now raise a positioned semantic error naming the construct and the
-  follow-up change, instead of a generic unexpected-token error.
-- The query-language policy now classifies every construct as canonical GQL, synthetic alias,
-  compatibility construct, pygrafito extension, or out of profile. Canonical GQL paths default to
-  `WALK`; the legacy `*n..m` quantifier keeps `TRAIL`, and an explicit path or clause mode wins
-  over both.
-- **BREAKING** A canonical path without an explicit mode now defaults to `WALK` instead of the
-  implicit relationship-unique trail. Use `MATCH TRAIL` or a legacy `*n..m` quantifier to keep the
-  old behavior. The Python `paths()` API remains a bounded, relationship-unique trail enumerator.
-- Open-ended upper bounds (`*`, `+`, `*n..`, and `{m,}`) are deferred and raise a positioned error
-  naming `add-gql-unbounded-traversal`. The `{n,m}` quantifier is implemented and no longer
-  gated.
-- **BREAKING** Element ids are allocated with `AUTOINCREMENT` and are never reused after a
-  delete.
-- **BREAKING** `Relationship.type` is replaced by `Relationship.labels` and
-  `Relationship.directed`; `Graph.add_relationship` and `Graph.find_relationships` take labels
-  and an optional direction filter.
-- **BREAKING** Relationship uniqueness constraints scope by label instead of a single
+- The composition surface now executes end to end; only open-ended traversal remains gated.
+- Unsupported constructs now fail with a clear, positioned message that names the missing feature
+  instead of a generic parse error.
+- Every query construct is now labeled as canonical GQL, compatibility, extension, or out of
+  profile, so unsupported syntax has a clear status. An explicit path mode still wins over the
+  default.
+- **BREAKING** Canonical paths now default to `WALK` instead of the old relationship-unique trail.
+  Use `MATCH TRAIL` or a legacy `*n..m` quantifier to keep the old behavior. The Python `paths()`
+  helper remains a bounded trail enumerator.
+- Open-ended bounds such as `*`, `+`, `*n..`, and `{m,}` are not available yet and fail with a
+  clear message.
+- **BREAKING** Element ids are never reused after deletion.
+- **BREAKING** Relationships now use labels and direction instead of a single `type`. Relationship
+  creation and lookup take labels and an optional direction filter.
+- **BREAKING** Relationship uniqueness constraints now scope by label instead of a single
   relationship type.
-- **BREAKING** A version 1 database or JSONL snapshot is refused. This pre-1.0 release does not
-  migrate the old layout; create a fresh graph or export with 0.8 first.
-- `/opsx-apply` runs must now update the Sphinx documentation under `docs/` for every behavior,
-  public API, CLI, or configuration change they implement, and pass `hatch run docs:build` before
-  marking the affected tasks complete.
+- **BREAKING** Databases and JSONL snapshots now use version 2. Version 1 files are refused; there
+  is no in-place upgrade. Export 0.8 data with 0.8 before moving it. Read-only views are also
+  version 2 and expose relationship labels and direction.
+- Contributors now update the documentation and pass the docs build as part of every apply run, so
+  behavior changes ship with current documentation.
 
 ### Removed
 
-- **BREAKING** `--` is no longer an undirected relationship arrow. It is a line comment, a `--`
-  that immediately follows a node or relationship pattern is a syntax error, and the replacement
-  for the old form is `-`.
-- **BREAKING** `Relationship.type`, the single relationship-type column, the version 1 snapshot
-  reader, and the version 1 view definitions.
+- **BREAKING** `--` is now only a line comment. Use `-` for an undirected relationship; a `--` that
+  follows a pattern is a syntax error.
+- **BREAKING** The old single-type relationship model, the version 1 snapshot reader, and the
+  version 1 views have been removed.
 
 ## [0.8.0] - 2026-10-26
 
