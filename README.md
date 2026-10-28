@@ -46,6 +46,10 @@ Every Python example in this README is executed by the test suite.
 - CSV and JSONL import, versioned JSONL export/restore, and read-only SQL views.
 - An interactive shell, transactions, read-only handles, backups, and integrity checks.
 
+The query language is moving to GQL. The target profile, including the canonical spelling,
+compatibility aliases, and pygrafito extensions, is documented in the
+[GQL profile](https://knkillname.github.io/pygrafito/reference/gql-profile.html).
+
 ## Documentation
 
 - [Five-minute quickstart](https://knkillname.github.io/pygrafito/getting-started/quickstart.html)

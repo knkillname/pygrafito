@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A published GQL language profile at `docs/reference/gql-profile.md`, covering the five-tier
+  construct classification, canonical surface, compatibility aliases and constructs, pygrafito
+  extensions, path-mode and query-budget decisions, conformance matrix, corpus contract, and
+  migration guidance. The current release continues to use the transitional Cypher-flavored
+  dialect; the profile marks unimplemented canonical forms as target or gated.
+- A documentation contract test that keeps the GQL profile page, tier headings, and conformance
+  matrix statuses consistent.
 - Relationships carry zero or more labels, can be directed or undirected, and expose a sorted
   label tuple and a `directed` flag. The Python API, traversal, query dialect, shell, indexes,
   constraints, and interop format use the new element model.
@@ -19,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The query-language policy now classifies every construct as canonical GQL, synthetic alias,
+  compatibility construct, pygrafito extension, or out of profile. The target default path mode
+  is ISO `WALK`, gated on a query budget; the legacy `*n..m` quantifier keeps `TRAIL`.
 - **BREAKING** Element ids are allocated with `AUTOINCREMENT` and are never reused after a
   delete.
 - **BREAKING** `Relationship.type` is replaced by `Relationship.labels` and

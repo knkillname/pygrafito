@@ -45,6 +45,10 @@ Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do n
 - `INTEGER PRIMARY KEY` ids may be reused after deletion; never treat them as permanent external keys.
 - Traversal: `paths()` enumerates relationship-unique trails (nodes may repeat, relationships may not); `traverse()` yields distinct nodes at shortest depth; `shortest_path()` uses bidirectional BFS. A `(node, depth)` DP counts walks and is wrong. `count_paths` is deferred.
 - `paths()` requires a maximum depth and supports an optional limit and lazy iteration.
+- The target query language is GQL. Canonical spelling, compatibility aliases, compatibility
+  constructs, and extensions are defined in `docs/reference/gql-profile.md`. A change that adds or
+  changes a query construct MUST update that profile, its conformance matrix, and the conformance
+  corpus.
 
 ## Testing
 

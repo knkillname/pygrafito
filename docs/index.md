@@ -45,7 +45,8 @@ Task-oriented pages for querying, indexes, constraints, import, interop, the she
 :::{grid-item-card} Reference
 :link: reference/query-language
 :link-type: doc
-Grammar, CLI options, snapshot format, index behavior, and the embedding contract.
+Grammar, the GQL profile, CLI options, snapshot format, index behavior, and the embedding
+contract.
 :::
 
 :::{grid-item-card} API reference
@@ -85,6 +86,7 @@ guides/embedding
 :caption: Reference
 
 reference/query-language
+reference/gql-profile
 reference/cli
 reference/snapshot-format
 reference/index-behavior

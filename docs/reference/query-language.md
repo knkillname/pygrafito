@@ -1,5 +1,11 @@
 # Query language reference
 
+:::{note}
+This page describes the transitional Cypher-flavored dialect that the current release executes.
+The target language contract is the [GQL profile](gql-profile.md). The profile marks canonical
+forms that are not yet implemented as target or gated.
+:::
+
 This page is the complete reference for the `pygrafito` query dialect: grammar, pattern
 semantics, write clauses, value and null rules, functions, aggregation, ordering, parameters,
 and errors. For a task-first introduction, start with [Query your graph](../guides/querying.md).
