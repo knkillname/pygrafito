@@ -4,7 +4,7 @@
 """Explicit write transactions."""
 
 import contextlib
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from sqlite3 import Connection, Error, OperationalError
 from types import TracebackType
 from typing import Self
@@ -229,8 +229,10 @@ class Transaction:
     def add_relationship(
         self,
         start: Node | int,
-        rel_type: str,
+        labels: str | Iterable[str],
         end: Node | int,
+        *,
+        directed: bool = True,
         **properties: Value,
     ) -> Relationship:
         """Create a relationship inside the transaction.
@@ -238,11 +240,14 @@ class Transaction:
         Parameters
         ----------
         start : Node | int
-            Start node or its id.
-        rel_type : str
-            Non-empty relationship type.
+            First endpoint node or its id.
+        labels : str | Iterable[str]
+            Labels to attach; a string is one label.
         end : Node | int
-            End node or its id.
+            Second endpoint node or its id.
+        directed : bool, optional
+            Whether the endpoints carry source and destination meaning, by
+            default ``True``.
         **properties : Value
             Properties to attach.
 
@@ -254,9 +259,10 @@ class Transaction:
         self._require_active()
         return self._relationship_repository.create(
             self._node_id(start),
-            rel_type,
+            labels,
             self._node_id(end),
-            properties,
+            directed=directed,
+            properties=properties,
         )
 
     def set_properties(
@@ -315,47 +321,53 @@ class Transaction:
 
     def add_labels(
         self,
-        node: Node | int,
+        element: Node | Relationship | int,
         *labels: str,
-    ) -> Node:
-        """Add labels to a node inside the transaction.
+    ) -> Node | Relationship:
+        """Add labels to an element inside the transaction.
 
         Parameters
         ----------
-        node : Node | int
-            Node or its id.
+        element : Node | Relationship | int
+            Node or relationship snapshot, or a node id.
         *labels : str
             Labels to add.
 
         Returns
         -------
-        Node
-            Snapshot of the updated node.
+        Node | Relationship
+            Snapshot of the updated element.
         """
         self._require_active()
-        return self._node_repository.add_labels(self._node_id(node), labels)
+        target = self._label_target(element)
+        if isinstance(target, Node):
+            return self._node_repository.add_labels(target.id, labels)
+        return self._relationship_repository.add_labels(target.id, labels)
 
     def remove_labels(
         self,
-        node: Node | int,
+        element: Node | Relationship | int,
         *labels: str,
-    ) -> Node:
-        """Remove labels from a node inside the transaction.
+    ) -> Node | Relationship:
+        """Remove labels from an element inside the transaction.
 
         Parameters
         ----------
-        node : Node | int
-            Node or its id.
+        element : Node | Relationship | int
+            Node or relationship snapshot, or a node id.
         *labels : str
             Labels to remove.
 
         Returns
         -------
-        Node
-            Snapshot of the updated node.
+        Node | Relationship
+            Snapshot of the updated element.
         """
         self._require_active()
-        return self._node_repository.remove_labels(self._node_id(node), labels)
+        target = self._label_target(element)
+        if isinstance(target, Node):
+            return self._node_repository.remove_labels(target.id, labels)
+        return self._relationship_repository.remove_labels(target.id, labels)
 
     def delete(
         self,
@@ -444,15 +456,18 @@ class Transaction:
 
     def find_relationships(
         self,
-        rel_type: str | None = None,
+        *labels: str,
+        directed: bool | None = None,
         **properties: Value,
     ) -> Iterator[Relationship]:
         """Find relationships inside the transaction.
 
         Parameters
         ----------
-        rel_type : str | None, optional
-            Relationship type every match must have, by default any type.
+        *labels : str
+            Labels every match must carry.
+        directed : bool | None, optional
+            Direction filter, by default any direction.
         **properties : Value
             Exact property values every match must have.
 
@@ -462,7 +477,7 @@ class Transaction:
             Matching relationship snapshots.
         """
         self._require_active()
-        return self._relationship_repository.find(rel_type, properties)
+        return self._relationship_repository.find(labels, properties, directed=directed)
 
     def query(
         self,
@@ -544,4 +559,32 @@ class Transaction:
         if isinstance(node, int) and not isinstance(node, bool):
             return node
         message = "node must be a Node snapshot or integer id"
+        raise ValidationError(message)
+
+    def _label_target(self, element: Node | Relationship | int) -> Node | Relationship:
+        """Resolve the element targeted by a label write.
+
+        A bare integer addresses a node, preserving the original node-only
+        signature. Pass a :class:`Relationship` snapshot to target an edge.
+
+        Parameters
+        ----------
+        element : Node | Relationship | int
+            Element snapshot or node id.
+
+        Returns
+        -------
+        Node | Relationship
+            Snapshot of the targeted element.
+
+        Raises
+        ------
+        ValidationError
+            If the argument is not a node, relationship, or integer id.
+        """
+        if isinstance(element, (Node, Relationship)):
+            return element
+        if isinstance(element, int) and not isinstance(element, bool):
+            return self._node_repository.get(element)
+        message = "element must be a Node, Relationship, or integer node id"
         raise ValidationError(message)

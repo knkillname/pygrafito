@@ -289,7 +289,7 @@ class TestQueryExecution(_QueryGraph):
         assert isinstance(relationship, Relationship)
         assert isinstance(target, Node)
         assert node.id > 0
-        assert relationship.rel_type == "TRUSTS"
+        assert relationship.labels == ("TRUSTS",)
         assert target["designation"] == "Tron"
 
     def test_scalar_functions(self, graph: Graph) -> None:

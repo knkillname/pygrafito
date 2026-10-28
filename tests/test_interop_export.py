@@ -44,7 +44,7 @@ class TestExport:
             summary = graph.export_jsonl(destination)
 
         expected = (
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,'
             '"nodes":4,"relationships":3}\n'
             '{"kind":"node","id":1,"labels":["Program"],'
             '"properties":{"cycles":36,"designation":"Kevin Flynn"}}\n'
@@ -53,11 +53,11 @@ class TestExport:
             '{"kind":"node","id":3,"labels":["Program"],'
             '"properties":{"cycles":40,"designation":"Tron"}}\n'
             '{"kind":"node","id":4,"labels":[],"properties":{"cycles":37}}\n'
-            '{"kind":"relationship","id":1,"type":"ALLIES_WITH",'
+            '{"kind":"relationship","id":1,"labels":["ALLIES_WITH"],"directed":true,'
             '"start_id":1,"end_id":2,"properties":{"since_cycle":2020}}\n'
-            '{"kind":"relationship","id":2,"type":"ALLIES_WITH",'
+            '{"kind":"relationship","id":2,"labels":["ALLIES_WITH"],"directed":true,'
             '"start_id":1,"end_id":2,"properties":{"since_cycle":2021}}\n'
-            '{"kind":"relationship","id":3,"type":"GUARDS",'
+            '{"kind":"relationship","id":3,"labels":["GUARDS"],"directed":true,'
             '"start_id":3,"end_id":3,"properties":{}}\n'
         )
         assert destination.read_text(encoding="utf-8") == expected
@@ -81,7 +81,7 @@ class TestExport:
 
         assert summary == InteropSummary(nodes=0, relationships=0)
         assert destination.read_text(encoding="utf-8") == (
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,"nodes":0,"relationships":0}\n'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,"nodes":0,"relationships":0}\n'
         )
 
     def test_read_only_handle(self, populated: Path, tmp_path: Path) -> None:

@@ -8,6 +8,12 @@ schema: spec-driven
 #   context: |
 #     Designs and tasks must cover Windows, macOS, and Linux
 #     Write all artifacts in Spanish
+context: |
+  Every `/opsx-apply` run MUST update the Sphinx documentation under `docs/`
+  for every behavior, public API, CLI, or configuration change it implements:
+  add or update the relevant pages, guides, references, and `toctree` entries,
+  then run `hatch run docs:build` and fix every warning before marking the
+  affected tasks complete. Plans and tasks must include this documentation work.
 
 # Per-artifact rules (optional)
 # Add custom rules for specific artifacts.

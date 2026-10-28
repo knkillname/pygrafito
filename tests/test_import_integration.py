@@ -4,8 +4,9 @@
 """End-to-end tests for statement-driven import and reopen."""
 
 import pathlib
+import typing
 
-from pygrafito import Graph
+from pygrafito import Graph, Relationship
 
 
 class TestImportIntegration:
@@ -73,6 +74,15 @@ class TestImportIntegration:
                 "RETURN a.designation AS source, b.designation AS target"
             )
             assert [tuple(row.values()) for row in result] == [("Kevin Flynn", "Quorra")]
+            relationship = typing.cast(
+                Relationship,
+                graph.query("MATCH ()-[r]->() RETURN r").rows[0]["r"],
+            )
+            # The transitional statement-driven importer creates one label and a
+            # directed edge. Multi-label and undirected rows belong to the GQL
+            # query core or to restore_jsonl.
+            assert relationship.labels == ("ALLIES_WITH",)
+            assert relationship.directed is True
 
     def test_conditional_update_after_reopen(self, tmp_path: pathlib.Path) -> None:
         database = tmp_path / "grid.db"

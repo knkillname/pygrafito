@@ -344,7 +344,12 @@ class PatternEngine:
             Complete binding for one match.
         """
         types = frozenset(relationship.types) if relationship.types else None
-        for edge, target_id in snapshot.edges(state.current, relationship.direction, types):
+        for edge, target_id in self._arrow_edges(
+            snapshot,
+            state.current,
+            relationship.direction,
+            types,
+        ):
             if edge.id in state.used or not self._relationship_matches(
                 relationship,
                 edge,
@@ -403,7 +408,12 @@ class PatternEngine:
         if state.hops >= maximum:
             return
         types = frozenset(relationship.types) if relationship.types else None
-        for edge, target_id in snapshot.edges(state.current, relationship.direction, types):
+        for edge, target_id in self._arrow_edges(
+            snapshot,
+            state.current,
+            relationship.direction,
+            types,
+        ):
             if edge.id in state.used or not self._relationship_matches(
                 relationship,
                 edge,
@@ -550,7 +560,7 @@ class PatternEngine:
         relationship: Relationship,
         binding: Mapping[str, QueryValue],
     ) -> bool:
-        """Check the type and property map of one traversed relationship.
+        """Check the labels and property map of one traversed relationship.
 
         Parameters
         ----------
@@ -566,9 +576,44 @@ class PatternEngine:
         bool
             ``True`` when the relationship satisfies the pattern.
         """
-        if pattern.types and relationship.rel_type not in pattern.types:
+        if pattern.types and not set(pattern.types) & set(relationship.labels):
             return False
         return self._properties_match(pattern.properties, relationship.properties, binding)
+
+    @staticmethod
+    def _arrow_edges(
+        snapshot: AdjacencySnapshot,
+        node_id: int,
+        direction: Direction,
+        labels: frozenset[str] | None,
+    ) -> Iterator[tuple[Relationship, int]]:
+        """Yield edges allowed by one query relationship direction.
+
+        The traversal API follows undirected edges from either endpoint in
+        both outgoing and incoming walks. The query dialect's arrows are
+        storage-direction constraints, so an undirected edge is reachable only
+        through the undirected ``--`` pattern.
+
+        Parameters
+        ----------
+        snapshot : AdjacencySnapshot
+            Captured region.
+        node_id : int
+            Current node.
+        direction : Direction
+            Pattern direction.
+        labels : frozenset[str] | None
+            Allowed labels, or ``None`` for all labels.
+
+        Yields
+        ------
+        tuple[Relationship, int]
+            Followable edge and the node reached through it.
+        """
+        for relationship, target in snapshot.edges(node_id, direction, labels):
+            if not relationship.directed and direction is not Direction.BOTH:
+                continue
+            yield relationship, target
 
     def _properties_match(
         self,

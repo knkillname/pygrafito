@@ -19,6 +19,72 @@ from pygrafito.storage.connection import Database
 from pygrafito.storage.schema import Schema
 
 
+def _write_version_one_database(path: Path) -> Path:
+    """Create a populated version 1 database for refusal tests.
+
+    Parameters
+    ----------
+    path : Path
+        Destination database path.
+
+    Returns
+    -------
+    Path
+        The written path.
+    """
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE nodes (
+                id    INTEGER PRIMARY KEY,
+                props TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props))
+            );
+            CREATE TABLE node_labels (
+                node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                label   TEXT NOT NULL,
+                PRIMARY KEY (node_id, label)
+            ) WITHOUT ROWID;
+            CREATE INDEX node_labels_by_label ON node_labels (label, node_id);
+            CREATE TABLE relationships (
+                id       INTEGER PRIMARY KEY,
+                src      INTEGER NOT NULL REFERENCES nodes(id) ON DELETE RESTRICT,
+                dst      INTEGER NOT NULL REFERENCES nodes(id) ON DELETE RESTRICT,
+                rel_type TEXT NOT NULL,
+                props    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props))
+            );
+            CREATE INDEX rel_by_src ON relationships (src, rel_type, dst);
+            CREATE INDEX rel_by_dst ON relationships (dst, rel_type, src);
+            CREATE INDEX rel_by_type ON relationships (rel_type, src, dst);
+            CREATE INDEX old_props_idx ON nodes (json_extract(props, '$."cycles"'));
+            CREATE UNIQUE INDEX old_unique
+                ON relationships (rel_type, json_extract(props, '$."since"'))
+                WHERE rel_type = 'ALLIES_WITH';
+            PRAGMA user_version = 1;
+            """
+        )
+        connection.execute(
+            "INSERT INTO nodes (id, props) VALUES (?, ?)",
+            (1, '{"designation":"Tron","cycles":40}'),
+        )
+        connection.execute(
+            "INSERT INTO nodes (id, props) VALUES (?, ?)",
+            (2, '{"designation":"Quorra","cycles":37}'),
+        )
+        connection.executemany(
+            "INSERT INTO node_labels (node_id, label) VALUES (?, ?)",
+            [(1, "Program"), (1, "ISO"), (2, "Program")],
+        )
+        connection.execute(
+            "INSERT INTO relationships (id, src, dst, rel_type, props) VALUES (?, ?, ?, ?, ?)",
+            (1, 1, 2, "ALLIES_WITH", '{"since":2020}'),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+    return path
+
+
 class _BrokenJsonCursor:
     """Cursor stand-in that fails a JSON query."""
 
@@ -156,10 +222,16 @@ class TestSchemaBootstrap:
             store = Schema(database.connection)
             assert store.version() == Schema.VERSION
             rows = database.connection.execute(
-                "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+                "SELECT name FROM sqlite_master WHERE type = 'table' "
+                "AND name NOT LIKE 'sqlite_%' ORDER BY name"
             ).fetchall()
             names = {str(row[0]) for row in rows}
-            assert names == {"node_labels", "nodes", "relationships"}
+            assert names == {
+                "node_labels",
+                "nodes",
+                "relationship_labels",
+                "relationships",
+            }
             indexes = database.connection.execute(
                 "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"
             ).fetchall()
@@ -168,7 +240,7 @@ class TestSchemaBootstrap:
                 "node_labels_by_label",
                 "rel_by_dst",
                 "rel_by_src",
-                "rel_by_type",
+                "relationship_labels_by_label",
             }
         finally:
             database.close()
@@ -189,6 +261,28 @@ class TestSchemaBootstrap:
             database.connection.execute(f"PRAGMA user_version = {Schema.VERSION + 1}")
             with pytest.raises(UnsupportedSqliteError):
                 Schema(database.connection).bootstrap()
+        finally:
+            database.close()
+
+    def test_older_schema_version_rejected(self, tmp_path: Path) -> None:
+        path = _write_version_one_database(tmp_path / "old.db")
+        before = path.read_bytes()
+        with pytest.raises(UnsupportedSqliteError, match="version 1"):
+            Database(path).close()
+        assert path.read_bytes() == before
+
+    def test_read_only_older_schema_rejected(self, tmp_path: Path) -> None:
+        path = _write_version_one_database(tmp_path / "old.db")
+        before = path.read_bytes()
+        with pytest.raises(UnsupportedSqliteError, match="version 1"):
+            Database(path, readonly=True)
+        assert path.read_bytes() == before
+
+    def test_uninitialized_file_bootstraps(self, tmp_path: Path) -> None:
+        path = tmp_path / "fresh.db"
+        database = Database(path)
+        try:
+            assert Schema(database.connection).version() == Schema.VERSION
         finally:
             database.close()
 
@@ -260,7 +354,7 @@ class TestJsonSupport:
 class TestStructuralIndexes:
     """Verify the indexes the schema maintains on its own."""
 
-    def test_relationship_type_index_exists(self) -> None:
+    def test_relationship_label_index_exists(self) -> None:
         database = Database(":memory:")
         try:
             names = {
@@ -269,23 +363,23 @@ class TestStructuralIndexes:
                     "SELECT name FROM sqlite_master WHERE type = 'index'"
                 )
             }
-            assert "rel_by_type" in names
+            assert "relationship_labels_by_label" in names
             assert "node_labels_by_label" in names
             assert "rel_by_src" in names
             assert "rel_by_dst" in names
         finally:
             database.close()
 
-    def test_type_filter_uses_an_index(self) -> None:
+    def test_label_filter_uses_an_index(self) -> None:
         database = Database(":memory:")
         try:
             plan = database.connection.execute(
-                "EXPLAIN QUERY PLAN SELECT id, src, dst FROM relationships WHERE rel_type = ?",
+                "EXPLAIN QUERY PLAN SELECT relationship_id FROM relationship_labels "
+                "WHERE label = ?",
                 ("ALLIES_WITH",),
             ).fetchall()
             details = " ".join(str(row[3]) for row in plan)
-            assert "SEARCH relationships USING" in details
-            assert "rel_by_type" in details
+            assert "relationship_labels_by_label" in details
         finally:
             database.close()
 
@@ -301,6 +395,6 @@ class TestStructuralIndexes:
                     "SELECT name FROM sqlite_master WHERE type = 'index'"
                 )
             }
-            assert "rel_by_type" in names
+            assert "relationship_labels_by_label" in names
         finally:
             second.close()

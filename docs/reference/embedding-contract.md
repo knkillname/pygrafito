@@ -108,6 +108,13 @@ These files still open:
 The read-only path applies the same rule, so a read-only handle cannot adopt a foreign file
 either.
 
+## Layout compatibility
+
+This release writes schema version 2. A file that records version 1 is refused on both
+read-write and read-only opens with `UnsupportedSqliteError`, and the file is left unchanged.
+There is no in-place migration before 1.0. Create a fresh database with this release; if you need
+data from a 0.8 file, export it with 0.8 first.
+
 ## Closing and copying
 
 Closing the last handle of a file-backed graph leaves one self-contained database file with no
@@ -124,4 +131,4 @@ writes a consistent copy through SQLite's backup operation and atomically moves 
 | `HandleAffinityError` | Open and use the handle in the same thread. |
 | `LockTimeoutError` | Retry later, or increase `busy_timeout` for a known long writer. |
 | `ReadOnlyError` | Open the file without `readonly=True` before writing. |
-| `UnsupportedSqliteError` | Use a supported SQLite runtime, or choose a path that is not a foreign database. |
+| `UnsupportedSqliteError` | Use a supported SQLite runtime, choose a path that is not a foreign database, or create a fresh version 2 database. |

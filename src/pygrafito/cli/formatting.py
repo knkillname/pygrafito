@@ -141,7 +141,8 @@ class ValueFormatter:
             relationship: dict[str, JsonValue] = {
                 "kind": "relationship",
                 "id": value.id,
-                "type": value.rel_type,
+                "labels": typing.cast(list[JsonValue], sorted(value.labels)),
+                "directed": value.directed,
                 "start": value.start_id,
                 "end": value.end_id,
                 "properties": self._json_mapping(value),
@@ -236,16 +237,39 @@ class ValueFormatter:
             return f"({prefix}{self._properties_text(value, value.id)})"
         if isinstance(value, Relationship):
             properties = self._properties_text(value, value.id)
-            return f"({value.start_id})-[:{value.rel_type} {properties}]->({value.end_id})"
+            labels = self._labels_text(value.labels)
+            inner = f"{labels} {properties}" if labels else properties
+            if not value.directed:
+                return f"({value.start_id})~[{inner}]~({value.end_id})"
+            return f"({value.start_id})-[{inner}]->({value.end_id})"
         parts = [f"({value.nodes[0].id})"] if value.nodes else []
         current = value.nodes[0] if value.nodes else None
         for relationship, node in zip(value.relationships, value.nodes[1:], strict=True):
-            if current is not None and relationship.start_id == current.id:
-                parts.append(f"-[:{relationship.rel_type}]->({node.id})")
+            labels = self._labels_text(relationship.labels)
+            if not relationship.directed:
+                parts.append(f"~[{labels}]~({node.id})")
+            elif current is not None and relationship.start_id == current.id:
+                parts.append(f"-[{labels}]->({node.id})")
             else:
-                parts.append(f"<-[:{relationship.rel_type}]-({node.id})")
+                parts.append(f"<-[{labels}]-({node.id})")
             current = node
         return "".join(parts)
+
+    @staticmethod
+    def _labels_text(labels: tuple[str, ...]) -> str:
+        """Render relationship labels in graph-shaped text.
+
+        Parameters
+        ----------
+        labels : tuple[str, ...]
+            Sorted relationship labels.
+
+        Returns
+        -------
+        str
+            Colon-prefixed labels, or an empty string.
+        """
+        return "".join(f":{label}" for label in labels)
 
     def _properties_text(self, properties: Mapping[str, object], entity_id: int) -> str:
         """Render an entity id and its properties.

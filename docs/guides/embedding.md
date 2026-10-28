@@ -140,6 +140,10 @@ of the search.
 Opening a file never adopts an unrelated SQLite database. A file with no graph layout and at least
 one unrelated table is refused with `UnsupportedSqliteError` and left unchanged.
 
+This release writes schema version 2. A version 1 file is refused on read-write and read-only
+opens and is left unchanged. There is no in-place migration before 1.0; create a fresh database
+with this release, and export an existing 0.8 graph with 0.8 first if you need its data.
+
 ## Go deeper
 
 - [Embedding contract](../reference/embedding-contract.md) for journal modes, read snapshots,

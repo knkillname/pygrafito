@@ -199,7 +199,8 @@ class TestEntities(_Rendering):
         assert row["a"]["labels"] == ["Program"]
         assert row["a"]["properties"] == {"designation": "Kevin Flynn"}
         assert row["r"]["kind"] == "relationship"
-        assert row["r"]["type"] == "ALLIES_WITH"
+        assert row["r"]["labels"] == ["ALLIES_WITH"]
+        assert row["r"]["directed"] is True
         assert row["r"]["start"] == 1
         assert row["r"]["end"] == 2
         assert row["p"]["kind"] == "path"

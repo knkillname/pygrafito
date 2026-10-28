@@ -77,8 +77,7 @@ class Constraint:
     kind : ElementKind
         Element kind the constraint covers.
     scope : str
-        Label for a node constraint or relationship type for a relationship
-        constraint.
+        Label scoped by the constraint, for either element kind.
     key : str
         Property key whose values must stay distinct inside the scope.
     """
@@ -190,9 +189,8 @@ class ConstraintViolationError(PygrafitoError):
         self.value = value
         self.existing = existing
         subject = "nodes" if kind is ElementKind.NODE else "relationships"
-        scope_name = "label" if kind is ElementKind.NODE else "relationship type"
         message = (
-            f"{subject} with {scope_name} {scope!r} must have distinct {key!r} values; "
+            f"{subject} with label {scope!r} must have distinct {key!r} values; "
             f"{value!r} is already held"
         )
         if existing is not None:
@@ -340,31 +338,44 @@ class Node(_PropertyMapping):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Relationship(_PropertyMapping):
-    """An immutable snapshot of a directed, typed relationship.
+    """An immutable snapshot of a labeled relationship.
 
     Parameters
     ----------
     id : int
         Database identifier of the relationship.
-    rel_type : str
-        Non-empty relationship type.
     start_id : int
-        Identifier of the start node.
+        Identifier of the first endpoint.
     end_id : int
-        Identifier of the end node.
+        Identifier of the second endpoint.
+    labels : tuple[str, ...]
+        Labels attached to the relationship, sorted.
+    directed : bool
+        Whether the endpoints carry source and destination meaning.
     properties : Mapping[str, Value]
         Properties attached to the relationship.
     """
 
     id: int
-    rel_type: str
     start_id: int
     end_id: int
+    labels: tuple[str, ...] = ()
+    directed: bool = True
     properties: Mapping[str, Value] = dataclasses.field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Freeze properties into an immutable container."""
+        """Freeze labels and properties into immutable containers.
+
+        Raises
+        ------
+        ValidationError
+            If ``directed`` is not a boolean.
+        """
+        object.__setattr__(self, "labels", tuple(sorted(set(self.labels))))
         object.__setattr__(self, "properties", self._freeze(self.properties))
+        if not isinstance(self.directed, bool):
+            message = "relationship directed flag must be a boolean"
+            raise ValidationError(message)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

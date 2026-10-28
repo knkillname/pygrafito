@@ -56,6 +56,12 @@ The practical consequences:
 - A query whose label is far more selective than its property value may still be
   planned through the label index. The engine does not intersect indexes.
 
+Label filtering itself is a structural concern, not a declared property index. Node
+labels and relationship labels each have their own lookup index, so a relationship label
+filter without a bound endpoint does not scan every relationship. A relationship property
+index still covers every relationship that stores the key, whatever labels it carries and
+whether it is directed or undirected.
+
 ## What an index accelerates
 
 | Predicate | Accelerated |
@@ -93,7 +99,7 @@ indexes are simply ignored.
 Uniqueness constraints use standard indexes and triggers too, but they are a separate
 concept with their own API. `Graph.indexes()` reports only indexes declared through
 `Graph.create_node_index` and `Graph.create_relationship_index`; the support index of a
-node constraint and the unique index of a relationship constraint are owned by the
+node constraint and the support index of a relationship constraint are owned by the
 constraint and are not listed. Declaring an ordinary index on a relationship key already
 covered by a relationship constraint is redundant. See [Enforce unique values](../guides/constraints.md)
 for declaration, enforcement, and violation reporting.

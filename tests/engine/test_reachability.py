@@ -170,28 +170,28 @@ class TestDirection(_GraphTestCase):
 class TestTypeFilter(_GraphTestCase):
     """Verify relationship type filtering."""
 
-    def test_type_filter(self, graph: Graph) -> None:
+    def test_label_filter(self, graph: Graph) -> None:
         start = graph.add_node()
         knows = graph.add_node()
         likes = graph.add_node()
         graph.add_relationship(start, "ALLIES_WITH", knows)
         graph.add_relationship(start, "TRUSTS", likes)
-        filtered = list(graph.traverse(start, max_depth=1, types=["ALLIES_WITH"]))
+        filtered = list(graph.traverse(start, max_depth=1, labels=["ALLIES_WITH"]))
         assert [step.node.id for step in filtered] == [knows.id]
 
-    def test_empty_type_set_means_all_types(self, graph: Graph) -> None:
+    def test_empty_label_set_means_all_labels(self, graph: Graph) -> None:
         start = graph.add_node()
         knows = graph.add_node()
         likes = graph.add_node()
         graph.add_relationship(start, "ALLIES_WITH", knows)
         graph.add_relationship(start, "TRUSTS", likes)
-        steps = list(graph.traverse(start, max_depth=1, types=[]))
+        steps = list(graph.traverse(start, max_depth=1, labels=[]))
         assert {step.node.id for step in steps} == {knows.id, likes.id}
 
-    def test_invalid_type_filter_rejected(self, graph: Graph) -> None:
+    def test_invalid_label_filter_rejected(self, graph: Graph) -> None:
         node = graph.add_node()
         with pytest.raises(ValidationError):
-            graph.traverse(node, max_depth=1, types=[""])
+            graph.traverse(node, max_depth=1, labels=[""])
 
 
 class TestValidation(_GraphTestCase):
@@ -226,3 +226,36 @@ class TestValidation(_GraphTestCase):
         graph.add_relationship(start, "GRID_LINK", target)
         steps = list(graph.traverse(start.id, max_depth=1))
         assert [step.node.id for step in steps] == [target.id]
+
+
+class TestUndirectedEdges(_GraphTestCase):
+    """Verify undirected relationships in the traversal API."""
+
+    def test_outgoing_and_incoming_follow_both_endpoints(self, graph: Graph) -> None:
+        start = graph.add_node("Program", designation="Tron")
+        end = graph.add_node("Program", designation="Quorra")
+        graph.add_relationship(start, ["ALLIES_WITH", "TRUSTS"], end, directed=False)
+        outgoing = list(graph.traverse(start, max_depth=1, direction=Direction.OUTGOING))
+        incoming = list(graph.traverse(end, max_depth=1, direction=Direction.INCOMING))
+        both = list(graph.traverse(start, max_depth=1, direction=Direction.BOTH))
+        assert [step.node.id for step in outgoing] == [end.id]
+        assert [step.node.id for step in incoming] == [start.id]
+        assert [step.node.id for step in both] == [end.id]
+
+    def test_label_filter_matches_any_listed_label(self, graph: Graph) -> None:
+        start = graph.add_node()
+        end = graph.add_node()
+        graph.add_relationship(start, ["ALLIES_WITH", "TRUSTS"], end, directed=False)
+        found = list(graph.traverse(start, max_depth=1, labels=["TRUSTS"]))
+        missing = list(graph.traverse(start, max_depth=1, labels=["GUARDS"]))
+        assert [step.node.id for step in found] == [end.id]
+        assert missing == []
+
+    def test_shortest_path_and_trails_use_undirected_edge(self, graph: Graph) -> None:
+        start = graph.add_node()
+        end = graph.add_node()
+        graph.add_relationship(start, "ALLIES_WITH", end, directed=False)
+        assert graph.shortest_path(start, end) is not None
+        assert graph.shortest_path(end, start) is not None
+        assert len(list(graph.paths(start, end, max_depth=1))) == 1
+        assert len(list(graph.paths(end, start, max_depth=1))) == 1

@@ -595,15 +595,15 @@ class Graph:
 
     def create_relationship_uniqueness_constraint(
         self,
-        rel_type: str,
+        label: str,
         key: str,
     ) -> Constraint:
-        """Declare that relationships of one type hold distinct property values.
+        """Declare that relationships carrying one label hold distinct values.
 
         Parameters
         ----------
-        rel_type : str
-            Relationship type whose relationships the constraint covers.
+        label : str
+            Relationship label whose relationships the constraint covers.
         key : str
             Property key whose values must stay distinct.
 
@@ -615,15 +615,15 @@ class Graph:
         Raises
         ------
         ValidationError
-            If the type or key is not a non-empty identifier.
+            If the label or key is not a non-empty identifier.
         ReadOnlyError
             If the graph handle was opened read-only.
         TransactionError
             If an explicit transaction is active on this graph.
         ConstraintViolationError
-            If relationships of the type already duplicate a value.
+            If relationships carrying the label already duplicate a value.
         """
-        return self._create_constraint(Constraint(ElementKind.RELATIONSHIP, rel_type, key))
+        return self._create_constraint(Constraint(ElementKind.RELATIONSHIP, label, key))
 
     def constraints(self) -> tuple[Constraint, ...]:
         """Return the declared uniqueness constraints.
@@ -896,8 +896,10 @@ class Graph:
     def add_relationship(
         self,
         start: Node | int,
-        rel_type: str,
+        labels: str | Iterable[str],
         end: Node | int,
+        *,
+        directed: bool = True,
         **properties: Value,
     ) -> Relationship:
         """Create a relationship in its own transaction.
@@ -905,11 +907,14 @@ class Graph:
         Parameters
         ----------
         start : Node | int
-            Start node or its id.
-        rel_type : str
-            Non-empty relationship type.
+            First endpoint node or its id.
+        labels : str | Iterable[str]
+            Labels to attach; a string is one label.
         end : Node | int
-            End node or its id.
+            Second endpoint node or its id.
+        directed : bool, optional
+            Whether the endpoints carry source and destination meaning, by
+            default ``True``.
         **properties : Value
             Properties to attach.
 
@@ -920,7 +925,13 @@ class Graph:
         """
         self._database.ensure_open()
         with self.transaction() as active:
-            return active.add_relationship(start, rel_type, end, **properties)
+            return active.add_relationship(
+                start,
+                labels,
+                end,
+                directed=directed,
+                **properties,
+            )
 
     def set_properties(
         self,
@@ -970,49 +981,49 @@ class Graph:
 
     def add_labels(
         self,
-        node: Node | int,
+        element: Node | Relationship | int,
         *labels: str,
-    ) -> Node:
+    ) -> Node | Relationship:
         """Add labels in their own transaction.
 
         Parameters
         ----------
-        node : Node | int
-            Node or its id.
+        element : Node | Relationship | int
+            Node or relationship snapshot, or a node id.
         *labels : str
             Labels to add.
 
         Returns
         -------
-        Node
-            Snapshot of the updated node.
+        Node | Relationship
+            Snapshot of the updated element.
         """
         self._database.ensure_open()
         with self.transaction() as active:
-            return active.add_labels(node, *labels)
+            return active.add_labels(element, *labels)
 
     def remove_labels(
         self,
-        node: Node | int,
+        element: Node | Relationship | int,
         *labels: str,
-    ) -> Node:
+    ) -> Node | Relationship:
         """Remove labels in their own transaction.
 
         Parameters
         ----------
-        node : Node | int
-            Node or its id.
+        element : Node | Relationship | int
+            Node or relationship snapshot, or a node id.
         *labels : str
             Labels to remove.
 
         Returns
         -------
-        Node
-            Snapshot of the updated node.
+        Node | Relationship
+            Snapshot of the updated element.
         """
         self._database.ensure_open()
         with self.transaction() as active:
-            return active.remove_labels(node, *labels)
+            return active.remove_labels(element, *labels)
 
     def delete(
         self,
@@ -1092,15 +1103,18 @@ class Graph:
 
     def find_relationships(
         self,
-        rel_type: str | None = None,
+        *labels: str,
+        directed: bool | None = None,
         **properties: Value,
     ) -> Iterator[Relationship]:
-        """Find relationships by type and exact property values.
+        """Find relationships by labels and exact property values.
 
         Parameters
         ----------
-        rel_type : str | None, optional
-            Relationship type every match must have, by default any type.
+        *labels : str
+            Labels every match must carry.
+        directed : bool | None, optional
+            Direction filter, by default any direction.
         **properties : Value
             Exact property values every match must have.
 
@@ -1111,7 +1125,7 @@ class Graph:
         """
         self._database.ensure_open()
         with self._read_snapshot():
-            return self._relationships.find(rel_type, properties)
+            return self._relationships.find(labels, properties, directed=directed)
 
     def traverse(
         self,
@@ -1119,7 +1133,7 @@ class Graph:
         *,
         max_depth: int,
         direction: Direction = Direction.OUTGOING,
-        types: Iterable[str] | None = None,
+        labels: Iterable[str] | None = None,
     ) -> Iterator[TraversalStep]:
         """Yield distinct reachable nodes at their shortest depth.
 
@@ -1135,8 +1149,8 @@ class Graph:
             Maximum number of relationships to follow.
         direction : Direction, optional
             Direction to follow, by default outgoing.
-        types : Iterable[str] | None, optional
-            Allowed relationship types, by default all types.
+        labels : Iterable[str] | None, optional
+            Allowed relationship labels, by default all labels.
 
         Returns
         -------
@@ -1149,14 +1163,14 @@ class Graph:
                 start,
                 max_depth,
                 direction,
-                types,
+                labels,
             )
         evaluator = ReachabilityEvaluator(
             snapshot,
             start,
             max_depth,
             direction,
-            types,
+            labels,
         )
         return iter(evaluator)
 
@@ -1166,7 +1180,7 @@ class Graph:
         end: Node | int,
         *,
         direction: Direction = Direction.OUTGOING,
-        types: Iterable[str] | None = None,
+        labels: Iterable[str] | None = None,
         max_depth: int | None = None,
     ) -> Path | None:
         """Find one path with the fewest relationships.
@@ -1181,8 +1195,8 @@ class Graph:
             End node or its id.
         direction : Direction, optional
             Direction in which paths advance, by default outgoing.
-        types : Iterable[str] | None, optional
-            Allowed relationship types, by default all types.
+        labels : Iterable[str] | None, optional
+            Allowed relationship labels, by default all labels.
         max_depth : int | None, optional
             Maximum path length, by default unbounded.
 
@@ -1199,7 +1213,7 @@ class Graph:
                 start,
                 end,
                 direction,
-                types,
+                labels,
                 max_depth,
             )
             return evaluator.evaluate()
@@ -1212,7 +1226,7 @@ class Graph:
         max_depth: int,
         min_depth: int = 1,
         direction: Direction = Direction.OUTGOING,
-        types: Iterable[str] | None = None,
+        labels: Iterable[str] | None = None,
         limit: int | None = None,
     ) -> Iterator[Path]:
         """Enumerate relationship-unique trails between two nodes.
@@ -1232,8 +1246,8 @@ class Graph:
             Inclusive minimum number of relationships, by default 1.
         direction : Direction, optional
             Direction in which paths advance, by default outgoing.
-        types : Iterable[str] | None, optional
-            Allowed relationship types, by default all types.
+        labels : Iterable[str] | None, optional
+            Allowed relationship labels, by default all labels.
         limit : int | None, optional
             Maximum number of paths to produce, by default unlimited.
 
@@ -1249,7 +1263,7 @@ class Graph:
                 start,
                 max_depth,
                 direction,
-                types,
+                labels,
                 include=(end_id,),
             )
         evaluator = TrailEnumerator(
@@ -1259,7 +1273,7 @@ class Graph:
             min_depth,
             max_depth,
             direction,
-            types,
+            labels,
             limit,
         )
         return iter(evaluator)

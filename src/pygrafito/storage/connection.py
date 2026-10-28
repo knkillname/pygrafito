@@ -235,7 +235,9 @@ class Database:
         """
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.execute(f"PRAGMA busy_timeout = {self._busy_timeout}")
-        Schema(self._connection).refuse_foreign_database()
+        schema = Schema(self._connection)
+        schema.refuse_foreign_database()
+        schema.ensure_supported(readonly=self._readonly)
         self._configure_journal_mode()
 
     def _configure_journal_mode(self) -> None:

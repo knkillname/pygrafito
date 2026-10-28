@@ -161,9 +161,9 @@ class PatternCreator:
             )
             created_relationship = self._relationships.create(
                 nodes[index].id,
-                relationship.types[0],
+                relationship.types,
                 nodes[index + 1].id,
-                properties,
+                properties=properties,
             )
             self._tally.created_relationships += 1
             if relationship.variable is not None:
@@ -436,7 +436,7 @@ class MutationExecutor:
             The row with refreshed element snapshots.
         """
         properties: dict[EntityKey, dict[str, Value | None]] = {}
-        labels: dict[int, set[str]] = {}
+        labels: dict[EntityKey, set[str]] = {}
         self._collect_set(clause, binding, evaluator, parameters, properties, labels)
         updates = self._apply_properties(properties)
         updates.update(self._apply_labels(labels))
@@ -449,7 +449,7 @@ class MutationExecutor:
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
         properties: dict[EntityKey, dict[str, Value | None]],
-        labels: dict[int, set[str]],
+        labels: dict[EntityKey, set[str]],
     ) -> None:
         """Collect one row's ``SET`` assignments into the clause accumulators.
 
@@ -465,8 +465,8 @@ class MutationExecutor:
             Query parameter values.
         properties : dict[EntityKey, dict[str, Value | None]]
             Property assignments keyed by entity.
-        labels : dict[int, set[str]]
-            Label additions keyed by node id.
+        labels : dict[EntityKey, set[str]]
+            Label additions keyed by entity.
         """
         for assignment in clause.assignments:
             key, _target = self._target(binding, assignment.variable)
@@ -475,10 +475,10 @@ class MutationExecutor:
             slot[assignment.key] = typing.cast(Value | None, value)
         for addition in clause.labels:
             key, target = self._target(binding, addition.variable)
-            if key[0] != NODE or not isinstance(target, Node):
-                message = "labels can only be added to nodes"
+            if not isinstance(target, (Node, Relationship)):
+                message = "labels can only be added to nodes or relationships"
                 raise QueryExecutionError(message)
-            labels.setdefault(key[1], set()).update(addition.labels)
+            labels.setdefault(key, set()).update(addition.labels)
 
     def _set(
         self,
@@ -506,7 +506,7 @@ class MutationExecutor:
             Bindings with refreshed element snapshots.
         """
         properties: dict[EntityKey, dict[str, Value | None]] = {}
-        labels: dict[int, set[str]] = {}
+        labels: dict[EntityKey, set[str]] = {}
         for binding in bindings:
             self._collect_set(clause, binding, evaluator, parameters, properties, labels)
         updates = self._apply_properties(properties)
@@ -533,7 +533,7 @@ class MutationExecutor:
             Bindings with refreshed element snapshots.
         """
         removals: dict[EntityKey, list[str]] = {}
-        labels: dict[int, set[str]] = {}
+        labels: dict[EntityKey, set[str]] = {}
         for binding in bindings:
             for removal in clause.properties:
                 key, _target = self._target(binding, removal.variable)
@@ -542,19 +542,45 @@ class MutationExecutor:
                     keys.append(removal.key)
             for removal in clause.labels:
                 key, target = self._target(binding, removal.variable)
-                if key[0] != NODE or not isinstance(target, Node):
-                    message = "labels can only be removed from nodes"
+                if not isinstance(target, (Node, Relationship)):
+                    message = "labels can only be removed from nodes or relationships"
                     raise QueryExecutionError(message)
-                labels.setdefault(key[1], set()).update(removal.labels)
+                labels.setdefault(key, set()).update(removal.labels)
         updates: dict[EntityKey, Node | Relationship] = {}
         for (kind, entity_id), keys in removals.items():
             updated = self._remove_properties(kind, entity_id, keys)
             updates[(kind, entity_id)] = updated
             self._tally.properties_removed += len(keys)
-        for entity_id, names in labels.items():
-            updates[(NODE, entity_id)] = self._nodes.remove_labels(entity_id, sorted(names))
+        for (kind, entity_id), names in labels.items():
+            updates[(kind, entity_id)] = self._remove_labels(kind, entity_id, sorted(names))
             self._tally.labels_removed += len(names)
         return self._refresh(bindings, updates)
+
+    def _remove_labels(
+        self,
+        kind: str,
+        entity_id: int,
+        names: Sequence[str],
+    ) -> Node | Relationship:
+        """Remove labels from one element.
+
+        Parameters
+        ----------
+        kind : str
+            Entity kind, either ``node`` or ``relationship``.
+        entity_id : int
+            Entity identifier.
+        names : Sequence[str]
+            Labels to remove.
+
+        Returns
+        -------
+        Node | Relationship
+            Snapshot of the updated element.
+        """
+        if kind == NODE:
+            return self._nodes.remove_labels(entity_id, names)
+        return self._relationships.remove_labels(entity_id, names)
 
     def _delete(self, clause: Delete, bindings: Sequence[Binding]) -> list[Binding]:
         """Apply one ``DELETE`` clause, keeping the pre-deletion snapshots.
@@ -625,22 +651,30 @@ class MutationExecutor:
                     self._tally.properties_set += 1
         return updates
 
-    def _apply_labels(self, labels: Mapping[int, set[str]]) -> dict[EntityKey, Node]:
-        """Apply deduplicated label additions once per node.
+    def _apply_labels(
+        self,
+        labels: Mapping[EntityKey, set[str]],
+    ) -> dict[EntityKey, Node | Relationship]:
+        """Apply deduplicated label additions once per element.
 
         Parameters
         ----------
-        labels : Mapping[int, set[str]]
-            Labels to add, keyed by node id.
+        labels : Mapping[EntityKey, set[str]]
+            Labels to add, keyed by entity.
 
         Returns
         -------
-        dict[EntityKey, Node]
-            Updated node snapshots keyed by entity.
+        dict[EntityKey, Node | Relationship]
+            Updated element snapshots keyed by entity.
         """
-        updates: dict[EntityKey, Node] = {}
-        for node_id, names in labels.items():
-            updates[(NODE, node_id)] = self._nodes.add_labels(node_id, sorted(names))
+        updates: dict[EntityKey, Node | Relationship] = {}
+        for (kind, entity_id), names in labels.items():
+            if kind == NODE:
+                updates[(kind, entity_id)] = self._nodes.add_labels(entity_id, sorted(names))
+            else:
+                updates[(kind, entity_id)] = self._relationships.add_labels(
+                    entity_id, sorted(names)
+                )
             self._tally.labels_added += len(names)
         return updates
 

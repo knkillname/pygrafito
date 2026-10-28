@@ -9,7 +9,13 @@ from pathlib import Path
 
 import pytest
 
-from pygrafito import Graph, GraphClosedError, HandleAffinityError, Transaction
+from pygrafito import (
+    Graph,
+    GraphClosedError,
+    HandleAffinityError,
+    Relationship,
+    Transaction,
+)
 from pygrafito.model import (
     ConnectedNodeError,
     Node,
@@ -201,6 +207,64 @@ class TestConvenienceWrites:
             graph.add_relationship(first, "TRUSTS", second, since_cycle=2020)
             found = list(graph.find_relationships("ALLIES_WITH", since_cycle=2020))
             assert [item.id for item in found] == [knows.id]
+
+    def test_add_relationship_with_labels_and_direction(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node("Program")
+            second = graph.add_node("Program")
+            relationship = graph.add_relationship(
+                first,
+                ["TRUSTS", "ALLIES_WITH"],
+                second,
+                directed=False,
+                since_cycle=2020,
+            )
+            assert relationship.labels == ("ALLIES_WITH", "TRUSTS")
+            assert relationship.directed is False
+            assert graph.relationship(relationship.id) == relationship
+
+    def test_add_relationship_without_labels(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node()
+            second = graph.add_node()
+            relationship = graph.add_relationship(first, (), second)
+            assert relationship.labels == ()
+            assert relationship.directed is True
+
+    def test_find_relationships_by_labels_and_direction(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node()
+            second = graph.add_node()
+            both = graph.add_relationship(
+                first,
+                ["ALLIES_WITH", "TRUSTS"],
+                second,
+                directed=False,
+            )
+            graph.add_relationship(first, "ALLIES_WITH", second)
+            found = list(graph.find_relationships("ALLIES_WITH", "TRUSTS", directed=False))
+            assert [item.id for item in found] == [both.id]
+            assert list(graph.find_relationships(directed=True))
+
+    def test_add_and_remove_relationship_labels(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node()
+            second = graph.add_node()
+            relationship = graph.add_relationship(first, "ALLIES_WITH", second)
+            updated = graph.add_labels(relationship, "TRUSTS", "ISO")
+            assert isinstance(updated, Relationship)
+            assert updated.labels == ("ALLIES_WITH", "ISO", "TRUSTS")
+            removed = graph.remove_labels(updated, "TRUSTS")
+            assert removed.labels == ("ALLIES_WITH", "ISO")
+
+    def test_relationship_ids_are_not_reused(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node()
+            second = graph.add_node()
+            relationship = graph.add_relationship(first, "ALLIES_WITH", second)
+            graph.delete(relationship)
+            replacement = graph.add_relationship(first, "ALLIES_WITH", second)
+            assert replacement.id > relationship.id
 
     def test_delete_relationship(self) -> None:
         with Graph.open(":memory:") as graph:

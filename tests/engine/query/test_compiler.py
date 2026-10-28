@@ -123,14 +123,14 @@ class TestRelationshipCompilation:
 
     def test_outgoing_join(self) -> None:
         compiled = self.compile("MATCH (a)-[r:ALLIES_WITH]->(b) RETURN b")
-        assert "JOIN relationships AS r0 ON r0.src = n0.id" in compiled.sql
+        assert "JOIN relationships AS r0 ON r0.directed = 1 AND r0.src = n0.id" in compiled.sql
         assert "JOIN nodes AS n1 ON n1.id = r0.dst" in compiled.sql
-        assert "r0.rel_type IN (?)" in compiled.sql
+        assert "rel_label_r0.label IN (?)" in compiled.sql
         assert "ALLIES_WITH" in compiled.arguments
 
     def test_incoming_join(self) -> None:
         compiled = self.compile("MATCH (a)<-[r:ALLIES_WITH]-(b) RETURN b")
-        assert "JOIN relationships AS r0 ON r0.dst = n0.id" in compiled.sql
+        assert "JOIN relationships AS r0 ON r0.directed = 1 AND r0.dst = n0.id" in compiled.sql
         assert "JOIN nodes AS n1 ON n1.id = r0.src" in compiled.sql
 
     def test_both_direction_uses_canonical_orientation(self) -> None:
@@ -140,7 +140,7 @@ class TestRelationshipCompilation:
 
     def test_type_alternatives(self) -> None:
         compiled = self.compile("MATCH (a)-[r:ALLIES_WITH|TRUSTS]->(b) RETURN b")
-        assert "r0.rel_type IN (?, ?)" in compiled.sql
+        assert "rel_label_r0.label IN (?, ?)" in compiled.sql
         assert compiled.arguments == ("ALLIES_WITH", "TRUSTS")
 
     def test_relationship_properties(self) -> None:
@@ -157,7 +157,7 @@ class TestRelationshipCompilation:
         compiled = self.compile("MATCH (a)-[r]->(b)-[r]->(c) RETURN r")
         assert compiled.sql.count("JOIN relationships AS r0") == 1
         assert "JOIN relationships AS r1" not in compiled.sql
-        assert "(r0.src = n1.id)" in compiled.sql
+        assert "(r0.directed = 1 AND r0.src = n1.id)" in compiled.sql
 
     def test_path_selection(self) -> None:
         compiled = self.compile("MATCH p = (a)-[r]->(b) RETURN p")

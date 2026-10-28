@@ -7,7 +7,9 @@ import sqlite3
 import typing
 from pathlib import Path
 
-from pygrafito import Graph
+import pytest
+
+from pygrafito import Graph, UnsupportedSqliteError
 from pygrafito.storage.schema import Schema
 
 
@@ -92,7 +94,7 @@ class TestQueryIntegration:
             )
             assert [tuple(row.values()) for row in aggregate] == [("Kevin Flynn", "Quorra", 1)]
 
-    def test_pre_change_schema_opens_without_migration(self, tmp_path: Path) -> None:
+    def test_pre_change_schema_is_refused_without_migration(self, tmp_path: Path) -> None:
         path = tmp_path / "legacy.db"
         connection = sqlite3.connect(path)
         try:
@@ -140,14 +142,11 @@ class TestQueryIntegration:
         finally:
             connection.close()
 
-        with Graph.open(path) as graph:
-            result = graph.query(
-                "MATCH (n:Program) WHERE n.cycles = 36 RETURN n.designation AS name"
-            )
-            assert result.rows[0]["name"] == "Kevin Flynn"
-            assert Schema.VERSION == 1
-            version = graph._database.connection.execute("PRAGMA user_version").fetchone()
-            assert version == (1,)
+        before = path.read_bytes()
+        with pytest.raises(UnsupportedSqliteError, match="version 1"):
+            Graph.open(path)
+        assert path.read_bytes() == before
+        assert Schema.VERSION == 2
 
 
 class TestWriteStatementIntegration:
@@ -229,9 +228,75 @@ class TestKeyInjectionSafety:
         with Graph.open(":memory:") as graph:
             kevin = graph.add_node("Program", designation="Kevin Flynn")
             quorra = graph.add_node("Program", designation="Quorra")
-            graph.add_relationship(kevin, "ALLIES_WITH", quorra, **{self.HOSTILE_KEY: 2020})
+            graph.add_relationship(
+                kevin,
+                "ALLIES_WITH",
+                quorra,
+                **typing.cast(typing.Any, {self.HOSTILE_KEY: 2020}),
+            )
             result = graph.query(
                 f"MATCH (a)-[r:ALLIES_WITH {{`{self.HOSTILE_KEY}`: 2020}}]->(b) "
                 f"RETURN b.designation AS name"
             )
             assert [row["name"] for row in result] == ["Quorra"]
+
+
+class TestLabelAndDirectionDialect:
+    """Verify the transitional dialect over the GQL element model."""
+
+    def test_arrow_does_not_match_undirected_edge(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(first, "ALLIES_WITH", second, directed=False)
+            assert graph.query("MATCH (a)-[r]->(b) RETURN r").rows == ()
+            assert len(graph.query("MATCH (a)-[r]-(b) RETURN r").rows) == 2
+
+    def test_multi_label_filter_and_functions(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(first, ["TRUSTS", "ALLIES_WITH"], second)
+            result = graph.query(
+                "MATCH (a)-[r:ALLIES_WITH]-(b) "
+                "RETURN type(r) AS first_label, labels(r) AS all_labels"
+            )
+            assert result.rows[0]["first_label"] == "ALLIES_WITH"
+            assert result.rows[0]["all_labels"] == ["ALLIES_WITH", "TRUSTS"]
+
+    def test_set_and_remove_relationship_labels(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(first, "ALLIES_WITH", second)
+            added = graph.query("MATCH ()-[r:ALLIES_WITH]->() SET r:TRUSTS RETURN labels(r) AS ls")
+            assert added.rows[0]["ls"] == ["ALLIES_WITH", "TRUSTS"]
+            removed = graph.query(
+                "MATCH ()-[r:ALLIES_WITH]->() REMOVE r:ALLIES_WITH RETURN labels(r) AS ls"
+            )
+            assert removed.rows[0]["ls"] == ["TRUSTS"]
+
+    def test_create_unlabeled_relationship(self) -> None:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", designation="Tron")
+            graph.add_node("Program", designation="Quorra")
+            result = graph.query(
+                "MATCH (a:Program {designation: 'Tron'}), "
+                "(b:Program {designation: 'Quorra'}) "
+                "CREATE (a)-[r]->(b) RETURN labels(r) AS ls"
+            )
+            assert result.rows[0]["ls"] == []
+
+    def test_quantified_arrow_excludes_undirected_edge(self) -> None:
+        with Graph.open(":memory:") as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(first, "ALLIES_WITH", second, directed=False)
+            arrow = graph.query(
+                "MATCH (a:Program)-[:ALLIES_WITH*1..2]->(b:Program) RETURN count(*) AS total"
+            )
+            either = graph.query(
+                "MATCH (a:Program)-[:ALLIES_WITH*1..2]-(b:Program) RETURN count(*) AS total"
+            )
+            assert arrow.rows[0]["total"] == 0
+            assert either.rows[0]["total"] == 2

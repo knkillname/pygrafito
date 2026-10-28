@@ -35,23 +35,41 @@ SHALL be idempotent. Invalid input SHALL raise a validation error and declare no
 - **WHEN** a caller declares a node constraint with an empty property key
 - **THEN** the system raises a validation error and reports no new constraint
 
+
 ### Requirement: Declared relationship uniqueness constraint
 
-The system SHALL let a caller declare that relationships of one type hold distinct values for
-one property key. A declaration SHALL require a non-empty relationship type and a non-empty
-property key and SHALL be idempotent. Invalid input SHALL raise a validation error and declare
-nothing.
+The system SHALL let a caller declare that relationships carrying one label hold distinct values for one property key. A declaration SHALL require a non-empty label and a non-empty property key and SHALL be idempotent. Invalid input SHALL raise a validation error and declare nothing.
 
 #### Scenario: Declare a relationship constraint
 
-- **WHEN** a caller declares a constraint on relationship type `ALLIES_WITH` and property key
-  `since`
-- **THEN** the constraint is reported with the relationship element kind, the type, and the key
+- **WHEN** a caller declares a constraint on relationship label `ALLIES_WITH` and property key `since`
+- **THEN** the constraint is reported with the relationship element kind, the label, and the key
 
 #### Scenario: Declaring twice
 
 - **WHEN** a caller declares the same relationship constraint twice
 - **THEN** both calls succeed and exactly one constraint is reported
+
+#### Scenario: Empty label
+
+- **WHEN** a caller declares a relationship constraint with an empty label
+- **THEN** the system raises a validation error and reports no new constraint
+
+#### Scenario: Empty property key
+
+- **WHEN** a caller declares a relationship constraint with an empty property key
+- **THEN** the system raises a validation error and reports no new constraint
+
+#### Scenario: Multi-label relationship is subject
+
+- **WHEN** a relationship carries the constrained label and another label
+- **THEN** its constrained property value participates in the uniqueness scope
+
+#### Scenario: Relationship without the label is exempt
+
+- **WHEN** a relationship does not carry the constrained label and holds the same value
+- **THEN** both relationships are stored
+
 
 ### Requirement: Constraint listing and removal
 
@@ -75,6 +93,7 @@ data.
 - **WHEN** a caller removes a constraint that was never declared
 - **THEN** the system raises a not-found error
 
+
 ### Requirement: Constraint persistence
 
 Declared constraints SHALL persist in a file-backed database and SHALL be reported and enforced
@@ -91,11 +110,10 @@ SHALL NOT change the recorded schema version.
 - **WHEN** a caller declares and removes constraints on an existing database
 - **THEN** the recorded schema version is the same as before the declarations
 
+
 ### Requirement: Type-sensitive uniqueness
 
-A constraint SHALL compare stored values by type and value, so that booleans, integers, floats,
-and strings never share a value. An element that does not carry the scope label or type, or that
-does not have the property, SHALL be exempt.
+A constraint SHALL compare stored values by type and value, so that booleans, integers, floats, and strings never share a value. An element that does not carry the scope label, or that does not have the property, SHALL be exempt.
 
 #### Scenario: Boolean does not collide with integer
 
@@ -122,17 +140,20 @@ does not have the property, SHALL be exempt.
 - **WHEN** a node without the constrained label holds the same value as a node with the label
 - **THEN** both are stored
 
+#### Scenario: Relationship outside the scope is exempt
+
+- **WHEN** a relationship without the constrained label holds the same value as a relationship with the label
+- **THEN** both are stored
+
 #### Scenario: List values compared by content and order
 
 - **WHEN** a constrained node holds `["ISO", "Grid"]` and another is given the same list
 - **THEN** the second write fails, and a list with the same items in another order is stored
 
+
 ### Requirement: Enforcement on every write
 
-The database SHALL enforce every declared constraint on every write, including element creation,
-property assignment and removal, label acquisition, statement-driven writes, and batch imports.
-A write that would create a duplicate SHALL fail and change nothing. Deleting the holder SHALL
-release the value.
+The database SHALL enforce every declared constraint on every write, including element creation, property assignment and removal, label acquisition and removal, statement-driven writes, and batch imports. A write that would create a duplicate SHALL fail and change nothing. Deleting the holder SHALL release the value.
 
 #### Scenario: Create a duplicate
 
@@ -149,6 +170,16 @@ release the value.
 - **WHEN** a node already holding a duplicate value is given the constrained label
 - **THEN** the label addition fails and the node keeps its previous labels
 
+#### Scenario: Acquire the relationship label
+
+- **WHEN** a relationship already holding a duplicate value is given the constrained label
+- **THEN** the label addition fails and the relationship keeps its previous labels
+
+#### Scenario: Remove the relationship label
+
+- **WHEN** a caller removes the constrained label from a relationship
+- **THEN** the relationship leaves that uniqueness scope
+
 #### Scenario: Statement-driven upsert
 
 - **WHEN** a `MERGE` matches an existing element and does not change the constrained property
@@ -163,6 +194,7 @@ release the value.
 
 - **WHEN** a caller deletes the only element holding a value and then stores that value again
 - **THEN** the second write succeeds
+
 
 ### Requirement: Immediate enforcement
 
@@ -184,6 +216,7 @@ while leaving the transaction usable.
 
 - **WHEN** a transaction that hit a violation is rolled back
 - **THEN** every value in the constrained scope is what it was before the transaction
+
 
 ### Requirement: Violation reporting
 
@@ -207,6 +240,7 @@ this error.
 - **WHEN** a write fails because a node still has relationships
 - **THEN** the system does not report a constraint violation
 
+
 ### Requirement: Declaration over existing data
 
 Declaring a constraint SHALL validate existing elements in the same write transaction that
@@ -222,6 +256,7 @@ constraint-violation error and SHALL create nothing.
 
 - **WHEN** a caller declares a constraint over a scope whose values are all distinct
 - **THEN** the declaration succeeds and the constraint is reported
+
 
 ### Requirement: Constraint changes outside transactions
 

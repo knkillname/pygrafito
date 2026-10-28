@@ -90,10 +90,10 @@ class TestDepthValidation(_GraphTestCase):
                 direction=typing.cast(Direction, "both"),
             )
 
-    def test_paths_invalid_type_filter(self, graph: Graph) -> None:
+    def test_paths_invalid_label_filter(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
-            graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2, types=[""])
+            graph.paths(nodes["Grid"], nodes["Portal"], max_depth=2, labels=[""])
 
     def test_paths_non_integer_depth(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
@@ -104,14 +104,14 @@ class TestDepthValidation(_GraphTestCase):
                 max_depth=typing.cast(int, "2"),
             )
 
-    def test_paths_non_string_type(self, graph: Graph) -> None:
+    def test_paths_non_string_label(self, graph: Graph) -> None:
         nodes = self.build_chain(graph)
         with pytest.raises(ValidationError):
             graph.paths(
                 nodes["Grid"],
                 nodes["Portal"],
                 max_depth=2,
-                types=[typing.cast(str, 1)],
+                labels=[typing.cast(str, 1)],
             )
 
 

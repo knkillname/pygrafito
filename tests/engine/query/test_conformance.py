@@ -298,7 +298,7 @@ class TestConformance:
         path = result.rows[0]["p"]
         assert isinstance(path, Path)
         assert [node["designation"] for node in path.nodes] == ["Kevin Flynn", "Tron"]
-        assert [relationship.rel_type for relationship in path.relationships] == ["TRUSTS"]
+        assert [relationship.labels for relationship in path.relationships] == [("TRUSTS",)]
 
     def test_quantified_path_conformance(self, graph: Graph) -> None:
         result = graph.query(

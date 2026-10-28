@@ -63,8 +63,10 @@ class RelationshipColumns:
         SQL column alias holding the start node id.
     dst : str
         SQL column alias holding the end node id.
-    rel_type : str
-        SQL column alias holding the relationship type.
+    directed : str
+        SQL column alias holding the directed flag.
+    labels : str
+        SQL column alias holding the relationship labels as JSON.
     props : str
         SQL column alias holding the encoded properties.
     variable : str | None
@@ -74,7 +76,8 @@ class RelationshipColumns:
     id: str
     src: str
     dst: str
-    rel_type: str
+    directed: str
+    labels: str
     props: str
     variable: str | None
 
@@ -950,11 +953,17 @@ class Compiler:
             self._relationship_counter += 1
             condition = self._direction_condition(pattern.direction, alias, current_id)
             self._joins.append(f"JOIN relationships AS {alias} ON {condition}")
+            labels = self._select(
+                f"(SELECT json_group_array(label) FROM "
+                f"(SELECT label FROM relationship_labels "
+                f"WHERE relationship_id = {alias}.id ORDER BY label))"
+            )
             columns = RelationshipColumns(
                 id=self._select(f"{alias}.id"),
                 src=self._select(f"{alias}.src"),
                 dst=self._select(f"{alias}.dst"),
-                rel_type=self._select(f"{alias}.rel_type"),
+                directed=self._select(f"{alias}.directed"),
+                labels=labels,
                 props=self._select(f"{alias}.props"),
                 variable=pattern.variable,
             )
@@ -968,7 +977,11 @@ class Compiler:
             self._predicates.append(condition)
         if pattern.types:
             placeholders = ", ".join("?" for _ in pattern.types)
-            self._predicates.append(f"{alias}.rel_type IN ({placeholders})")
+            self._predicates.append(
+                f"{alias}.id IN (SELECT relationship_id FROM relationship_labels "
+                f"AS rel_label_{alias} "
+                f"WHERE rel_label_{alias}.label IN ({placeholders}))"
+            )
             self._arguments.extend(pattern.types)
         self._add_property_predicates(alias, pattern.properties)
         return self._next_id(pattern.direction, alias, current_id), columns
@@ -992,9 +1005,9 @@ class Compiler:
             SQL condition.
         """
         if direction is Direction.OUTGOING:
-            return f"{alias}.src = {current_id}.id"
+            return f"{alias}.directed = 1 AND {alias}.src = {current_id}.id"
         if direction is Direction.INCOMING:
-            return f"{alias}.dst = {current_id}.id"
+            return f"{alias}.directed = 1 AND {alias}.dst = {current_id}.id"
         return f"({alias}.src = {current_id}.id OR {alias}.dst = {current_id}.id)"
 
     @staticmethod

@@ -89,13 +89,13 @@ class JsonLinesCodec:
     """
 
     FORMAT: typing.ClassVar[str] = "pygrafito-jsonl"
-    VERSION: typing.ClassVar[int] = 1
+    VERSION: typing.ClassVar[int] = 2
     HEADER_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
         {"kind", "format", "version", "nodes", "relationships"}
     )
     NODE_FIELDS: typing.ClassVar[frozenset[str]] = frozenset({"kind", "id", "labels", "properties"})
     RELATIONSHIP_FIELDS: typing.ClassVar[frozenset[str]] = frozenset(
-        {"kind", "id", "type", "start_id", "end_id", "properties"}
+        {"kind", "id", "labels", "directed", "start_id", "end_id", "properties"}
     )
 
     def __init__(self, property_codec: PropertyCodec) -> None:
@@ -200,7 +200,8 @@ class JsonLinesCodec:
         record: dict[str, object] = {
             "kind": "relationship",
             "id": relationship.id,
-            "type": relationship.rel_type,
+            "labels": sorted(relationship.labels),
+            "directed": relationship.directed,
             "start_id": relationship.start_id,
             "end_id": relationship.end_id,
             "properties": properties,
@@ -238,12 +239,10 @@ class JsonLinesCodec:
             self._require_fields(record, self.RELATIONSHIP_FIELDS)
             return Relationship(
                 id=self._positive_int(record["id"], "id"),
-                rel_type=self._codec.validate_identifier(
-                    record["type"],
-                    "relationship type",
-                ),
                 start_id=self._positive_int(record["start_id"], "start_id"),
                 end_id=self._positive_int(record["end_id"], "end_id"),
+                labels=self._labels(record["labels"]),
+                directed=self._boolean(record["directed"], "directed"),
                 properties=self._properties(record["properties"]),
             )
         message = "record kind must be 'node' or 'relationship'"
@@ -407,6 +406,32 @@ class JsonLinesCodec:
         """
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             message = f"{field} must be a non-negative integer"
+            raise ValidationError(message)
+        return value
+
+    @staticmethod
+    def _boolean(value: object, field: str) -> bool:
+        """Validate one boolean field.
+
+        Parameters
+        ----------
+        value : object
+            Candidate value.
+        field : str
+            Field name used in error messages.
+
+        Returns
+        -------
+        bool
+            Validated boolean.
+
+        Raises
+        ------
+        ValidationError
+            If the value is not a boolean.
+        """
+        if not isinstance(value, bool):
+            message = f"{field} must be a boolean"
             raise ValidationError(message)
         return value
 
@@ -760,18 +785,22 @@ class SnapshotExporter:
             One validated relationship.
         """
         rows = self._connection.execute(
-            "SELECT id, src, dst, rel_type, props FROM relationships ORDER BY id"
+            "SELECT r.id, r.src, r.dst, r.directed, "
+            "(SELECT json_group_array(label) FROM (SELECT label FROM relationship_labels "
+            "WHERE relationship_id = r.id ORDER BY label)), r.props "
+            "FROM relationships AS r ORDER BY r.id"
         )
         for row in rows:
+            labels = () if row[4] is None else tuple(json.loads(str(row[4])))
             yield Relationship(
                 id=int(row[0]),
-                rel_type=self._property_codec.validate_identifier(
-                    row[3],
-                    "relationship type",
-                ),
                 start_id=int(row[1]),
                 end_id=int(row[2]),
-                properties=self._property_codec.decode_properties(str(row[4])),
+                labels=tuple(
+                    self._property_codec.validate_identifier(label, "label") for label in labels
+                ),
+                directed=bool(row[3]),
+                properties=self._property_codec.decode_properties(str(row[5])),
             )
 
 
@@ -944,8 +973,9 @@ class SnapshotRestorer:
             try:
                 transaction.add_relationship(
                     start,
-                    relationship.rel_type,
+                    relationship.labels,
                     end,
+                    directed=relationship.directed,
                     **dict(relationship.properties),
                 )
             except PygrafitoError as error:

@@ -137,7 +137,8 @@ grid.db> MATCH (a:Program)-[r:ALLIES_WITH]->(b) RETURN r;
 
 In JSON modes a node becomes
 `{"kind": "node", "id": 1, "labels": [...], "properties": {...}}`, a relationship adds
-`"type"`, `"start"`, and `"end"`, and a path contains `"nodes"` and `"relationships"`.
+`"labels"`, `"directed"`, `"start"`, and `"end"`, and a path contains `"nodes"` and
+`"relationships"`.
 
 `.headers off` hides the table and CSV header row. A result with no rows prints the header only in
 table mode, the header in CSV mode, `[]` in JSON mode, and nothing in JSONL and line modes.
@@ -217,9 +218,10 @@ the session with an open transaction rolls it back and reports that on standard 
 
 ## Introspection
 
-`.schema` summarizes labels with node counts and property keys, relationship types with
-relationship counts, declared indexes, declared uniqueness constraints, and the journal mode in
-effect. `.labels`, `.reltypes`, `.indexes`, and `.constraints` report each part separately.
+`.schema` summarizes labels with node counts and property keys, relationship labels with
+relationship counts, direction counts, declared indexes, declared uniqueness constraints, and the
+journal mode in effect. `.labels`, `.reltypes`, `.indexes`, and `.constraints` report each part
+separately.
 
 ```console
 grid.db> .schema
@@ -227,9 +229,12 @@ Labels
   ISO               1 node   cycles, designation
   Program           3 nodes   cycles, designation
   SystemMonitor     1 node   designation
-Relationship types
+Relationship labels
   ALLIES_WITH       2 relationships
   GUARDS            1 relationship
+Directions
+  directed          3 relationships
+  undirected        0 relationships
 Indexes
   node cycles
 Constraints
@@ -247,7 +252,7 @@ Constraint listing works in a read-only session. Declaring or removing a constra
 shell requires a Python handle; the shell does not expose constraint DDL.
 
 `.node` shows labels, properties, and incident relationships with direction and neighbor. `.rel`
-shows one relationship's type, endpoints, and properties.
+shows one relationship's labels, directed flag, endpoints, and properties.
 
 ```console
 grid.db> .node 3
@@ -255,12 +260,13 @@ Node 3
   labels: Program
   properties: {cycles=40, designation="Tron"}
   relationships
-    <- ALLIES_WITH (:ISO:Program {id: 2, cycles: 37, designation: "Quorra"}) id=2
-    -> GUARDS (:Program {id: 3, cycles: 40, designation: "Tron"}) id=3
+    <- :ALLIES_WITH (:ISO:Program {id: 2, cycles: 37, designation: "Quorra"}) id=2
+    -> :GUARDS (:Program {id: 3, cycles: 40, designation: "Tron"}) id=3
 
 grid.db> .rel 1
 Relationship 1
-  type: ALLIES_WITH
+  labels: :ALLIES_WITH
+  directed: True
   start: 1
   end: 2
   properties: {since_cycle=2020}

@@ -251,9 +251,12 @@ class TestSchemaCommands:
             "Labels",
             "  ISO               1 node   cycles, designation",
             "  Program           3 nodes   cycles, designation",
-            "Relationship types",
+            "Relationship labels",
             "  ALLIES_WITH       2 relationships",
             "  GUARDS            1 relationship",
+            "Directions",
+            "  directed          3 relationships",
+            "  undirected        0 relationships",
             "Indexes",
             "  node cycles",
             "Constraints",
@@ -341,7 +344,7 @@ class TestElementCommands:
         assert lines[0] == "Node 1"
         assert lines[1] == "  labels: Program"
         assert lines[2] == '  properties: {cycles=36, designation="Kevin Flynn"}'
-        assert any(line.startswith("    -> ALLIES_WITH") for line in lines)
+        assert any(line.startswith("    -> :ALLIES_WITH") for line in lines)
 
     def test_node_shows_incoming_and_self_loop(self, seeded: Path) -> None:
         harness = Harness(seeded)
@@ -350,8 +353,8 @@ class TestElementCommands:
         finally:
             harness.close()
 
-        assert "<- ALLIES_WITH" in output
-        assert "-> GUARDS" in output
+        assert "<- :ALLIES_WITH" in output
+        assert "-> :GUARDS" in output
 
     def test_missing_node(self, seeded: Path) -> None:
         harness = Harness(seeded)
@@ -370,11 +373,28 @@ class TestElementCommands:
             harness.close()
         assert output.splitlines() == [
             "Relationship 1",
-            "  type: ALLIES_WITH",
+            "  labels: :ALLIES_WITH",
+            "  directed: True",
             "  start: 1",
             "  end: 2",
             "  properties: {since_cycle=2020}",
         ]
+
+    def test_undirected_relationship_introspection(self, tmp_path: Path) -> None:
+        path = tmp_path / "grid.db"
+        with Graph.open(path) as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(first, ["TRUSTS"], second, directed=False)
+        harness = Harness(path)
+        try:
+            _, node_output, _ = harness.run(".node 1\n")
+            _, rel_output, _ = harness.run(".rel 1\n")
+        finally:
+            harness.close()
+        assert "~ :TRUSTS" in node_output
+        assert "labels: :TRUSTS" in rel_output
+        assert "directed: False" in rel_output
 
     def test_expand_depth_one(self, seeded: Path) -> None:
         harness = Harness(seeded)
@@ -494,7 +514,7 @@ class TestMaintenanceCommands:
         try:
             connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute(
-                "INSERT INTO relationships (src, dst, rel_type) VALUES (1, 999, 'TRUSTS')"
+                "INSERT INTO relationships (src, dst, directed, props) VALUES (1, 999, 1, '{}')"
             )
             connection.commit()
         finally:

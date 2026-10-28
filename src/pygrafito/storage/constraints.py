@@ -37,7 +37,7 @@ class ConstraintRegistry:
         ElementKind.RELATIONSHIP: "rel",
     }
     KINDS: typing.ClassVar[dict[str, ElementKind]] = {tag: kind for kind, tag in TAGS.items()}
-    NODE_SUFFIXES: typing.ClassVar[tuple[str, ...]] = ("_idx", "_props", "_labels")
+    SUFFIXES: typing.ClassVar[tuple[str, ...]] = ("_idx", "_props", "_labels")
     NAME_PARTS: typing.ClassVar[int] = 2
 
     def __init__(self, connection: Connection, codec: PropertyCodec) -> None:
@@ -75,13 +75,10 @@ class ConstraintRegistry:
         Returns
         -------
         tuple[str, ...]
-            One unique index for a relationship constraint, or a support index
-            and two triggers for a node constraint.
+            A support index and two triggers for either element kind.
         """
         stem = cls.name(constraint)
-        if constraint.kind is ElementKind.RELATIONSHIP:
-            return (stem,)
-        return tuple(f"{stem}{suffix}" for suffix in cls.NODE_SUFFIXES)
+        return tuple(f"{stem}{suffix}" for suffix in cls.SUFFIXES)
 
     @classmethod
     def parse_name(cls, name: str) -> Constraint | None:
@@ -105,7 +102,7 @@ class ConstraintRegistry:
         tag, separator, body = rest.partition("_")
         if not separator or tag not in cls.KINDS:
             return None
-        for suffix in cls.NODE_SUFFIXES:
+        for suffix in cls.SUFFIXES:
             if body.endswith(suffix):
                 body = body[: -len(suffix)]
                 break
@@ -187,7 +184,7 @@ class ConstraintRegistry:
             constraint.
         """
         if constraint.kind is ElementKind.RELATIONSHIP:
-            return (self._relationship_ddl(constraint),)
+            return self._relationship_ddl(constraint)
         return self._node_ddl(constraint)
 
     def create(self, constraint: Constraint) -> None:
@@ -260,8 +257,8 @@ class ConstraintRegistry:
             raise
         self._connection.execute("COMMIT")
 
-    def _relationship_ddl(self, constraint: Constraint) -> str:
-        """Render the unique index for a relationship constraint.
+    def _relationship_ddl(self, constraint: Constraint) -> tuple[str, ...]:
+        """Render the support index and triggers for a relationship constraint.
 
         Parameters
         ----------
@@ -270,16 +267,54 @@ class ConstraintRegistry:
 
         Returns
         -------
-        str
-            ``CREATE UNIQUE INDEX`` statement.
+        tuple[str, ...]
+            Support index, property trigger, and label trigger.
         """
+        stem = self.name(constraint)
         path = self._codec.sql_json_path(constraint.key)
-        scope = self._quote(constraint.scope)
-        return (
-            f"CREATE UNIQUE INDEX IF NOT EXISTS {self.name(constraint)} "
-            f"ON relationships (json_extract(props, {path}), json_type(props, {path})) "
-            f"WHERE rel_type = {scope}"
+        label = self._quote(constraint.scope)
+        token = self._quote(self.token(constraint))
+        index = (
+            f"CREATE INDEX IF NOT EXISTS {stem}_idx ON relationships "
+            f"(json_extract(props, {path}), json_type(props, {path}))"
         )
+        props = (
+            f"CREATE TRIGGER IF NOT EXISTS {stem}_props "
+            f"BEFORE UPDATE OF props ON relationships "
+            f"WHEN EXISTS (SELECT 1 FROM relationship_labels "
+            f"WHERE relationship_id = NEW.id AND label = {label}) "
+            f"AND json_extract(NEW.props, {path}) IS NOT NULL "
+            f"BEGIN "
+            f"SELECT RAISE(ABORT, {token}) WHERE EXISTS ("
+            f"SELECT 1 FROM relationships other "
+            f"JOIN relationship_labels other_label ON other_label.relationship_id = other.id "
+            f"WHERE other.id != NEW.id AND other_label.label = {label} "
+            f"AND json_extract(other.props, {path}) IS NOT NULL "
+            f"AND json_extract(other.props, {path}) = json_extract(NEW.props, {path}) "
+            f"AND json_type(other.props, {path}) = json_type(NEW.props, {path})); "
+            f"END"
+        )
+        labels = (
+            f"CREATE TRIGGER IF NOT EXISTS {stem}_labels "
+            f"AFTER INSERT ON relationship_labels "
+            f"WHEN NEW.label = {label} "
+            f"AND json_extract((SELECT props FROM relationships WHERE id = NEW.relationship_id), "
+            f"{path}) IS NOT NULL "
+            f"BEGIN "
+            f"SELECT RAISE(ABORT, {token}) WHERE EXISTS ("
+            f"SELECT 1 FROM relationships other "
+            f"JOIN relationship_labels other_label ON other_label.relationship_id = other.id "
+            f"WHERE other.id != NEW.relationship_id AND other_label.label = {label} "
+            f"AND json_extract(other.props, {path}) IS NOT NULL "
+            f"AND json_extract(other.props, {path}) = "
+            f"json_extract((SELECT props FROM relationships WHERE id = NEW.relationship_id), "
+            f"{path}) "
+            f"AND json_type(other.props, {path}) = "
+            f"json_type((SELECT props FROM relationships WHERE id = NEW.relationship_id), "
+            f"{path})); "
+            f"END"
+        )
+        return (index, props, labels)
 
     def _node_ddl(self, constraint: Constraint) -> tuple[str, ...]:
         """Render the support index and triggers for a node constraint.
@@ -460,15 +495,16 @@ class ConstraintRegistry:
         clause = ""
         parameters: list[object] = [constraint.scope, json_type, comparison]
         if exclude_id is not None:
-            clause = "AND id != ? "
+            clause = "AND relationships.id != ? "
             parameters.append(exclude_id)
         row = self._connection.execute(
-            f"SELECT id FROM relationships "
-            f"WHERE rel_type = ? "
-            f"AND json_type(props, {path}) = ? "
-            f"AND json_extract(props, {path}) = ? "
+            f"SELECT relationships.id FROM relationships "
+            f"JOIN relationship_labels ON relationship_labels.relationship_id = relationships.id "
+            f"WHERE relationship_labels.label = ? "
+            f"AND json_type(relationships.props, {path}) = ? "
+            f"AND json_extract(relationships.props, {path}) = ? "
             f"{clause}"
-            f"ORDER BY id LIMIT 1",
+            f"ORDER BY relationships.id LIMIT 1",
             parameters,
         ).fetchone()
         return None if row is None else int(typing.cast(int, row[0]))
@@ -522,16 +558,20 @@ class ConstraintRegistry:
             Later duplicate id and value, or ``None``.
         """
         path = self._codec.sql_json_path(constraint.key)
-        rel_type = self._quote(constraint.scope)
+        label = self._quote(constraint.scope)
         row = self._connection.execute(
             f"SELECT later.id, json_extract(later.props, {path}), "
             f"json_type(later.props, {path}) "
             f"FROM relationships later "
-            f"WHERE later.rel_type = {rel_type} "
+            f"JOIN relationship_labels later_label "
+            f"ON later_label.relationship_id = later.id "
+            f"WHERE later_label.label = {label} "
             f"AND json_extract(later.props, {path}) IS NOT NULL "
             f"AND EXISTS ("
             f"SELECT 1 FROM relationships earlier "
-            f"WHERE earlier.id < later.id AND earlier.rel_type = {rel_type} "
+            f"JOIN relationship_labels earlier_label "
+            f"ON earlier_label.relationship_id = earlier.id "
+            f"WHERE earlier.id < later.id AND earlier_label.label = {label} "
             f"AND json_extract(earlier.props, {path}) = json_extract(later.props, {path}) "
             f"AND json_type(earlier.props, {path}) = json_type(later.props, {path})) "
             f"ORDER BY later.id LIMIT 1"
@@ -619,7 +659,7 @@ class ConstraintRegistry:
         ValidationError
             If the scope or key cannot be embedded in a statement.
         """
-        field = "label" if constraint.kind is ElementKind.NODE else "relationship type"
+        field = "label"
         self._codec.validate_identifier(constraint.scope, field)
         self._codec.validate_identifier(constraint.key, "property key")
 
@@ -666,7 +706,7 @@ class ConstraintTranslator:
     """
 
     INDEX_MARKER: typing.ClassVar[str] = "unique constraint failed: index '"
-    TOKEN_TAG: typing.ClassVar[str] = "node"
+    TOKEN_PREFIX: typing.ClassVar[str] = "pygrafito:constraint:"
     TOKEN_PARTS: typing.ClassVar[int] = 5
 
     def __init__(
@@ -683,7 +723,7 @@ class ConstraintTranslator:
         *,
         properties: Mapping[str, Value] | None = None,
         labels: Iterable[str] = (),
-        rel_type: str | None = None,
+        rel_labels: Iterable[str] = (),
         exclude_id: int | None = None,
     ) -> ConstraintViolationError | None:
         """Translate one SQLite failure when it is a uniqueness violation.
@@ -695,9 +735,9 @@ class ConstraintTranslator:
         properties : Mapping[str, Value] | None, optional
             Values the failed write attempted to store, by default unknown.
         labels : Iterable[str], optional
-            Labels the failed write touched, by default none.
-        rel_type : str | None, optional
-            Relationship type the failed write touched, by default unknown.
+            Node labels the failed write touched, by default none.
+        rel_labels : Iterable[str], optional
+            Relationship labels the failed write touched, by default none.
         exclude_id : int | None, optional
             Element the failed write updated, by default ``None``.
 
@@ -709,7 +749,7 @@ class ConstraintTranslator:
         constraint = self._constraint(str(error))
         if constraint is None:
             return None
-        if not self._matches_scope(constraint, labels, rel_type):
+        if not self._matches_scope(constraint, labels, rel_labels):
             return None
         value = None if properties is None else properties.get(constraint.key)
         if value is None:
@@ -790,13 +830,15 @@ class ConstraintTranslator:
         Constraint | None
             The decoded node constraint, or ``None``.
         """
-        marker = f"{self._registry.TOKEN_PREFIX}:{self.TOKEN_TAG}:"
-        index = message.find(marker)
+        index = message.find(self.TOKEN_PREFIX)
         if index < 0:
             return None
         token = message[index:].split()[0]
         parts = token.split(":")
         if len(parts) != self.TOKEN_PARTS:
+            return None
+        kind = self._registry.KINDS.get(parts[2])
+        if kind is None:
             return None
         try:
             scope = bytes.fromhex(parts[3]).decode("utf-8")
@@ -805,13 +847,13 @@ class ConstraintTranslator:
             return None
         if not scope or not key:
             return None
-        return Constraint(ElementKind.NODE, scope, key)
+        return Constraint(kind, scope, key)
 
     @staticmethod
     def _matches_scope(
         constraint: Constraint,
         labels: Iterable[str],
-        rel_type: str | None,
+        rel_labels: Iterable[str],
     ) -> bool:
         """Report whether a write could have touched a constraint scope.
 
@@ -820,9 +862,9 @@ class ConstraintTranslator:
         constraint : Constraint
             Candidate constraint.
         labels : Iterable[str]
-            Labels the write touched.
-        rel_type : str | None
-            Relationship type the write touched.
+            Node labels the write touched.
+        rel_labels : Iterable[str]
+            Relationship labels the write touched.
 
         Returns
         -------
@@ -831,9 +873,7 @@ class ConstraintTranslator:
         """
         if constraint.kind is ElementKind.NODE:
             return not labels or constraint.scope in labels
-        if rel_type is None:
-            return True
-        return constraint.scope == rel_type
+        return not rel_labels or constraint.scope in rel_labels
 
     @staticmethod
     def _find_ignore_case(message: str, fragment: str) -> int:

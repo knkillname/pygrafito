@@ -2,8 +2,8 @@
 
 **An embedded property graph for Python, persisted in one SQLite file.**
 
-`pygrafito` stores nodes, labels, typed properties, and directed relationships in a single
-database. It uses only the Python standard library at runtime, writes in explicit ACID
+`pygrafito` stores nodes, labels, typed properties, and labeled directed or undirected
+relationships in a single database. It uses only the Python standard library at runtime, writes in explicit ACID
 transactions, and includes a pattern-matching query language, traversal, indexes, uniqueness
 constraints, batch import, and JSONL interop.
 

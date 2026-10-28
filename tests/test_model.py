@@ -177,19 +177,33 @@ class TestRelationship:
     def test_fields_and_mapping(self) -> None:
         relationship = Relationship(
             id=3,
-            rel_type="KNOWS",
             start_id=1,
             end_id=2,
+            labels=("KNOWS",),
             properties={"since": 2020},
         )
-        assert relationship.rel_type == "KNOWS"
+        assert relationship.labels == ("KNOWS",)
+        assert relationship.directed is True
         assert relationship.start_id == 1
         assert relationship.end_id == 2
         assert relationship["since"] == 2020
 
     def test_defaults_are_empty(self) -> None:
-        relationship = Relationship(id=1, rel_type="KNOWS", start_id=1, end_id=2)
+        relationship = Relationship(id=1, start_id=1, end_id=2)
+        assert relationship.labels == ()
+        assert relationship.directed is True
         assert dict(relationship) == {}
+
+    def test_labels_are_sorted_and_deduplicated(self) -> None:
+        relationship = Relationship(
+            id=1,
+            start_id=1,
+            end_id=2,
+            labels=("TRUSTS", "ALLIES_WITH", "TRUSTS"),
+            directed=False,
+        )
+        assert relationship.labels == ("ALLIES_WITH", "TRUSTS")
+        assert relationship.directed is False
 
 
 class TestPath:
@@ -198,7 +212,7 @@ class TestPath:
     def test_length_and_endpoints(self) -> None:
         first = Node(id=1)
         second = Node(id=2)
-        relationship = Relationship(id=1, rel_type="KNOWS", start_id=1, end_id=2)
+        relationship = Relationship(id=1, start_id=1, end_id=2, labels=("KNOWS",))
         path = Path(nodes=(first, second), relationships=(relationship,))
         assert path.length == 1
         assert path.start is first
@@ -217,7 +231,7 @@ class TestPath:
 
     def test_mismatched_counts_rejected(self) -> None:
         node = Node(id=1)
-        relationship = Relationship(id=1, rel_type="KNOWS", start_id=1, end_id=1)
+        relationship = Relationship(id=1, start_id=1, end_id=1, labels=("KNOWS",))
         with pytest.raises(ValidationError):
             Path(nodes=(node,), relationships=(relationship,))
 

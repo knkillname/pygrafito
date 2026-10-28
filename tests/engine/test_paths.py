@@ -126,7 +126,7 @@ class TestTrailSemantics(_GraphTestCase):
         paths = list(graph.paths(first, first, min_depth=2, max_depth=2))
         assert len(paths) == 1
         assert paths[0].nodes == (first, second, first)
-        assert [relationship.rel_type for relationship in paths[0].relationships] == [
+        assert [relationship.labels[0] for relationship in paths[0].relationships] == [
             "GRID_LINK",
             "GRID_LINK",
         ]
@@ -222,10 +222,10 @@ class _CountingSnapshot(AdjacencySnapshot):
         self,
         node_id: int,
         direction: Direction,
-        rel_types: frozenset[str] | None,
+        labels: frozenset[str] | None,
     ) -> Iterator[tuple[Relationship, int]]:
         self.edge_calls += 1
-        yield from super().edges(node_id, direction, rel_types)
+        yield from super().edges(node_id, direction, labels)
 
 
 class TestEarlyStop(_GraphTestCase):
@@ -237,10 +237,10 @@ class TestEarlyStop(_GraphTestCase):
         right = Node(id=3)
         end = Node(id=4)
         relationships = (
-            Relationship(id=1, rel_type="GRID_LINK", start_id=1, end_id=2),
-            Relationship(id=2, rel_type="GRID_LINK", start_id=1, end_id=3),
-            Relationship(id=3, rel_type="GRID_LINK", start_id=2, end_id=4),
-            Relationship(id=4, rel_type="GRID_LINK", start_id=3, end_id=4),
+            Relationship(id=1, start_id=1, end_id=2, labels=("GRID_LINK",)),
+            Relationship(id=2, start_id=1, end_id=3, labels=("GRID_LINK",)),
+            Relationship(id=3, start_id=2, end_id=4, labels=("GRID_LINK",)),
+            Relationship(id=4, start_id=3, end_id=4, labels=("GRID_LINK",)),
         )
         snapshot = _CountingSnapshot((start, left, right, end), relationships)
         full_snapshot = _CountingSnapshot((start, left, right, end), relationships)

@@ -46,7 +46,7 @@ class TestBackup:
             assert copy.node(2)["designation"] == "Quorra"
             assert copy.node(2).labels == frozenset({"Program", "ISO"})
             relationship = copy.relationship(1)
-            assert relationship.rel_type == "ALLIES_WITH"
+            assert relationship.labels == ("ALLIES_WITH",)
             assert relationship["since_cycle"] == 2020
 
     def test_existing_destination_is_refused(self, populated: Path, tmp_path: Path) -> None:
@@ -71,6 +71,30 @@ class TestBackup:
         assert not destination.exists()
         with Graph.open(populated) as graph:
             assert list(graph.find_nodes("Program", designation="Tron")) == []
+
+    def test_version_two_labels_and_direction_survive_backup(self, tmp_path: Path) -> None:
+        """A fresh version 2 graph keeps labels, direction, and integrity."""
+        path = tmp_path / "grid.db"
+        backup = tmp_path / "backup.db"
+        snapshot = tmp_path / "grid.jsonl"
+        with Graph.open(path) as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(
+                first,
+                ["ALLIES_WITH", "TRUSTS"],
+                second,
+                directed=False,
+                since=2020,
+            )
+            graph.backup_to(backup)
+            assert graph.check_integrity() == ()
+            assert graph.export_jsonl(snapshot).relationships == 1
+
+        with Graph.open(backup) as copy:
+            relationship = next(iter(copy.find_relationships(directed=False)))
+            assert relationship.labels == ("ALLIES_WITH", "TRUSTS")
+            assert copy.check_integrity() == ()
 
     def test_read_only_source(self, populated: Path, tmp_path: Path) -> None:
         """A read-only handle can still write a backup copy."""
@@ -122,7 +146,7 @@ class TestIntegrity:
         try:
             connection.execute("PRAGMA foreign_keys = OFF")
             connection.execute(
-                "INSERT INTO relationships (src, dst, rel_type) VALUES (1, 999, 'TRUSTS')"
+                "INSERT INTO relationships (src, dst, directed, props) VALUES (1, 999, 1, '{}')"
             )
             connection.commit()
         finally:

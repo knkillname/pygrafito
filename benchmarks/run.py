@@ -125,11 +125,12 @@ class Dataset:
                 end = created[(position * 7 + 13) % len(created)]
                 if start.id == end.id:
                     continue
-                rel_type = "TRANSMISSION" if position % 100 == 0 else "ALLIES_WITH"
+                label = "TRANSMISSION" if position % 100 == 0 else "ALLIES_WITH"
                 transaction.add_relationship(
                     start,
-                    rel_type,
+                    (label,),
                     end,
+                    directed=position % 10 != 0,
                     since_cycle=2000 + position % 20,
                 )
         with graph.transaction() as transaction:
@@ -156,9 +157,14 @@ class Scenarios:
         graph.query("MATCH (n:Program) WHERE n.cycles >= 90 RETURN count(*) AS total")
 
     @staticmethod
-    def type_filter(graph: Graph) -> None:
-        """Filter a selective relationship type without a bound endpoint."""
+    def label_filter(graph: Graph) -> None:
+        """Filter a selective relationship label without a bound endpoint."""
         graph.query("MATCH (a)-[r:TRANSMISSION]->(b) RETURN count(*) AS total")
+
+    @staticmethod
+    def direction_filter(graph: Graph) -> None:
+        """Follow directed relationships from an indexed start property."""
+        graph.query("MATCH (a:Program {cycles: 36})-[r]->(b) RETURN count(*) AS total")
 
     @staticmethod
     def node_lookup(graph: Graph) -> None:
@@ -190,7 +196,8 @@ class Runner:
         self._scenarios: dict[str, Callable[[Graph], None]] = {
             "equality": Scenarios.equality,
             "range": Scenarios.range_filter,
-            "type filter": Scenarios.type_filter,
+            "label filter": Scenarios.label_filter,
+            "direction filter": Scenarios.direction_filter,
             "node lookup": Scenarios.node_lookup,
             "quantified": Scenarios.quantified,
         }

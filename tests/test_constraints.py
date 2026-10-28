@@ -240,6 +240,33 @@ class TestNodeEnforcement(_ConstraintTestCase):
         graph.add_relationship(second, "TRUSTS", first, since=2020)
         assert len(list(graph.find_relationships("ALLIES_WITH"))) == 2
 
+    def test_relationship_constraint_covers_multi_label_and_undirected(
+        self,
+        graph: Graph,
+    ) -> None:
+        graph.create_relationship_uniqueness_constraint("ALLIES_WITH", "since")
+        first = graph.add_node("Program", designation="Tron")
+        second = graph.add_node("Program", designation="Quorra")
+        graph.add_relationship(
+            first,
+            ["ALLIES_WITH", "TRUSTS"],
+            second,
+            directed=False,
+            since=2020,
+        )
+        with pytest.raises(ConstraintViolationError):
+            graph.add_relationship(first, "ALLIES_WITH", second, since=2020)
+
+    def test_relationship_constraint_checks_label_acquisition(self, graph: Graph) -> None:
+        graph.create_relationship_uniqueness_constraint("ALLIES_WITH", "since")
+        first = graph.add_node("Program", designation="Tron")
+        second = graph.add_node("Program", designation="Quorra")
+        graph.add_relationship(first, "ALLIES_WITH", second, since=2020)
+        other = graph.add_relationship(first, "TRUSTS", second, since=2020)
+        with pytest.raises(ConstraintViolationError):
+            graph.add_labels(other, "ALLIES_WITH")
+        assert graph.relationship(other.id).labels == ("TRUSTS",)
+
     def test_relationship_property_update_fails(self, graph: Graph) -> None:
         graph.create_relationship_uniqueness_constraint("ALLIES_WITH", "since")
         first = graph.add_node("Program", designation="Tron")

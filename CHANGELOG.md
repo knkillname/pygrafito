@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Relationships carry zero or more labels, can be directed or undirected, and expose a sorted
+  label tuple and a `directed` flag. The Python API, traversal, query dialect, shell, indexes,
+  constraints, and interop format use the new element model.
+- `Graph.add_labels` and `Graph.remove_labels` accept a `Relationship` snapshot as well as a
+  `Node`, so relationship labels can be added and removed directly.
+- Schema version 2 and JSONL snapshot version 2. Snapshots carry relationship `labels` and
+  `directed`, and the read-only views expose the same fields.
+
+### Changed
+
+- **BREAKING** Element ids are allocated with `AUTOINCREMENT` and are never reused after a
+  delete.
+- **BREAKING** `Relationship.type` is replaced by `Relationship.labels` and
+  `Relationship.directed`; `Graph.add_relationship` and `Graph.find_relationships` take labels
+  and an optional direction filter.
+- **BREAKING** Relationship uniqueness constraints scope by label instead of a single
+  relationship type.
+- **BREAKING** A version 1 database or JSONL snapshot is refused. This pre-1.0 release does not
+  migrate the old layout; create a fresh graph or export with 0.8 first.
+- `/opsx-apply` runs must now update the Sphinx documentation under `docs/` for every behavior,
+  public API, CLI, or configuration change they implement, and pass `hatch run docs:build` before
+  marking the affected tasks complete.
+
+### Removed
+
+- **BREAKING** `Relationship.type`, the single relationship-type column, the version 1 snapshot
+  reader, and the version 1 view definitions.
+
 ## [0.8.0] - 2026-10-26
 
 ### Added

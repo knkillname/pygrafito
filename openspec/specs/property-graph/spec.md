@@ -20,6 +20,7 @@ The system SHALL provide a graph handle that opens or creates a database at a fi
 - **WHEN** a caller opens an in-memory graph
 - **THEN** the graph is usable without creating a filesystem database file
 
+
 ### Requirement: Closed graph handle operations
 
 The system SHALL reject reads, writes, and traversal starts on a closed graph handle with a
@@ -39,6 +40,7 @@ The system SHALL reject reads, writes, and traversal starts on a closed graph ha
 
 - **WHEN** a caller closes a graph and then starts `traverse`, `shortest_path`, or `paths`
 - **THEN** the system raises `GraphClosedError`
+
 
 ### Requirement: Single-writer concurrency
 
@@ -69,6 +71,7 @@ The system SHALL use one database connection per graph handle, and a handle SHAL
 - **WHEN** another writer holds the lock for longer than the busy timeout
 - **THEN** the waiting write raises a lock-timeout error and changes nothing
 
+
 ### Requirement: Read snapshot
 
 Each public read call SHALL observe one committed state, even when another handle commits while
@@ -89,6 +92,7 @@ own writes.
 
 - **WHEN** a caller reads inside an explicit transaction that already wrote
 - **THEN** the read observes the transaction's own uncommitted writes
+
 
 ### Requirement: Effective journal mode
 
@@ -111,26 +115,6 @@ and remain consistent, and concurrent reading during a commit SHALL NOT be guara
 - **WHEN** a caller opens an in-memory graph
 - **THEN** the reported journal mode is the in-memory mode and no file is created
 
-### Requirement: Layout-only schema version
-
-The recorded schema version SHALL change only when the stored layout becomes incompatible, and
-SHALL NOT change when additive objects are declared or removed. A database that records a newer
-layout SHALL be refused.
-
-#### Scenario: Additive objects keep the version
-
-- **WHEN** a caller declares or removes constraints or indexes
-- **THEN** the recorded schema version is unchanged
-
-#### Scenario: Newer layout refused
-
-- **WHEN** a caller opens a database that records a newer layout than the library supports
-- **THEN** the system raises an unsupported-runtime error before accepting any write
-
-#### Scenario: Older layout upgraded
-
-- **WHEN** a caller opens a write-capable handle on a database with an older layout
-- **THEN** the layout is upgraded on open and the recorded version becomes the current one
 
 ### Requirement: Foreign database refusal
 
@@ -160,6 +144,7 @@ SHALL NOT count as unrelated tables.
 - **WHEN** a caller opens a graph database that contains externally visible views
 - **THEN** the graph opens normally
 
+
 ### Requirement: Portable database file
 
 Closing the last handle of a file-backed graph SHALL leave a single self-contained database file.
@@ -179,6 +164,7 @@ Copying a database file while a handle holds it open SHALL be outside the contra
 
 - **WHEN** a cleanly closed database is opened read-only from read-only media
 - **THEN** reads succeed
+
 
 ### Requirement: Strict property values
 
@@ -214,6 +200,7 @@ The system SHALL accept property values that are booleans, signed 64-bit integer
 - **WHEN** a caller assigns null to an existing property
 - **THEN** the property is removed and later reads do not report it
 
+
 ### Requirement: Type distinction
 
 The system SHALL preserve the distinction between booleans, integers, and floats in stored values and in property filters.
@@ -227,6 +214,7 @@ The system SHALL preserve the distinction between booleans, integers, and floats
 
 - **WHEN** a node stores integer 1 and a caller filters on float 1.0
 - **THEN** the node does not match
+
 
 ### Requirement: Nodes, labels, and properties
 
@@ -252,6 +240,7 @@ The system SHALL create nodes with a unique integer id, zero or more non-empty s
 - **WHEN** a caller requests a node id that does not exist
 - **THEN** the system raises a not-found error
 
+
 ### Requirement: Immutable read snapshots
 
 The system SHALL return immutable snapshots for node and relationship reads. A later write SHALL NOT change a snapshot that was already returned.
@@ -261,37 +250,25 @@ The system SHALL return immutable snapshots for node and relationship reads. A l
 - **WHEN** a caller reads a node, changes a property through the graph, and inspects the earlier snapshot
 - **THEN** the earlier snapshot still reports the original property value
 
-### Requirement: Directed typed relationships
-
-The system SHALL create directed relationships with a non-empty string type, a start node, an end node, and properties. It SHALL reject relationships whose endpoints do not exist.
-
-#### Scenario: Create a relationship
-
-- **WHEN** a caller connects two existing nodes with type KNOWS and a property
-- **THEN** the relationship is returned with the same type, endpoints, and properties
-
-#### Scenario: Missing endpoint
-
-- **WHEN** a caller creates a relationship referencing an absent node id
-- **THEN** the system raises a not-found error and creates no relationship
-
-#### Scenario: Self-loop
-
-- **WHEN** a caller creates a relationship whose start and end are the same node
-- **THEN** the relationship is stored and can be read back
 
 ### Requirement: Element identity
 
-The system SHALL assign unique integer ids to live nodes and relationships. An id MAY be reused after the element is deleted.
+The system SHALL assign unique integer ids to live nodes and relationships. An id SHALL NOT be reused after the element is deleted.
 
 #### Scenario: Distinct live ids
 
 - **WHEN** a caller creates several nodes and relationships
 - **THEN** every live element has a distinct id
 
+#### Scenario: Deleted id is not reused
+
+- **WHEN** a caller deletes an element and then creates another element of the same kind
+- **THEN** the new element receives an id that no deleted element ever used
+
+
 ### Requirement: Lookup by label and property
 
-The system SHALL find nodes carrying all specified labels and matching exact property values, and SHALL find relationships by type and exact property values. Property matching SHALL be type-sensitive and SHALL respect list order.
+The system SHALL find nodes carrying all specified labels and matching exact property values, and SHALL find relationships carrying all specified labels, optionally restricted by direction, and matching exact property values. Property matching SHALL be type-sensitive and SHALL respect list order.
 
 #### Scenario: Find nodes by label and property
 
@@ -308,9 +285,25 @@ The system SHALL find nodes carrying all specified labels and matching exact pro
 - **WHEN** a node stores the list [1, 2] and the caller looks up [2, 1]
 - **THEN** the node is not returned
 
+#### Scenario: Find relationships by label
+
+- **WHEN** a caller looks up relationships carrying labels ALLIES_WITH and TRUSTS
+- **THEN** only relationships carrying both labels are returned
+
+#### Scenario: Find relationships by direction
+
+- **WHEN** a caller looks up directed relationships
+- **THEN** relationships stored as undirected are not returned
+
+#### Scenario: Unlabeled relationship
+
+- **WHEN** a caller looks up relationships without a label filter
+- **THEN** labeled and unlabeled relationships are both eligible
+
+
 ### Requirement: Deletion rules
 
-The system SHALL delete relationships directly. It SHALL refuse to delete a node that still has relationships unless detaching deletion is requested, in which case incident relationships are removed first.
+The system SHALL delete relationships directly. It SHALL refuse to delete a node that still has an incident relationship, whether that relationship is directed or undirected, unless detaching deletion is requested, in which case incident relationships are removed first.
 
 #### Scenario: Connected node refused
 
@@ -321,6 +314,17 @@ The system SHALL delete relationships directly. It SHALL refuse to delete a node
 
 - **WHEN** a caller deletes a connected node with detaching enabled
 - **THEN** the node and all incident relationships are removed
+
+#### Scenario: Undirected edge blocks deletion
+
+- **WHEN** a caller deletes a node that is an endpoint of an undirected relationship without detaching
+- **THEN** the system raises a connected-node error and changes nothing
+
+#### Scenario: Detach removes undirected edges
+
+- **WHEN** a caller deletes a node with detaching enabled and the node is an endpoint of an undirected relationship
+- **THEN** that relationship is removed with the node
+
 
 ### Requirement: Transactions and durability
 
@@ -341,6 +345,7 @@ The system SHALL group writes in ACID transactions. An explicit transaction SHAL
 - **WHEN** a single convenience write fails validation
 - **THEN** no partial change is persisted
 
+
 ### Requirement: Active transaction write guard
 
 The system SHALL reject a convenience write while an explicit transaction is active, raising a
@@ -358,6 +363,7 @@ handles that error.
   through the transaction
 - **THEN** the transaction remains active and commits its writes normally
 
+
 ### Requirement: Database compatibility
 
 The system SHALL verify at open time that the SQLite runtime provides the JSON functions required for property storage, and SHALL refuse to operate otherwise.
@@ -366,6 +372,7 @@ The system SHALL verify at open time that the SQLite runtime provides the JSON f
 
 - **WHEN** a graph is opened on a SQLite runtime without the required JSON support
 - **THEN** the system raises an unsupported-runtime error before accepting writes
+
 
 ### Requirement: Read-only graph handles
 
@@ -404,6 +411,7 @@ reject an in-memory location.
 - **WHEN** a caller requests a read-only in-memory graph
 - **THEN** the system raises a validation error
 
+
 ### Requirement: Manual transaction control
 
 An explicit transaction SHALL also be controllable through `begin`, `commit`, and `rollback`
@@ -440,6 +448,7 @@ finish it, and the context-manager form SHALL remain equivalent.
 - **WHEN** a caller writes inside a transaction context block that completes successfully
 - **THEN** the writes are committed as before, and an exception still rolls them back
 
+
 ### Requirement: Database backup
 
 The system SHALL write a consistent copy of the open database to a destination path while the
@@ -466,6 +475,7 @@ an explicit transaction is active. A read-only handle SHALL support backup.
 - **WHEN** a caller backs up a read-only graph handle
 - **THEN** the copy is written
 
+
 ### Requirement: Integrity check
 
 The system SHALL report structural integrity problems of the open database, including storage
@@ -486,3 +496,113 @@ healthy.
 
 - **WHEN** a caller checks the integrity of a read-only handle
 - **THEN** the report is returned, or empty when the store is healthy
+
+
+### Requirement: Labeled directed and undirected relationships
+
+The system SHALL create relationships with zero or more non-empty string labels, two existing endpoint nodes, a directed flag, and properties. Duplicate labels SHALL be deduplicated. Empty labels and missing endpoints SHALL be rejected. A directed relationship SHALL preserve its start and end endpoints; an undirected relationship SHALL expose both endpoints without a source or destination meaning.
+
+#### Scenario: Create a labeled relationship
+
+- **WHEN** a caller connects two existing nodes with labels ALLIES_WITH and TRUSTS and a property
+- **THEN** the relationship is returned with both labels, both endpoints, the directed flag, and the property
+
+#### Scenario: Create an unlabeled relationship
+
+- **WHEN** a caller connects two existing nodes without labels
+- **THEN** the relationship is stored and read back with an empty label set
+
+#### Scenario: Duplicate labels
+
+- **WHEN** a caller supplies the same label twice for one relationship
+- **THEN** the relationship carries that label once
+
+#### Scenario: Empty label rejected
+
+- **WHEN** a caller supplies an empty label
+- **THEN** the system raises a validation error and creates no relationship
+
+#### Scenario: Directed endpoints
+
+- **WHEN** a caller creates a directed relationship
+- **THEN** reads report the same start and end endpoints that were supplied
+
+#### Scenario: Undirected endpoints
+
+- **WHEN** a caller creates an undirected relationship
+- **THEN** reads report both endpoints and no source or destination meaning
+
+#### Scenario: Missing endpoint
+
+- **WHEN** a caller creates a relationship referencing an absent node id
+- **THEN** the system raises a not-found error and creates no relationship
+
+#### Scenario: Self-loop
+
+- **WHEN** a caller creates a directed or undirected relationship whose endpoints are the same node
+- **THEN** the relationship is stored and can be read back
+
+#### Scenario: Snapshot exposes labels and direction
+
+- **WHEN** a caller reads a relationship after creating it with labels and a direction
+- **THEN** the snapshot reports the sorted labels and the directed flag
+
+
+### Requirement: Relationship label mutation
+
+The system SHALL add and remove labels on an existing relationship. Adding a label the relationship already carries SHALL be a no-op; removing an absent label SHALL be a no-op. A missing relationship SHALL raise a not-found error. A snapshot SHALL report labels in sorted order.
+
+#### Scenario: Add a label
+
+- **WHEN** a caller adds a label to an existing relationship
+- **THEN** later reads report the added label with the existing labels
+
+#### Scenario: Remove a label
+
+- **WHEN** a caller removes one label from a relationship carrying several labels
+- **THEN** later reads report the remaining labels
+
+#### Scenario: Repeated addition is a no-op
+
+- **WHEN** a caller adds a label the relationship already carries
+- **THEN** the relationship is unchanged and no error is raised
+
+#### Scenario: Missing relationship
+
+- **WHEN** a caller adds or removes a label on a relationship id that does not exist
+- **THEN** the system raises a not-found error and changes nothing
+
+#### Scenario: Undirected relationship labels
+
+- **WHEN** a caller adds a label to an undirected relationship
+- **THEN** the relationship keeps its undirected flag and reports the new label
+
+
+### Requirement: Layout version compatibility
+
+The recorded schema version SHALL change only when the stored layout becomes incompatible, and SHALL NOT change when additive objects are declared or removed. An uninitialized database SHALL be bootstrapped to the current version. A database that records a version other than zero or the current version SHALL be refused.
+
+#### Scenario: Additive objects keep the version
+
+- **WHEN** a caller declares or removes constraints or indexes
+- **THEN** the recorded schema version is unchanged
+
+#### Scenario: Newer layout refused
+
+- **WHEN** a caller opens a database that records a newer layout than the library supports
+- **THEN** the system raises an unsupported-runtime error before accepting any write
+
+#### Scenario: Older layout refused
+
+- **WHEN** a caller opens a database that records schema version 1
+- **THEN** the system raises an unsupported-runtime error and leaves the file unchanged
+
+#### Scenario: Read-only older layout refused
+
+- **WHEN** a caller opens a version 1 database read-only
+- **THEN** the system raises an unsupported-runtime error and makes no change
+
+#### Scenario: Uninitialized database bootstrapped
+
+- **WHEN** a caller opens a new or empty database
+- **THEN** the current layout is created and the recorded version is the current version

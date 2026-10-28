@@ -58,7 +58,8 @@ class TestCreateAndGet(_RelationshipTestCase):
         )
         loaded = relationship_repository.get(created.id)
         assert loaded == created
-        assert loaded.rel_type == "ALLIES_WITH"
+        assert loaded.labels == ("ALLIES_WITH",)
+        assert loaded.directed is True
         assert loaded.start_id == start.id
         assert loaded.end_id == end.id
         assert loaded["since_cycle"] == 2020
@@ -230,6 +231,63 @@ class TestFind(_RelationshipTestCase):
         _, relationship_repository = repositories
         with pytest.raises(ValidationError):
             list(relationship_repository.find(""))
+
+
+class TestLabelsAndDirection(_RelationshipTestCase):
+    """Verify label sets, direction, and relationship label mutation."""
+
+    def test_create_undirected_multi_label(self, repositories: Repositories) -> None:
+        node_repository, relationship_repository = repositories
+        first = node_repository.create()
+        second = node_repository.create()
+        relationship = relationship_repository.create(
+            first.id,
+            ["TRUSTS", "ALLIES_WITH"],
+            second.id,
+            directed=False,
+        )
+        assert relationship.labels == ("ALLIES_WITH", "TRUSTS")
+        assert relationship.directed is False
+        assert relationship_repository.get(relationship.id) == relationship
+
+    def test_add_and_remove_labels(self, repositories: Repositories) -> None:
+        node_repository, relationship_repository = repositories
+        first = node_repository.create()
+        second = node_repository.create()
+        relationship = relationship_repository.create(first.id, (), second.id)
+        added = relationship_repository.add_labels(relationship.id, ("TRUSTS", "ISO"))
+        assert added.labels == ("ISO", "TRUSTS")
+        removed = relationship_repository.remove_labels(added.id, ("TRUSTS",))
+        assert removed.labels == ("ISO",)
+
+    def test_find_by_labels_and_direction(self, repositories: Repositories) -> None:
+        node_repository, relationship_repository = repositories
+        first = node_repository.create()
+        second = node_repository.create()
+        both = relationship_repository.create(
+            first.id,
+            ["ALLIES_WITH", "TRUSTS"],
+            second.id,
+            directed=False,
+        )
+        relationship_repository.create(first.id, "ALLIES_WITH", second.id)
+        found = list(
+            relationship_repository.find(
+                ("ALLIES_WITH", "TRUSTS"),
+                directed=False,
+            )
+        )
+        assert [item.id for item in found] == [both.id]
+        assert list(relationship_repository.find(directed=True))
+
+    def test_ids_are_not_reused(self, repositories: Repositories) -> None:
+        node_repository, relationship_repository = repositories
+        first = node_repository.create()
+        second = node_repository.create()
+        relationship = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
+        relationship_repository.delete(relationship.id)
+        replacement = relationship_repository.create(first.id, "ALLIES_WITH", second.id)
+        assert replacement.id > relationship.id
 
 
 class TestFindPredicateShape:

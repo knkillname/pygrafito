@@ -1,8 +1,8 @@
 # Enforce unique values
 
-Use a uniqueness constraint when one property value must stay distinct inside one label or one
-relationship type. The database enforces the rule on every write path, including writes made by an
-older build or an external SQLite client.
+Use a uniqueness constraint when one property value must stay distinct inside one label, whether
+the elements are nodes or relationships. The database enforces the rule on every write path,
+including writes made by an external SQLite client.
 
 This guide covers declaring, using, diagnosing, and removing a constraint. The API reference
 documents [`Constraint`](../api/admin.md#constraint) and
@@ -10,7 +10,8 @@ documents [`Constraint`](../api/admin.md#constraint) and
 
 ## Declare a constraint
 
-A constraint is scoped to exactly one label or one relationship type and one property key.
+A constraint is scoped to exactly one label and one property key. A relationship constraint
+applies to every relationship carrying that label, including a relationship with other labels.
 
 ```python
 from pygrafito import ElementKind, Graph
@@ -32,7 +33,7 @@ with Graph.open(":memory:") as graph:
     # [('node', 'Program', 'designation')]
 ```
 
-A label, relationship type, and property key must be non-empty strings. Declaring the same
+A label and property key must be non-empty strings. Declaring the same
 constraint twice is a no-op. Declaring a constraint over data that already violates it raises
 `ConstraintViolationError` without creating anything. Validation and object creation run in the
 same write transaction, so a concurrent writer cannot slip a duplicate between the check and the
@@ -47,7 +48,7 @@ handle.
 
 A constraint compares the stored value and its JSON type. `true`, `1`, `1.0`, and `"1"` are four
 different values, and lists compare by content and order. An element that does not carry the scope
-label or type, or does not have the property, is exempt.
+label, or does not have the property, is exempt.
 
 ```python
 from pygrafito import ConstraintViolationError, Graph
@@ -108,20 +109,18 @@ through a duplicate. Use a temporary value or two statements instead.
 
 Constraints persist in the database file and are reported and enforced after a reopen without
 being declared again. They are implemented with standard indexes and triggers, not with a catalog
-table, so they do not change the recorded schema version. A file that carries constraints remains
-openable by an older build, which remains bound by them and reports a raw integrity error instead
-of a domain error when a write violates one.
+table, so they do not change the recorded schema version.
 
-A relationship constraint is a partial unique index over the relationship table. A node constraint
-is a support index plus one trigger for property updates and one for label acquisition, because a
-label lives in a separate table. The support index and the unique index are not reported by
+Both element kinds use a support index plus one trigger for property updates and one for label
+acquisition, because a label lives in a separate table. The support index and the triggers are not
+reported by
 `Graph.indexes()`; they belong to the constraint and are dropped with it. Declaring an ordinary
 index on the same key as a relationship constraint is redundant.
 
 ## When the scope changes
 
-Constraints are declared for a label or relationship type that already exists as a concept; the
-database does not create labels or types. Declaring a constraint whose scope has no elements
+Constraints are declared for a label that already exists as a concept; the database does not
+create labels. Declaring a constraint whose scope has no elements
 succeeds, and the rule starts applying as soon as an element acquires that scope.
 
 ## Go deeper

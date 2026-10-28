@@ -82,12 +82,13 @@ class TestRestore:
 
             relationships = list(graph.find_relationships())
             assert len(relationships) == 3
-            assert {relationship.rel_type for relationship in relationships} == {
-                "ALLIES_WITH",
-                "GUARDS",
+            assert {relationship.labels for relationship in relationships} == {
+                ("ALLIES_WITH",),
+                ("GUARDS",),
             }
+            assert all(relationship.directed for relationship in relationships)
             self_loop = next(
-                relationship for relationship in relationships if relationship.rel_type == "GUARDS"
+                relationship for relationship in relationships if relationship.labels == ("GUARDS",)
             )
             assert self_loop.start_id == self_loop.end_id
             assert graph.node(self_loop.start_id)["designation"] == "Tron"
@@ -102,6 +103,23 @@ class TestRestore:
             summary = graph.restore_jsonl(destination)
             assert summary == InteropSummary(nodes=0, relationships=0)
             assert list(graph.find_nodes()) == []
+
+    def test_version_one_snapshot_is_refused(self, tmp_path: Path) -> None:
+        """A version 1 snapshot is not converted."""
+        destination = tmp_path / "old.jsonl"
+        destination.write_text(
+            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '"nodes":0,"relationships":0}\n',
+            encoding="utf-8",
+        )
+        with (
+            Graph.open(":memory:") as graph,
+            pytest.raises(
+                ValidationError,
+                match="unsupported snapshot version 1; expected 2",
+            ),
+        ):
+            graph.restore_jsonl(destination)
 
     def test_non_empty_target_is_refused(self, tmp_path: Path) -> None:
         """Without replace, a populated target is left alone."""
@@ -209,7 +227,7 @@ class TestRestore:
         """A truncated node phase is rejected at EOF."""
         snapshot = tmp_path / "short.jsonl"
         snapshot.write_text(
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,'
             '"nodes":2,"relationships":0}\n'
             '{"kind":"node","id":1,"labels":["Program"],"properties":{}}\n',
             encoding="utf-8",
@@ -229,7 +247,7 @@ class TestRestore:
         """An incomplete final record is rejected with its line number."""
         snapshot = tmp_path / "truncated.jsonl"
         snapshot.write_text(
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,'
             '"nodes":1,"relationships":0}\n'
             '{"kind":"node"\n',
             encoding="utf-8",
@@ -247,10 +265,10 @@ class TestRestore:
         """A relationship must reference a node from the node phase."""
         snapshot = tmp_path / "endpoint.jsonl"
         snapshot.write_text(
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,'
             '"nodes":1,"relationships":1}\n'
             '{"kind":"node","id":1,"labels":["Program"],"properties":{}}\n'
-            '{"kind":"relationship","id":1,"type":"ALLIES_WITH",'
+            '{"kind":"relationship","id":1,"labels":["ALLIES_WITH"],"directed":true,'
             '"start_id":1,"end_id":2,"properties":{}}\n',
             encoding="utf-8",
         )
@@ -267,7 +285,7 @@ class TestRestore:
         """Two node records cannot share a source id."""
         snapshot = tmp_path / "duplicate.jsonl"
         snapshot.write_text(
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,'
             '"nodes":2,"relationships":0}\n'
             '{"kind":"node","id":1,"labels":["Program"],"properties":{}}\n'
             '{"kind":"node","id":1,"labels":["Program"],"properties":{}}\n',
@@ -286,10 +304,10 @@ class TestRestore:
         """A node record after a relationship record is rejected."""
         snapshot = tmp_path / "phase.jsonl"
         snapshot.write_text(
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,'
             '"nodes":2,"relationships":1}\n'
             '{"kind":"node","id":1,"labels":["Program"],"properties":{}}\n'
-            '{"kind":"relationship","id":1,"type":"GUARDS",'
+            '{"kind":"relationship","id":1,"labels":["GUARDS"],"directed":true,'
             '"start_id":1,"end_id":1,"properties":{}}\n'
             '{"kind":"node","id":2,"labels":["Program"],"properties":{}}\n',
             encoding="utf-8",
@@ -307,7 +325,7 @@ class TestRestore:
         """An invalid record reports its one-based line."""
         snapshot = tmp_path / "line.jsonl"
         snapshot.write_text(
-            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '{"kind":"header","format":"pygrafito-jsonl","version":2,'
             '"nodes":2,"relationships":0}\n'
             '{"kind":"node","id":1,"labels":["Program"],"properties":{}}\n'
             '{"kind":"node","id":2,"labels":["Program"],"properties":{},'

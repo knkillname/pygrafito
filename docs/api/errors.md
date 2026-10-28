@@ -99,7 +99,7 @@ Retry later, or increase `busy_timeout` for a known long writer.
 | Attribute | Meaning |
 | --- | --- |
 | `kind` | `ElementKind` the constraint covers. |
-| `scope` | Label or relationship type of the constraint. |
+| `scope` | Label scoped by the constraint, for either element kind. |
 | `key` | Property key whose values must stay distinct. |
 | `value` | Offending value, or `None` when it is unknown. |
 | `existing` | Identifier of the surviving holder, or `None` when the duplicate was rolled back. |

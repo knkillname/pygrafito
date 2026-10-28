@@ -19,7 +19,7 @@ class Views:
         Open connection to the graph database.
     """
 
-    VERSION: int = 1
+    VERSION: int = 2
     FORMAT: str = "pygrafito"
     NODES: str = "graph_nodes"
     NODE_LABELS: str = "graph_node_labels"
@@ -184,12 +184,15 @@ class Views:
             """,
             f"""
             CREATE VIEW {cls.RELATIONSHIPS} AS
-            SELECT id AS id,
-                   src AS start_id,
-                   dst AS end_id,
-                   rel_type AS type,
-                   props AS properties
-              FROM relationships
+            SELECT r.id AS id,
+                   r.src AS start_id,
+                   r.dst AS end_id,
+                   CAST((SELECT json_group_array(label)
+                           FROM (SELECT label FROM relationship_labels
+                                  WHERE relationship_id = r.id ORDER BY label)) AS TEXT) AS labels,
+                   r.directed AS directed,
+                   r.props AS properties
+              FROM relationships AS r
             """,
             f"""
             CREATE VIEW {cls.META} AS

@@ -6,6 +6,7 @@
 import contextlib
 import dataclasses
 import functools
+import json
 import sqlite3
 import typing
 from collections.abc import Mapping, Sequence
@@ -1379,11 +1380,13 @@ class QueryExecutor:
         except ValidationError as error:
             message = "stored relationship properties are not valid"
             raise QueryExecutionError(message) from error
+        labels = json.loads(str(record[positions[columns.labels]]))
         relationship = Relationship(
             id=relationship_id,
-            rel_type=str(record[positions[columns.rel_type]]),
             start_id=typing.cast(int, record[positions[columns.src]]),
             end_id=typing.cast(int, record[positions[columns.dst]]),
+            labels=tuple(str(label) for label in labels),
+            directed=bool(record[positions[columns.directed]]),
             properties=properties,
         )
         cache[relationship_id] = relationship

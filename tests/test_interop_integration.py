@@ -55,14 +55,15 @@ class TestInteropIntegration:
             assert labels == [(1, "Program"), (2, "ISO"), (2, "Program")]
 
             relationships = reader.execute(
-                "SELECT id, start_id, end_id, type, properties FROM graph_relationships ORDER BY id"
+                "SELECT id, start_id, end_id, labels, directed, properties "
+                "FROM graph_relationships ORDER BY id"
             ).fetchall()
             assert relationships == [
-                (1, 1, 2, "ALLIES_WITH", '{"since_cycle":2020}'),
+                (1, 1, 2, '["ALLIES_WITH"]', 1, '{"since_cycle":2020}'),
             ]
 
             metadata = dict(reader.execute("SELECT key, value FROM graph_meta").fetchall())
-            assert metadata == {"format": "pygrafito", "view_version": "1"}
+            assert metadata == {"format": "pygrafito", "view_version": "2"}
 
     def test_shell_round_trip(self, tmp_path: Path) -> None:
         """The shell exports, replaces, and still exposes the views."""
@@ -88,4 +89,4 @@ class TestInteropIntegration:
         with contextlib.closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)) as reader:
             assert reader.execute(
                 "SELECT value FROM graph_meta WHERE key = 'view_version'"
-            ).fetchone() == ("1",)
+            ).fetchone() == ("2",)

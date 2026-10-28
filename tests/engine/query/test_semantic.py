@@ -558,15 +558,13 @@ class TestWriteAnalysis:
         with pytest.raises(QuerySemanticError):
             self.analyze("DELETE n")
 
-    def test_label_on_relationship_is_rejected(self) -> None:
-        with pytest.raises(QuerySemanticError) as caught:
-            self.analyze("MATCH (a)-[r]->(b) SET r:SystemMonitor")
-        assert "nodes" in caught.value.message
+    def test_label_on_relationship_is_accepted(self) -> None:
+        analysis = self.analyze("MATCH (a)-[r]->(b) SET r:SystemMonitor")
+        assert analysis.is_write
 
-    def test_remove_label_from_relationship_is_rejected(self) -> None:
-        with pytest.raises(QuerySemanticError) as caught:
-            self.analyze("MATCH (a)-[r]->(b) REMOVE r:SystemMonitor")
-        assert "nodes" in caught.value.message
+    def test_remove_label_from_relationship_is_accepted(self) -> None:
+        analysis = self.analyze("MATCH (a)-[r]->(b) REMOVE r:SystemMonitor")
+        assert analysis.is_write
 
     def test_delete_path_variable_is_rejected(self) -> None:
         with pytest.raises(QuerySemanticError) as caught:
@@ -582,10 +580,14 @@ class TestWriteAnalysis:
         with pytest.raises(QuerySemanticError):
             self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r:TRUSTS]->(c)")
 
-    def test_create_relationship_requires_one_type(self) -> None:
+    def test_create_relationship_allows_no_label(self) -> None:
+        analysis = self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r]->(b)")
+        assert analysis.is_write
+
+    def test_create_relationship_rejects_multiple_labels(self) -> None:
         with pytest.raises(QuerySemanticError) as caught:
-            self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r]->(b)")
-        assert "one type" in caught.value.message
+            self.analyze("MATCH (a)-[:ALLIES_WITH]->(b) CREATE (a)-[r:TRUSTS|ISO]->(b)")
+        assert "at most one label" in caught.value.message
 
     def test_create_relationship_requires_outgoing_direction(self) -> None:
         with pytest.raises(QuerySemanticError) as caught:
@@ -725,9 +727,9 @@ class TestUnwindAndMergeAnalysis:
         with pytest.raises(QuerySemanticError):
             self.analyze("MERGE (n:Program) ON CREATE SET m.cycles = 1")
 
-    def test_merge_conditional_label_on_relationship_is_rejected(self) -> None:
-        with pytest.raises(QuerySemanticError):
-            self.analyze("MERGE (a:Program)-[r:TRUSTS]->(b:Program) ON CREATE SET r:ISO")
+    def test_merge_conditional_label_on_relationship_is_accepted(self) -> None:
+        analysis = self.analyze("MERGE (a:Program)-[r:TRUSTS]->(b:Program) ON CREATE SET r:ISO")
+        assert analysis.is_write
 
     def test_merge_conditional_null_removal_is_accepted(self) -> None:
         analysis = self.analyze("MERGE (n:Program) ON MATCH SET n.cycles = null RETURN n")

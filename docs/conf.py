@@ -46,6 +46,7 @@ nitpick_ignore = [
     ("py:class", "Scalar"),
     ("py:class", "Value"),
     ("py:class", "collections.abc.Mapping[str"),
+    ("py:class", "tuple[str"),
     ("py:class", "optional"),
     ("py:class", "pygrafito.engine.query.prepared.PreparedQuery"),
     ("py:class", "pygrafito.engine.query.values.QueryValue"),

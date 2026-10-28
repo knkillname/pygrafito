@@ -33,6 +33,12 @@ with Graph.open(":memory:") as graph:
     print(constraint.kind is ElementKind.NODE)  # True
     print(constraint.scope, constraint.key)  # Program designation
     print(constraint.ordering_key)  # ('node', 'Program', 'designation')
+
+    relationship_constraint = graph.create_relationship_uniqueness_constraint(
+        "ALLIES_WITH",
+        "since",
+    )
+    print(relationship_constraint.kind is ElementKind.RELATIONSHIP)  # True
 ```
 
 ## InteropSummary

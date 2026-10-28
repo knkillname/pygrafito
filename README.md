@@ -39,7 +39,7 @@ Every Python example in this README is executed by the test suite.
 
 - A single embedded database file, with no server and no runtime dependencies.
 - Nodes with labels, strict typed properties, and indexed lookups.
-- Directed, typed relationships with properties.
+- Labeled relationships with properties, either directed or undirected.
 - A pattern-matching query language with writes, aggregation, and prepared statements.
 - Bounded traversal, shortest paths, and relationship-unique trail enumeration.
 - Property indexes and uniqueness constraints enforced by the database.

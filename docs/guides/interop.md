@@ -62,7 +62,9 @@ Indexes and uniqueness constraints stay with the target and are enforced during 
 ## Read through SQL views
 
 A write-capable open publishes four read-only views: `graph_nodes`, `graph_node_labels`,
-`graph_relationships`, and `graph_meta`. Open the file read-only from the external reader.
+`graph_relationships`, and `graph_meta`. `graph_relationships` exposes a JSON `labels` array and a
+`directed` flag (`1` or `0`) instead of a single relationship type. Open the file read-only from
+the external reader.
 
 ```python
 import pathlib
@@ -75,7 +77,7 @@ with tempfile.TemporaryDirectory() as directory:
     path = pathlib.Path(directory) / "grid.db"
     with Graph.open(path) as graph:
         graph.add_node("Program", designation="Tron", cycles=40)
-        print(graph.view_version)  # 1
+        print(graph.view_version)  # 2
 
     with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as reader:
         rows = reader.execute(
@@ -85,7 +87,7 @@ with tempfile.TemporaryDirectory() as directory:
         version = reader.execute(
             "SELECT value FROM graph_meta WHERE key = 'view_version'"
         ).fetchone()[0]
-        print(version)  # 1
+        print(version)  # 2
 ```
 
 Properties are canonical JSON text. Use `json_type` and `json_extract` together when a predicate

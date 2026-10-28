@@ -405,7 +405,7 @@ class FunctionCatalog:
     AGGREGATES: frozenset[str] = frozenset({"count", "collect", "sum", "avg", "min", "max"})
     SPECS: typing.ClassVar[Mapping[str, FunctionSpec]] = {
         "id": FunctionSpec("id", 1, 1, (ArgumentKind.ENTITY,)),
-        "labels": FunctionSpec("labels", 1, 1, (ArgumentKind.NODE,)),
+        "labels": FunctionSpec("labels", 1, 1, (ArgumentKind.ENTITY,)),
         "type": FunctionSpec("type", 1, 1, (ArgumentKind.RELATIONSHIP,)),
         "properties": FunctionSpec("properties", 1, 1, (ArgumentKind.ENTITY,)),
         "keys": FunctionSpec("keys", 1, 1, (ArgumentKind.ENTITY,)),
@@ -873,12 +873,12 @@ class ScalarFunctions:
         return self._type_error("id", "a node or relationship", value)
 
     def _labels(self, arguments: Sequence[QueryValue]) -> QueryValue:
-        """Return a node's labels in sorted order.
+        """Return an element's labels in sorted order.
 
         Parameters
         ----------
         arguments : Sequence[QueryValue]
-            One node argument.
+            One node or relationship argument.
 
         Returns
         -------
@@ -888,12 +888,12 @@ class ScalarFunctions:
         value = arguments[0]
         if value is None:
             return None
-        if isinstance(value, Node):
+        if isinstance(value, (Node, Relationship)):
             return typing.cast(QueryValue, sorted(value.labels))
-        return self._type_error("labels", "a node", value)
+        return self._type_error("labels", "a node or relationship", value)
 
     def _type(self, arguments: Sequence[QueryValue]) -> QueryValue:
-        """Return a relationship's stored type.
+        """Return a relationship's first sorted label.
 
         Parameters
         ----------
@@ -903,13 +903,14 @@ class ScalarFunctions:
         Returns
         -------
         QueryValue
-            Relationship type, or null for a null argument.
+            First sorted label, null for an unlabeled relationship, or null for
+            a null argument.
         """
         value = arguments[0]
         if value is None:
             return None
         if isinstance(value, Relationship):
-            return value.rel_type
+            return value.labels[0] if value.labels else None
         return self._type_error("type", "a relationship", value)
 
     def _properties(self, arguments: Sequence[QueryValue]) -> QueryValue:

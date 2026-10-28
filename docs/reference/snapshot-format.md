@@ -8,6 +8,12 @@ A graph file is ordinary SQLite, and the snapshot and views make that file a sup
 in two ways: a portable JSONL snapshot and a set of read-only SQL views. This page documents the
 snapshot contract first; the export, restore, and view sections follow below.
 
+```{note}
+This release is pre-1.0. A database or snapshot written with the earlier version 1 layout is
+refused rather than converted. Create a fresh database with this release; if you need data from a
+0.8 file, export it with 0.8 first.
+```
+
 ## Export
 
 `Graph.export_jsonl(path, *, overwrite=False)` writes one consistent committed snapshot of the
@@ -47,12 +53,12 @@ mark. The first non-blank line is a header, followed by node records and then re
 records.
 
 ```text
-{"kind":"header","format":"pygrafito-jsonl","version":1,"nodes":3,"relationships":2}
+{"kind":"header","format":"pygrafito-jsonl","version":2,"nodes":3,"relationships":2}
 {"kind":"node","id":1,"labels":["Program"],"properties":{"designation":"Tron"}}
 {"kind":"node","id":2,"labels":["Program","ISO"],"properties":{"designation":"Quorra"}}
 {"kind":"node","id":3,"labels":[],"properties":{"cycles":37}}
-{"kind":"relationship","id":1,"type":"ALLIES_WITH","start_id":1,"end_id":2,"properties":{"since_cycle":2020}}
-{"kind":"relationship","id":2,"type":"ALLIES_WITH","start_id":2,"end_id":3,"properties":{}}
+{"kind":"relationship","id":1,"labels":["ALLIES_WITH"],"directed":true,"start_id":1,"end_id":2,"properties":{"since_cycle":2020}}
+{"kind":"relationship","id":2,"labels":["ALLIES_WITH"],"directed":false,"start_id":2,"end_id":3,"properties":{}}
 ```
 
 ### Header
@@ -63,7 +69,7 @@ The header carries exactly these fields:
 | --- | --- | --- |
 | `kind` | string | Always `header`. |
 | `format` | string | Always `pygrafito-jsonl`. |
-| `version` | integer | Snapshot format version, currently `1`. |
+| `version` | integer | Snapshot format version, currently `2`. |
 | `nodes` | integer | Number of node records that follow. |
 | `relationships` | integer | Number of relationship records that follow. |
 
@@ -86,9 +92,10 @@ rejected instead of being restored as a smaller graph.
 | --- | --- | --- |
 | `kind` | string | Always `relationship`. |
 | `id` | positive integer | Source relationship identifier. It is informational and is not preserved. |
-| `type` | non-empty string | Relationship type. |
-| `start_id` | positive integer | Source id of the start node. |
-| `end_id` | positive integer | Source id of the end node. |
+| `labels` | array of strings | Relationship labels; may be empty. |
+| `directed` | boolean | Whether the endpoints carry source and destination meaning. |
+| `start_id` | positive integer | Source id of the first endpoint. |
+| `end_id` | positive integer | Source id of the second endpoint. |
 | `properties` | object | Typed property values; may be empty. |
 
 Every node record precedes every relationship record. A relationship endpoint must name a node
@@ -96,7 +103,7 @@ that appeared in the node phase.
 
 ### Values
 
-Labels, relationship types, and property keys are non-empty strings without null characters.
+Node labels, relationship labels, and property keys are non-empty strings without null characters. A relationship label array may be empty.
 Property values follow the same strict model as the store:
 
 - booleans, signed 64-bit integers, finite floats, and strings;
@@ -107,15 +114,17 @@ A property value the store cannot represent is a malformed snapshot, not a value
 
 ### Ordering and determinism
 
-Export writes nodes in source-id order, then relationships in source-id order. Each node's labels
-are sorted, property keys are sorted, and the JSON is compact. Exporting the same committed graph
-twice produces identical bytes. No timestamp, filesystem path, or library version is embedded.
+Export writes nodes in source-id order, then relationships in source-id order. Each node's and
+relationship's labels are sorted, property keys are sorted, and the JSON is compact. Exporting the
+same committed graph twice produces identical bytes. No timestamp, filesystem path, or library
+version is embedded.
 
 ### Strictness
 
 Records contain exactly the fields listed above. Unknown fields, missing fields, duplicate JSON
 keys, wrong types, and non-finite numbers are rejected with the one-based line number. Blank
-lines are ignored, but the header must be the first non-blank line.
+lines are ignored, but the header must be the first non-blank line. A header declaring any version
+other than `2` is refused; version 1 snapshots are not converted.
 
 Indexes, uniqueness constraints, the journal mode, the schema version, and the views are not part
 of a snapshot. A snapshot preserves node and relationship data; it does not migrate schema
@@ -175,7 +184,7 @@ A graph file exposes four read-only views for external SQL readers:
 | --- | --- | --- |
 | `graph_nodes` | `id` INTEGER, `labels` TEXT, `properties` TEXT | One row per node. `labels` is a JSON array and `properties` is canonical JSON text. |
 | `graph_node_labels` | `node_id` INTEGER, `label` TEXT | One row per node label, for readers that do not use JSON functions. |
-| `graph_relationships` | `id` INTEGER, `start_id` INTEGER, `end_id` INTEGER, `type` TEXT, `properties` TEXT | One row per directed relationship. |
+| `graph_relationships` | `id` INTEGER, `start_id` INTEGER, `end_id` INTEGER, `labels` TEXT, `directed` INTEGER, `properties` TEXT | One row per relationship. `labels` is a JSON array and `directed` is `1` or `0`. |
 | `graph_meta` | `key` TEXT, `value` TEXT | Metadata records, including `format` and `view_version`. |
 
 ```python
@@ -189,7 +198,7 @@ with tempfile.TemporaryDirectory() as directory:
     path = pathlib.Path(directory) / "grid.db"
     with Graph.open(path) as graph:
         graph.add_node("Program", designation="Tron", cycles=40)
-        print(graph.view_version)  # 1
+        print(graph.view_version)  # 2
 
     with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as reader:
         rows = reader.execute(
@@ -200,7 +209,7 @@ with tempfile.TemporaryDirectory() as directory:
             reader.execute(
                 "SELECT value FROM graph_meta WHERE key = 'view_version'"
             ).fetchone()[0]
-        )  # 1
+        )  # 2
 ```
 
 The views are created on a write-capable open and are never used by the engine for its own

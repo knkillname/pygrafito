@@ -79,6 +79,11 @@ An index covers one key across every node or every relationship. It is not attac
 `create_node_index("cycles")` helps every query that filters on `cycles`, whatever label it also
 requires.
 
+Label filters are structural rather than declared. Node labels and relationship labels each have a
+lookup index, so a relationship label filter without a bound endpoint does not scan every
+relationship. A declared relationship property index still covers edges with any label set and
+either direction.
+
 Equality, range, and `IN` predicates can turn a scan into a seek. Negated filters, null checks,
 `STARTS WITH`, and `ORDER BY` do not use the index by themselves. The [predicate
 table](../reference/index-behavior.md#what-an-index-accelerates) lists each form.

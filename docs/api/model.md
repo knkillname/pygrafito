@@ -27,8 +27,8 @@ with Graph.open(":memory:") as graph:
 .. autoclass:: pygrafito.Relationship
 ```
 
-A relationship preserves its stored start and end nodes. It also behaves as a read-only property
-mapping:
+A relationship preserves its two endpoints, its sorted labels, and its directed flag. It also
+behaves as a read-only property mapping:
 
 ```python
 from pygrafito import Graph
@@ -37,7 +37,7 @@ with Graph.open(":memory:") as graph:
     tron = graph.add_node("Program", designation="Tron")
     quorra = graph.add_node("Program", designation="Quorra")
     relationship = graph.add_relationship(tron, "ALLIES_WITH", quorra, since_cycle=2020)
-    print(relationship.start_id, relationship.rel_type, relationship.end_id)
+    print(relationship.start_id, relationship.labels, relationship.directed, relationship.end_id)
     print(relationship["since_cycle"])  # 2020
 ```
 
@@ -69,9 +69,9 @@ traversal start and the reached node.
 
 | Member | Value | Meaning |
 | --- | --- | --- |
-| `OUTGOING` | `outgoing` | Follow relationships from start to end. |
-| `INCOMING` | `incoming` | Follow relationships from end to start. |
-| `BOTH` | `both` | Follow relationships in either direction. |
+| `OUTGOING` | `outgoing` | Follow directed relationships from start to end and undirected relationships from either endpoint. |
+| `INCOMING` | `incoming` | Follow directed relationships from end to start and undirected relationships from either endpoint. |
+| `BOTH` | `both` | Follow every incident relationship. |
 
 ## ElementKind
 

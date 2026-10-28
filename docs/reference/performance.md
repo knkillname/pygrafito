@@ -19,10 +19,11 @@ hatch run python benchmarks/run.py --nodes 200000 --relationships 400000
 
 Dataset shape: one node in ten carries the `Program` label, every node carries a
 `cycles` integer in a 97-value cycle and a `region` string, and one relationship in a
-hundred has the `TRANSMISSION` type. All relationships carry a `since_cycle` integer.
+hundred carries the `TRANSMISSION` label. One relationship in ten is undirected. Every
+relationship carries a `since_cycle` integer.
 
 Declared indexes for the measured runs: `cycles` on nodes and `since_cycle` on
-relationships.
+relationships. Relationship labels have their own structural index.
 
 Environment: Linux 7.3, AMD Ryzen 9 6900HX, Python 3.14.8, SQLite 3.53.4, in-memory
 database, single process, warm connection.
@@ -33,39 +34,42 @@ database, single process, warm connection.
 
 | Scenario | No index | Indexed | Speedup |
 | --- | ---: | ---: | ---: |
-| Property equality | 7.38 ms | 0.46 ms | 16.0x |
-| Property range | 8.11 ms | 1.44 ms | 5.6x |
-| Selective type filter | 5.23 ms | 5.35 ms | 1.0x |
-| `find_nodes` lookup | 8.39 ms | 0.17 ms | 49.3x |
+| Property equality | 9.68 ms | 0.53 ms | 18.4x |
+| Property range | 12.47 ms | 1.59 ms | 7.8x |
+| Label filter (no bound endpoint) | 0.81 ms | 0.65 ms | 1.2x |
+| Direction filter (indexed start) | 42.53 ms | 0.41 ms | 104.9x |
+| `find_nodes` lookup | 9.84 ms | 0.20 ms | 49.2x |
 
 | Write | No index | Indexed |
 | --- | ---: | ---: |
-| Insert nodes | 99,068/s | 87,402/s |
-| Update property | 61,882/s | 54,903/s |
+| Insert nodes | 61,631/s | 53,338/s |
+| Update property | 52,053/s | 44,211/s |
 
 ### 200,000 nodes / 400,000 relationships
 
 | Scenario | No index | Indexed | Speedup |
 | --- | ---: | ---: | ---: |
-| Property equality | 75.20 ms | 2.71 ms | 27.7x |
-| Property range | 83.02 ms | 14.54 ms | 5.7x |
-| Selective type filter | 46.12 ms | 46.81 ms | 1.0x |
-| `find_nodes` lookup | 81.48 ms | 1.77 ms | 46.0x |
+| Property equality | 92.96 ms | 2.78 ms | 33.4x |
+| Property range | 102.94 ms | 16.69 ms | 6.2x |
+| Label filter (no bound endpoint) | 3.46 ms | 3.47 ms | 1.0x |
+| Direction filter (indexed start) | 195.46 ms | 1.12 ms | 174.5x |
+| `find_nodes` lookup | 88.51 ms | 1.65 ms | 53.5x |
 
 | Write | No index | Indexed |
 | --- | ---: | ---: |
-| Insert nodes | 97,427/s | 78,726/s |
-| Update property | 62,461/s | 56,551/s |
+| Insert nodes | 64,590/s | 52,922/s |
+| Update property | 56,317/s | 51,825/s |
 
 The scaling behaviour matters more than the ratios. Without an index, a property
-equality filter grows with the number of candidate nodes: 7.7 ms at 20,000 nodes and
-77 ms at 200,000. With the index, the same filter stays in the low milliseconds.
+equality filter grows with the number of candidate nodes: 9.7 ms at 20,000 nodes and
+93 ms at 200,000. With the index, the same filter stays in the low milliseconds.
 
-The type filter is the honest exception. The plan uses the relationship-type index
-instead of scanning every relationship, but the measured statement still joins the
-matching rows to their endpoint nodes and counts them, so wall-clock time is dominated by
-that work at these selectivities. The index is doing its job; the query shape is what
-sets the floor.
+The label filter is the structural-index case: a relationship label lookup without a
+bound endpoint uses the label index and stays in the low milliseconds at both sizes. The
+direction filter starts from a `cycles`-indexed node and follows outgoing relationships;
+the property index selects the start set, then endpoint indexes drive the expansion. The
+unindexed direction figure is the cost of scanning the start candidates, not of
+traversing the edges.
 
 ### Quantified matching
 
@@ -75,7 +79,7 @@ and then expands the declared number of hops in the pattern engine. On the same
 
 | Scenario | No index | Indexed | Speedup |
 | --- | ---: | ---: | ---: |
-| `MATCH (a:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b)` | 14.70 ms | 5.46 ms | 2.7x |
+| `MATCH (a:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b)` | 16.33 ms | 6.88 ms | 2.4x |
 
 The command is the same `benchmarks/run.py --nodes 20000 --relationships 60000` run
 shown above; the `quantified` row is reported in its query table. The indexed gain comes
@@ -91,12 +95,12 @@ same `benchmarks/run.py --nodes 20000 --relationships 60000` run shown above.
 
 | Scenario | Rows per second |
 | --- | ---: |
-| `UNWIND` + `MERGE`, one statement | 530/s |
-| CSV `import_file`, batch size 1000 | 527/s |
+| `UNWIND` + `MERGE`, one statement | 484/s |
+| CSV `import_file`, batch size 1000 | 484/s |
 
 The merge path matches and creates one row at a time, and it compiles the
 single-node match for each row. That is the price of sequential visibility: a
-later row must see an earlier row's creation. At roughly 530 rows/s, a
+later row must see an earlier row's creation. At roughly 480 rows/s, a
 single-node lookup fast path is needed before this becomes a bulk loader; the
 current numbers favor correctness and a small implementation over throughput.
 
@@ -123,15 +127,15 @@ Measured on the 20,000-node / 60,000-relationship dataset, median of three repet
 
 | Operation | Whole graph | Bounded | Speedup |
 | --- | ---: | ---: | ---: |
-| `traverse`, depth 1 | 343.47 ms | 0.09 ms | 3779x |
-| `traverse`, depth 3 | 335.52 ms | 0.25 ms | 1328x |
-| `paths`, depth 3, limit 50 | 333.75 ms | 0.24 ms | 1364x |
-| `shortest_path`, depth 3 | 329.96 ms | 0.13 ms | 2465x |
+| `traverse`, depth 1 | 596.50 ms | 0.15 ms | 4076x |
+| `traverse`, depth 3 | 574.50 ms | 0.51 ms | 1123x |
+| `paths`, depth 3, limit 50 | 563.09 ms | 0.51 ms | 1100x |
+| `shortest_path`, depth 3 | 595.11 ms | 0.32 ms | 1837x |
 
 The important property is the shape, not the ratio. Every whole-graph figure is roughly
 the cost of reading the database, independent of the answer. The bounded figures are
 neighbourhood-sized and grow with the explored region. At 200,000 nodes and 400,000
-relationships the whole-graph figures rise to about 3.8 seconds per call while the
+relationships the whole-graph figures rise to about 5 seconds per call while the
 bounded figures stay at a fraction of a millisecond, which is the scaling behaviour the
 change is for. An unbounded `shortest_path` on a dense component still explores that
 component, because that region is the answer's search space.

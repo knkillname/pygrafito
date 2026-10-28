@@ -35,6 +35,7 @@ error and SHALL NOT declare anything.
 - **WHEN** a caller declares an index on an empty key
 - **THEN** the system raises a validation error and reports no new index
 
+
 ### Requirement: Index listing and removal
 
 The system SHALL report every declared index, identifying its element kind and property
@@ -55,6 +56,7 @@ until it is removed. Removing an index that is not declared SHALL raise a not-fo
 
 - **WHEN** a caller removes an index that was never declared
 - **THEN** the system raises a not-found error
+
 
 ### Requirement: Index transparency
 
@@ -83,6 +85,7 @@ index is declared for the filtered key.
 - **WHEN** a caller runs a comparison filter on an indexed key
 - **THEN** the same elements match as without the index, and results remain ordered by id
 
+
 ### Requirement: Index maintenance
 
 The system SHALL keep a declared index consistent with stored data across property
@@ -108,6 +111,7 @@ updates, property removal, element deletion, and rolled-back writes.
 - **WHEN** a transaction changes an indexed property and rolls back
 - **THEN** the index matches the state before the transaction
 
+
 ### Requirement: Index persistence
 
 Declared indexes SHALL persist in a file-backed database and SHALL be reported and used
@@ -129,20 +133,6 @@ SHALL NOT change the recorded schema version.
 - **WHEN** a caller declares an index on an in-memory graph
 - **THEN** the index is reported and usable for the lifetime of that handle
 
-### Requirement: Relationship type index
-
-The system SHALL maintain an index on the relationship type so that filtering by type
-without a bound endpoint does not read every relationship.
-
-#### Scenario: Type filter without an endpoint
-
-- **WHEN** a caller matches a relationship type without constraining either endpoint
-- **THEN** the returned relationships are complete and the plan names an index search
-
-#### Scenario: Type index stays current
-
-- **WHEN** relationships are created and deleted
-- **THEN** type filters match exactly the live relationships of that type
 
 ### Requirement: Query planning statistics
 
@@ -163,6 +153,7 @@ file-backed graph is closed, so later connections plan with current information.
 
 - **WHEN** planning statistics are refreshed
 - **THEN** statement results and result ordering are unchanged
+
 
 ### Requirement: Plan inspection
 
@@ -189,6 +180,7 @@ inspection SHALL NOT read, create, update, or delete graph elements.
 - **WHEN** a caller inspects a write statement
 - **THEN** no element is created, changed, or deleted
 
+
 ### Requirement: Property key escaping
 
 The system SHALL match property keys literally and SHALL NOT let a key alter statement
@@ -214,3 +206,53 @@ SQL-like text SHALL be matched as exact keys with their stored values.
 
 - **WHEN** a caller queries a key whose text resembles a SQL fragment
 - **THEN** the fragment is treated as a key name and no additional SQL is executed
+
+
+### Requirement: Relationship label index
+
+The system SHALL maintain a structural index on relationship labels so that filtering by one or more labels without a bound endpoint does not read every relationship. A relationship carrying several labels SHALL be indexed under each label. The index SHALL stay current when a relationship is created, deleted, or has a label added or removed.
+
+#### Scenario: Label filter without an endpoint
+
+- **WHEN** a caller matches a relationship label without constraining either endpoint
+- **THEN** the returned relationships are complete and the plan names an index search
+
+#### Scenario: Multi-label relationship
+
+- **WHEN** a relationship carries labels ALLIES_WITH and TRUSTS
+- **THEN** a filter on either label returns it
+
+#### Scenario: Label added
+
+- **WHEN** a caller adds a label to an existing relationship
+- **THEN** a filter on the added label returns that relationship
+
+#### Scenario: Label removed
+
+- **WHEN** a caller removes a label from a relationship
+- **THEN** a filter on the removed label no longer returns that relationship
+
+#### Scenario: Relationship deleted
+
+- **WHEN** a caller deletes a relationship
+- **THEN** later label filters return no result for it and no stale index entry is observed
+
+
+### Requirement: Relationship property index scope
+
+A declared index on a relationship property key SHALL cover every relationship that stores that key, regardless of its labels or directed flag. Label and direction filters SHALL narrow the candidates without changing the indexed property comparison.
+
+#### Scenario: Indexed property on a multi-label edge
+
+- **WHEN** a caller declares an index on a relationship property and filters on that property on edges carrying two labels
+- **THEN** the matching edges are returned and the plan uses the property index
+
+#### Scenario: Indexed property on an undirected edge
+
+- **WHEN** a caller declares an index on a relationship property and filters on that property on an undirected edge
+- **THEN** the matching edge is returned
+
+#### Scenario: Label filter with an indexed property
+
+- **WHEN** a caller combines a label filter with an indexed property filter
+- **THEN** only edges carrying the label and matching the property value are returned

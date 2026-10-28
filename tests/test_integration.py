@@ -3,14 +3,104 @@
 # SPDX-License-Identifier: MIT
 """Cross-cutting tests for persistence, transactions, deletion, and traversal."""
 
+import sqlite3
 from pathlib import Path
 
 import pytest
 
-from pygrafito import Graph
+from pygrafito import Graph, InteropSummary, UnsupportedSqliteError
 from pygrafito.model import (
     NotFoundError,
+    ValidationError,
 )
+
+
+class TestGqlElementModelIntegration:
+    """Exercise labels, direction, interop, and the version 2 break end to end."""
+
+    def test_version_two_round_trip(self, tmp_path: Path) -> None:
+        """Labels and direction survive reopen, read-only, backup, and snapshot."""
+        path = tmp_path / "grid.db"
+        backup = tmp_path / "backup.db"
+        snapshot = tmp_path / "grid.jsonl"
+        with Graph.open(path) as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", "ISO", designation="Quorra")
+            graph.add_relationship(
+                first,
+                ["ALLIES_WITH", "TRUSTS"],
+                second,
+                directed=False,
+                since=2020,
+            )
+            graph.backup_to(backup)
+            assert graph.check_integrity() == ()
+            assert graph.export_jsonl(snapshot) == InteropSummary(nodes=2, relationships=1)
+
+        with Graph.open(path, readonly=True) as graph:
+            relationship = next(iter(graph.find_relationships(directed=False)))
+            assert relationship.labels == ("ALLIES_WITH", "TRUSTS")
+            assert relationship.directed is False
+
+        with Graph.open(backup) as copy:
+            assert copy.check_integrity() == ()
+            assert next(iter(copy.find_relationships("TRUSTS"))).labels == (
+                "ALLIES_WITH",
+                "TRUSTS",
+            )
+
+        with Graph.open(":memory:") as restored:
+            assert restored.restore_jsonl(snapshot) == InteropSummary(
+                nodes=2,
+                relationships=1,
+            )
+            assert next(iter(restored.find_relationships(directed=False))).directed is False
+
+    def test_version_one_database_and_snapshot_are_refused(self, tmp_path: Path) -> None:
+        """The pre-1.0 break refuses both old files without changing them."""
+        database = tmp_path / "old.db"
+        connection = sqlite3.connect(database)
+        try:
+            connection.executescript(
+                """
+                CREATE TABLE nodes (id INTEGER PRIMARY KEY, props TEXT NOT NULL DEFAULT '{}');
+                CREATE TABLE node_labels (
+                    node_id INTEGER NOT NULL REFERENCES nodes(id),
+                    label TEXT NOT NULL,
+                    PRIMARY KEY (node_id, label)
+                ) WITHOUT ROWID;
+                CREATE TABLE relationships (
+                    id INTEGER PRIMARY KEY,
+                    src INTEGER NOT NULL,
+                    dst INTEGER NOT NULL,
+                    rel_type TEXT NOT NULL,
+                    props TEXT NOT NULL DEFAULT '{}'
+                );
+                PRAGMA user_version = 1;
+                """
+            )
+            connection.commit()
+        finally:
+            connection.close()
+        before = database.read_bytes()
+        with pytest.raises(UnsupportedSqliteError, match="version 1"):
+            Graph.open(database)
+        assert database.read_bytes() == before
+
+        snapshot = tmp_path / "old.jsonl"
+        snapshot.write_text(
+            '{"kind":"header","format":"pygrafito-jsonl","version":1,'
+            '"nodes":0,"relationships":0}\n',
+            encoding="utf-8",
+        )
+        with (
+            Graph.open(":memory:") as graph,
+            pytest.raises(
+                ValidationError,
+                match="unsupported snapshot version 1",
+            ),
+        ):
+            graph.restore_jsonl(snapshot)
 
 
 class TestGraphLifecycle:
@@ -57,11 +147,11 @@ class TestGraphLifecycle:
 
             steps = {
                 step.node["designation"]: step.depth
-                for step in graph.traverse(ada, max_depth=2, types=["ALLIES_WITH"])
+                for step in graph.traverse(ada, max_depth=2, labels=["ALLIES_WITH"])
             }
             assert steps == {"Quorra": 1, "Sam Flynn": 1}
 
-            shortest = graph.shortest_path(ada, bob, types=["ALLIES_WITH"])
+            shortest = graph.shortest_path(ada, bob, labels=["ALLIES_WITH"])
             assert shortest is not None
             assert shortest.length == 1
             assert shortest.relationships[0].id == direct.id

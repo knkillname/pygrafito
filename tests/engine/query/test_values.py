@@ -52,9 +52,9 @@ class _Source(SnapshotSource):
         self.relationships = {
             1: Relationship(
                 id=1,
-                rel_type="ALLIES_WITH",
                 start_id=1,
                 end_id=2,
+                labels=("ALLIES_WITH",),
                 properties={"since_cycle": 2020},
             ),
         }
@@ -112,18 +112,18 @@ class TestValues:
         other = Node(id=2)
         assert Values.equals(first, second) is True
         assert Values.equals(first, other) is False
-        assert Values.equals(first, Relationship(1, "TRUSTS", 1, 2)) is False
+        assert Values.equals(first, Relationship(1, 1, 2, labels=("TRUSTS",))) is False
 
     def test_relationships_compare_by_id(self) -> None:
-        first = Relationship(1, "TRUSTS", 1, 2)
-        second = Relationship(1, "ALLIES_WITH", 1, 2)
+        first = Relationship(1, 1, 2, labels=("TRUSTS",))
+        second = Relationship(1, 1, 2, labels=("ALLIES_WITH",))
         assert Values.equals(first, second) is True
-        assert Values.equals(first, Relationship(2, "TRUSTS", 1, 2)) is False
+        assert Values.equals(first, Relationship(2, 1, 2, labels=("TRUSTS",))) is False
 
     def test_paths_compare_by_element_sequence(self) -> None:
         node_one = Node(id=1)
         node_two = Node(id=2)
-        relationship = Relationship(1, "TRUSTS", 1, 2)
+        relationship = Relationship(1, 1, 2, labels=("TRUSTS",))
         first = Path(nodes=(node_one, node_two), relationships=(relationship,))
         second = Path(nodes=(node_one, node_two), relationships=(relationship,))
         reverse = Path(nodes=(node_two, node_one), relationships=(relationship,))
@@ -155,13 +155,13 @@ class TestValues:
 
     def test_value_key_for_containers_and_entities(self) -> None:
         node = Node(id=1)
-        relationship = Relationship(1, "TRUSTS", 1, 2)
+        relationship = Relationship(1, 1, 2, labels=("TRUSTS",))
         path = Path(nodes=(node, Node(id=2)), relationships=(relationship,))
         assert ValueKey([1, 2]) == ValueKey([1, 2])
         assert ValueKey([1, 2]) != ValueKey([2, 1])
         assert ValueKey({"a": 1}) == ValueKey({"a": 1})
         assert ValueKey(node) == ValueKey(Node(id=1))
-        assert ValueKey(relationship) == ValueKey(Relationship(1, "TRUSTS", 1, 2))
+        assert ValueKey(relationship) == ValueKey(Relationship(1, 1, 2, labels=("TRUSTS",)))
         assert ValueKey(path) == ValueKey(path)
         assert "ValueKey" in repr(ValueKey(node))
 
@@ -214,7 +214,7 @@ class TestScalarFunctions:
 
     def test_id(self, functions: ScalarFunctions) -> None:
         assert functions.call("id", [Node(id=3)]) == 3
-        assert functions.call("id", [Relationship(4, "TRUSTS", 1, 2)]) == 4
+        assert functions.call("id", [Relationship(4, 1, 2, labels=("TRUSTS",))]) == 4
         assert functions.call("id", [None]) is None
         with pytest.raises(QueryExecutionError):
             functions.call("id", [1])
@@ -224,12 +224,20 @@ class TestScalarFunctions:
             "ISO",
             "Program",
         ]
+        assert functions.call(
+            "labels",
+            [Relationship(1, 1, 2, labels=("TRUSTS", "ALLIES_WITH"))],
+        ) == ["ALLIES_WITH", "TRUSTS"]
         assert functions.call("labels", [None]) is None
         with pytest.raises(QueryExecutionError):
-            functions.call("labels", [Relationship(1, "TRUSTS", 1, 2)])
+            functions.call("labels", [1])
 
     def test_type(self, functions: ScalarFunctions) -> None:
-        assert functions.call("type", [Relationship(1, "TRUSTS", 1, 2)]) == "TRUSTS"
+        assert (
+            functions.call("type", [Relationship(1, 1, 2, labels=("TRUSTS", "ALLIES_WITH"))])
+            == "ALLIES_WITH"
+        )
+        assert functions.call("type", [Relationship(1, 1, 2)]) is None
         assert functions.call("type", [None]) is None
         with pytest.raises(QueryExecutionError):
             functions.call("type", [Node(id=1)])
@@ -238,7 +246,7 @@ class TestScalarFunctions:
         assert functions.call("properties", [Node(id=1, properties={"a": 1})]) == {"a": 1}
         assert functions.call(
             "properties",
-            [Relationship(1, "TRUSTS", 1, 2, properties={"b": 2})],
+            [Relationship(1, 1, 2, labels=("TRUSTS",), properties={"b": 2})],
         ) == {"b": 2}
         assert functions.call("properties", [None]) is None
         with pytest.raises(QueryExecutionError):
@@ -318,7 +326,7 @@ class TestScalarFunctions:
             functions.call("concat", ["a", 1])
 
     def test_start_and_end_node(self, functions: ScalarFunctions) -> None:
-        relationship = Relationship(1, "TRUSTS", 1, 2)
+        relationship = Relationship(1, 1, 2, labels=("TRUSTS",))
         start = functions.call("startNode", [relationship])
         end = functions.call("endNode", [relationship])
         assert isinstance(start, Node)

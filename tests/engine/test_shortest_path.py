@@ -182,22 +182,22 @@ class TestIncomingAndBoth(_GraphTestCase):
 class TestTypeFilter(_GraphTestCase):
     """Verify relationship type restrictions."""
 
-    def test_type_filter_selects_longer_route(self, graph: Graph) -> None:
+    def test_label_filter_selects_longer_route(self, graph: Graph) -> None:
         start = graph.add_node()
         middle = graph.add_node()
         end = graph.add_node()
         graph.add_relationship(start, "TRUSTS", end)
         graph.add_relationship(start, "ALLIES_WITH", middle)
         graph.add_relationship(middle, "ALLIES_WITH", end)
-        path = graph.shortest_path(start, end, types=["ALLIES_WITH"])
+        path = graph.shortest_path(start, end, labels=["ALLIES_WITH"])
         assert path is not None
         assert path.nodes == (start, middle, end)
 
-    def test_empty_type_set_means_all_types(self, graph: Graph) -> None:
+    def test_empty_label_set_means_all_labels(self, graph: Graph) -> None:
         start = graph.add_node()
         end = graph.add_node()
         graph.add_relationship(start, "TRUSTS", end)
-        path = graph.shortest_path(start, end, types=[])
+        path = graph.shortest_path(start, end, labels=[])
         assert path is not None
         assert path.length == 1
 
@@ -229,10 +229,10 @@ class TestValidation(_GraphTestCase):
                 direction=typing.cast(Direction, "incoming"),
             )
 
-    def test_invalid_type_filter_rejected(self, graph: Graph) -> None:
+    def test_invalid_label_filter_rejected(self, graph: Graph) -> None:
         node = graph.add_node()
         with pytest.raises(ValidationError):
-            graph.shortest_path(node, node, types=[""])
+            graph.shortest_path(node, node, labels=[""])
 
     def test_integer_endpoints_accepted(self, graph: Graph) -> None:
         first = graph.add_node()

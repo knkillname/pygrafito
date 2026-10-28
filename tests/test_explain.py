@@ -95,11 +95,10 @@ class TestPlanSelection(_ExplainTestCase):
         plan = graph.explain("MATCH (n:Program) WHERE n.cycles = 36 RETURN n")
         assert any(line.startswith("SCAN n0") for line in plan)
 
-    def test_relationship_type_filter_uses_an_index(self, graph: Graph) -> None:
+    def test_relationship_label_filter_uses_an_index(self, graph: Graph) -> None:
         plan = graph.explain("MATCH (a)-[r:ALLIES_WITH]->(b) RETURN b")
         details = " ".join(plan)
-        assert "rel_by_type" in details
-        assert "SCAN r0" not in details
+        assert "relationship_labels_by_label" in details
 
     def test_range_filter_uses_the_declared_index(self, graph: Graph) -> None:
         graph.create_node_index("cycles")

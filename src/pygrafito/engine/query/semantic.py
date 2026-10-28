@@ -584,8 +584,8 @@ class SemanticAnalyzer:
             if relationship.min_hops is not None or relationship.max_hops is not None:
                 message = "CREATE cannot use a variable-length relationship"
                 raise QuerySemanticError(message)
-            if len(relationship.types) != 1:
-                message = "a created relationship must have exactly one type"
+            if len(relationship.types) > 1:
+                message = "a created relationship must have at most one label"
                 raise QuerySemanticError(message)
             if relationship.direction is not Direction.OUTGOING:
                 message = "a created relationship must use the '-->' direction"
@@ -604,17 +604,13 @@ class SemanticAnalyzer:
         Raises
         ------
         QuerySemanticError
-            If a target is unbound or not a node or relationship, or a label is
-            added to a relationship.
+            If a target is unbound or not a node or relationship.
         """
         for assignment in clause.assignments:
             self._require_write_target(assignment.variable, assignment.span, "SET")
             self._validate_expression(assignment.value, aggregates_allowed=False)
         for label in clause.labels:
-            kind = self._require_write_target(label.variable, label.span, "SET")
-            if kind is not VariableKind.NODE:
-                message = "labels can only be added to nodes"
-                raise QuerySemanticError(message)
+            self._require_write_target(label.variable, label.span, "SET")
 
     def _validate_remove(self, clause: Remove) -> None:
         """Validate a ``REMOVE`` clause.
@@ -627,16 +623,12 @@ class SemanticAnalyzer:
         Raises
         ------
         QuerySemanticError
-            If a target is unbound or not a node or relationship, or a label is
-            removed from a relationship.
+            If a target is unbound or not a node or relationship.
         """
         for removal in clause.properties:
             self._require_write_target(removal.variable, removal.span, "REMOVE")
         for label in clause.labels:
-            kind = self._require_write_target(label.variable, label.span, "REMOVE")
-            if kind is not VariableKind.NODE:
-                message = "labels can only be removed from nodes"
-                raise QuerySemanticError(message)
+            self._require_write_target(label.variable, label.span, "REMOVE")
 
     def _validate_delete(self, clause: Delete) -> None:
         """Validate a ``DELETE`` clause.

@@ -19,14 +19,16 @@ class Schema:
         Open connection to the graph database.
     """
 
-    VERSION: int = 1
+    VERSION: int = 2
     MINIMUM_SQLITE_VERSION: tuple[int, int, int] = (3, 38, 0)
-    GRAPH_TABLES: frozenset[str] = frozenset({"nodes", "node_labels", "relationships"})
+    GRAPH_TABLES: frozenset[str] = frozenset(
+        {"nodes", "node_labels", "relationships", "relationship_labels"}
+    )
 
     _STATEMENTS: tuple[str, ...] = (
         """
         CREATE TABLE IF NOT EXISTS nodes (
-            id    INTEGER PRIMARY KEY,
+            id    INTEGER PRIMARY KEY AUTOINCREMENT,
             props TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props))
         )
         """,
@@ -40,16 +42,24 @@ class Schema:
         "CREATE INDEX IF NOT EXISTS node_labels_by_label ON node_labels (label, node_id)",
         """
         CREATE TABLE IF NOT EXISTS relationships (
-            id       INTEGER PRIMARY KEY,
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
             src      INTEGER NOT NULL REFERENCES nodes(id) ON DELETE RESTRICT,
             dst      INTEGER NOT NULL REFERENCES nodes(id) ON DELETE RESTRICT,
-            rel_type TEXT NOT NULL,
+            directed INTEGER NOT NULL DEFAULT 1 CHECK (directed IN (0, 1)),
             props    TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(props))
         )
         """,
-        "CREATE INDEX IF NOT EXISTS rel_by_src ON relationships (src, rel_type, dst)",
-        "CREATE INDEX IF NOT EXISTS rel_by_dst ON relationships (dst, rel_type, src)",
-        "CREATE INDEX IF NOT EXISTS rel_by_type ON relationships (rel_type, src, dst)",
+        """
+        CREATE TABLE IF NOT EXISTS relationship_labels (
+            relationship_id INTEGER NOT NULL REFERENCES relationships(id) ON DELETE CASCADE,
+            label           TEXT NOT NULL,
+            PRIMARY KEY (relationship_id, label)
+        ) WITHOUT ROWID
+        """,
+        "CREATE INDEX IF NOT EXISTS relationship_labels_by_label "
+        "ON relationship_labels (label, relationship_id)",
+        "CREATE INDEX IF NOT EXISTS rel_by_src ON relationships (src, dst)",
+        "CREATE INDEX IF NOT EXISTS rel_by_dst ON relationships (dst, src)",
     )
 
     def __init__(self, connection: Connection) -> None:
@@ -78,12 +88,17 @@ class Schema:
             If the database declares a newer schema version than this library
             can operate.
         """
+        current = self.version()
         if readonly:
+            if current != self.VERSION:
+                self._refuse_version(current, readonly=True)
             self._apply_statements()
             return
-        if self.version() == self.VERSION:
+        if current == self.VERSION:
             self._apply_statements()
             return
+        if current != 0:
+            self._refuse_version(current, readonly=False)
         self._connection.execute("BEGIN IMMEDIATE")
         try:
             self._bootstrap_transaction()
@@ -99,19 +114,54 @@ class Schema:
         Raises
         ------
         UnsupportedSqliteError
-            If the database declares a newer schema version than this library
-            can operate.
+            If another writer initialized the database with an unsupported
+            layout while this handle waited for the write lock.
         """
         current = self.version()
-        if current > self.VERSION:
-            message = (
-                f"database schema version {current} is newer than the supported "
-                f"version {self.VERSION}"
-            )
-            raise UnsupportedSqliteError(message)
+        if current not in (0, self.VERSION):
+            self._refuse_version(current, readonly=False)
         self._apply_statements()
         if current != self.VERSION:
             self._connection.execute(f"PRAGMA user_version = {self.VERSION}")
+
+    def ensure_supported(self, *, readonly: bool = False) -> None:
+        """Reject an unsupported layout before any write or journal switch.
+
+        Parameters
+        ----------
+        readonly : bool, optional
+            Whether the handle cannot write, by default ``False``.
+
+        Raises
+        ------
+        UnsupportedSqliteError
+            If the database records a layout this release does not support.
+        """
+        current = self.version()
+        if current not in (0, self.VERSION):
+            self._refuse_version(current, readonly=readonly)
+
+    def _refuse_version(self, current: int, *, readonly: bool) -> None:
+        """Reject an unsupported stored layout without changing the file.
+
+        Parameters
+        ----------
+        current : int
+            Schema version read from ``PRAGMA user_version``.
+        readonly : bool
+            Whether the handle cannot write.
+
+        Raises
+        ------
+        UnsupportedSqliteError
+            Always, because the layout is not supported by this release.
+        """
+        qualifier = "read-only " if readonly else ""
+        message = (
+            f"database schema version {current} is unsupported; this release "
+            f"requires version {self.VERSION} and does not migrate {qualifier}databases"
+        )
+        raise UnsupportedSqliteError(message)
 
     def _apply_statements(self) -> None:
         """Run the idempotent schema statements."""

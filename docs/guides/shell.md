@@ -70,14 +70,18 @@ next result. `.timer on` adds statement timing, and `.param NAME=JSON` binds a p
 
 ## Inspect the graph
 
-`.schema` summarizes labels, relationship types, indexes, constraints, and the journal mode.
-`.labels`, `.reltypes`, `.indexes`, and `.constraints` report each part separately.
+`.schema` summarizes labels, relationship labels, direction counts, indexes, constraints, and the
+journal mode. `.labels`, `.reltypes`, `.indexes`, and `.constraints` report each part separately.
 
 ```console
 grid.db> .schema
 Labels
   Program           1 node   cycles, designation
-Relationship types
+Relationship labels
+  ALLIES_WITH       1 relationship
+Directions
+  directed          1 relationship
+  undirected        0 relationships
 Indexes
 Constraints
 Journal mode

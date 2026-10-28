@@ -34,6 +34,7 @@ database argument SHALL select a file, creating it when missing unless the sessi
 - **WHEN** a caller starts a session with read-only access to a path that does not exist
 - **THEN** the session reports an error, exits with code 1, and creates no file
 
+
 ### Requirement: Interactive and non-interactive modes
 
 The session SHALL be interactive only when no command or script is supplied and standard input is
@@ -54,6 +55,7 @@ non-interactive session SHALL print neither.
 
 - **WHEN** a caller supplies the quiet option
 - **THEN** the banner and interactive footers are suppressed and results are unchanged
+
 
 ### Requirement: Statement input and terminators
 
@@ -97,6 +99,7 @@ contains only whitespace or comments SHALL execute nothing.
 - **WHEN** a script or an interactive session reaches the end of input with a non-empty unterminated statement
 - **THEN** the session executes that statement as if it were terminated
 
+
 ### Requirement: Dot-command recognition
 
 A line whose first non-whitespace character is `.` SHALL be a dot-command when no statement is
@@ -118,6 +121,7 @@ statement.
 
 - **WHEN** a `.`-prefixed line appears while a statement is pending
 - **THEN** the line is treated as statement text rather than as a command
+
 
 ### Requirement: Script execution
 
@@ -144,6 +148,7 @@ exit with code 1.
 
 - **WHEN** the path given to `-f` cannot be read
 - **THEN** the session reports an error and exits with code 1
+
 
 ### Requirement: Import command
 
@@ -189,6 +194,7 @@ exit with code 1.
 - **WHEN** a caller submits `--batch 0` or a negative value
 - **THEN** the command reports a validation error and stores nothing
 
+
 ### Requirement: Exit codes and output streams
 
 The session SHALL exit with code 0 on success, 1 on a runtime or statement failure, and 2 on a
@@ -214,6 +220,7 @@ target. Prompts, banners, row counts, timings, and errors SHALL be written to st
 
 - **WHEN** a caller captures standard output while the session runs
 - **THEN** only results, reports, and plans appear there, and diagnostics appear on standard error
+
 
 ### Requirement: Result rendering modes
 
@@ -250,12 +257,18 @@ every mode.
 #### Scenario: Graph entity rendering
 
 - **WHEN** a result contains a node, relationship, or path value
-- **THEN** table and line modes show a graph-shaped form and JSON modes emit a tagged object with the entity's id, labels, properties, and, for a relationship, its endpoints
+- **THEN** table and line modes show a graph-shaped form and JSON modes emit a tagged object with the entity's id, labels, properties, and, for a relationship, its directed flag and endpoints
+
+#### Scenario: Undirected relationship rendering
+
+- **WHEN** a result contains an undirected relationship
+- **THEN** its rendering names both endpoints and shows no source or destination direction
 
 #### Scenario: Null rendering
 
 - **WHEN** a value is null
 - **THEN** JSON modes emit `null`, and table, line, and CSV modes mark it distinctly from the empty string
+
 
 ### Requirement: Timing and result footers
 
@@ -277,6 +290,7 @@ standard error and SHALL be absent in non-interactive sessions and when the quie
 
 - **WHEN** the session is non-interactive or quiet
 - **THEN** no row count or timing is reported
+
 
 ### Requirement: Output redirection
 
@@ -303,6 +317,7 @@ error and preserve the previous output target.
 
 - **WHEN** the requested output path cannot be opened
 - **THEN** the session reports an error and keeps the previous output target
+
 
 ### Requirement: Session and database commands
 
@@ -346,6 +361,7 @@ end the session with exit code 0.
 - **WHEN** a caller submits `.quit` or `.exit`
 - **THEN** the session ends with exit code 0
 
+
 ### Requirement: Parameters
 
 `--param NAME=JSON` SHALL bind a query parameter to the JSON-decoded value and SHALL be repeatable
@@ -371,6 +387,7 @@ SHALL apply to every statement the session executes.
 
 - **WHEN** a script contains several statements that reference a bound parameter
 - **THEN** every statement receives the bound value
+
 
 ### Requirement: Explicit transactions
 
@@ -409,6 +426,7 @@ leave the session usable. Ending the session with an active transaction SHALL ro
 - **WHEN** a caller attempts `.open` or `.close` while a transaction is active
 - **THEN** the command is refused and the transaction remains active
 
+
 ### Requirement: Read-only sessions
 
 A read-only session SHALL open an existing database without write access. Write statements,
@@ -435,6 +453,7 @@ session usable. Reads, `.check`, `.backup`, and query plans SHALL remain availab
 - **WHEN** a caller submits `.check` or `.backup` in a read-only session
 - **THEN** the command runs against the read-only database
 
+
 ### Requirement: Graph introspection commands
 
 The session SHALL provide `.schema`, `.labels`, `.reltypes`, `.indexes`, `.node ID`, `.rel ID`,
@@ -444,27 +463,32 @@ metadata and neighborhood information without modifying the graph.
 #### Scenario: Schema summary
 
 - **WHEN** a caller submits `.schema`
-- **THEN** labels with node counts and property keys, relationship types with relationship counts, and declared indexes are reported in sorted order
+- **THEN** node labels with node counts and property keys, relationship labels with relationship counts and direction counts, and declared indexes are reported in sorted order
 
 #### Scenario: Node details
 
 - **WHEN** a caller submits `.node` with an existing id
 - **THEN** its sorted labels, its properties, and its incident relationships with direction and neighbor are shown
 
+#### Scenario: Undirected neighbor
+
+- **WHEN** a node is incident to an undirected relationship
+- **THEN** `.node` reports the relationship as undirected and names the other endpoint
+
 #### Scenario: Relationship details
 
 - **WHEN** a caller submits `.rel` with an existing id
-- **THEN** its type, start node, end node, and properties are shown
+- **THEN** its sorted labels, directed flag, start node, end node, and properties are shown
 
 #### Scenario: Expand a neighborhood
 
 - **WHEN** a caller submits `.expand` with an id and an optional depth
-- **THEN** a tree of reachable relationships is rendered, the depth defaults to one, each node appears at most once, and a negative or non-integer depth is rejected
+- **THEN** a tree of reachable relationships is rendered, the depth defaults to one, each node appears at most once, undirected relationships are followed from either endpoint, and a negative or non-integer depth is rejected
 
 #### Scenario: Shortest path
 
 - **WHEN** a caller submits `.path` with two node ids
-- **THEN** the shortest path is rendered, or the session reports that no path exists
+- **THEN** the shortest path is rendered, including undirected relationships, or the session reports that no path exists
 
 #### Scenario: Explain without executing
 
@@ -475,6 +499,7 @@ metadata and neighborhood information without modifying the graph.
 
 - **WHEN** a caller refers to a node or relationship id that does not exist
 - **THEN** the session reports a not-found error and remains usable
+
 
 ### Requirement: Maintenance commands
 
@@ -507,6 +532,7 @@ path that already exists, and SHALL refuse to run while a transaction is active.
 - **WHEN** a caller submits `.backup` while a transaction is active
 - **THEN** the command is refused and the transaction remains active
 
+
 ### Requirement: Interruption and end of input
 
 Interrupting an interactive prompt SHALL discard the pending buffer and return to the prompt
@@ -528,6 +554,7 @@ with exit code 0.
 
 - **WHEN** an interactive session receives end of input
 - **THEN** the session ends with exit code 0
+
 
 ### Requirement: Export command
 
@@ -576,6 +603,7 @@ read-only session, and SHALL refuse while an explicit transaction is active.
 - **WHEN** a caller quotes a path that contains spaces
 - **THEN** the path is parsed as one argument
 
+
 ### Requirement: Restore command
 
 `.restore PATH [--replace]` SHALL restore a JSONL snapshot into the open graph. It SHALL refuse a
@@ -622,6 +650,7 @@ intact.
 
 - **WHEN** a caller quotes a path that contains spaces
 - **THEN** the path is parsed as one argument
+
 
 ### Requirement: Interop command usage and output
 

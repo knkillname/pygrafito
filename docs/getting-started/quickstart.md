@@ -68,7 +68,7 @@ with Graph.open(":memory:") as graph:
     quorra = graph.add_node("Program", designation="Quorra")
     alliance = graph.add_relationship(kevin, "ALLIES_WITH", quorra, since_cycle=2020)
 
-    print(alliance.start_id, alliance.rel_type, alliance.end_id)
+    print(alliance.start_id, alliance.labels, alliance.directed, alliance.end_id)
     print(alliance["since_cycle"])  # 2020
 
     found = graph.find_relationships("ALLIES_WITH", since_cycle=2020)

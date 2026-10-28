@@ -125,7 +125,7 @@ class TestViewSchema:
         path = tmp_path / "grid.db"
         Fixtures.seed(path)
         with Graph.open(path) as graph:
-            assert graph.view_version == 1
+            assert graph.view_version == 2
         with contextlib.closing(Fixtures.connection(path)) as connection:
             names = Fixtures.view_names(connection)
         assert {
@@ -153,7 +153,8 @@ class TestViewSchema:
                 ("id", "INTEGER"),
                 ("start_id", "INTEGER"),
                 ("end_id", "INTEGER"),
-                ("type", "TEXT"),
+                ("labels", "TEXT"),
+                ("directed", "INTEGER"),
                 ("properties", "TEXT"),
             ]
             assert Fixtures.columns(connection, "graph_meta") == [
@@ -192,11 +193,12 @@ class TestViewSchema:
             assert labels == [(1, "Program"), (2, "ISO"), (2, "Program")]
 
             relationships = connection.execute(
-                "SELECT id, start_id, end_id, type, properties FROM graph_relationships ORDER BY id"
+                "SELECT id, start_id, end_id, labels, directed, properties "
+                "FROM graph_relationships ORDER BY id"
             ).fetchall()
             assert relationships == [
-                (1, 1, 2, "ALLIES_WITH", '{"since_cycle":2020}'),
-                (2, 1, 1, "GUARDS", "{}"),
+                (1, 1, 2, '["ALLIES_WITH"]', 1, '{"since_cycle":2020}'),
+                (2, 1, 1, '["GUARDS"]', 1, "{}"),
             ]
 
             assert connection.execute(
@@ -204,7 +206,7 @@ class TestViewSchema:
             ).fetchone() == ("pygrafito",)
             assert connection.execute(
                 "SELECT value FROM graph_meta WHERE key = 'view_version'"
-            ).fetchone() == ("1",)
+            ).fetchone() == ("2",)
 
             active = connection.execute(
                 "SELECT json_type(properties, '$.active'), "
@@ -220,6 +222,24 @@ class TestViewSchema:
                 "SELECT json_extract(properties, '$.\"a.b\"') FROM graph_nodes WHERE id = 1"
             ).fetchone()
             assert dotted == (1,)
+
+    def test_undirected_relationship_view(self, tmp_path: Path) -> None:
+        """An undirected relationship exposes both endpoints and directed=0."""
+        path = tmp_path / "grid.db"
+        with Graph.open(path) as graph:
+            first = graph.add_node("Program", designation="Tron")
+            second = graph.add_node("Program", designation="Quorra")
+            graph.add_relationship(
+                first,
+                ["ALLIES_WITH", "TRUSTS"],
+                second,
+                directed=False,
+            )
+        with contextlib.closing(Fixtures.connection(path, readonly=True)) as connection:
+            row = connection.execute(
+                "SELECT start_id, end_id, labels, directed FROM graph_relationships"
+            ).fetchone()
+        assert row == (1, 2, '["ALLIES_WITH","TRUSTS"]', 0)
 
     def test_views_are_read_only(self, tmp_path: Path) -> None:
         """SQLite refuses writes through a view."""
@@ -250,7 +270,7 @@ class TestViewPublication:
         assert destination.exists()
 
         with Graph.open(path) as graph:
-            assert graph.view_version == 1
+            assert graph.view_version == 2
         with contextlib.closing(Fixtures.connection(path)) as connection:
             assert "graph_nodes" in Fixtures.view_names(connection)
 
@@ -267,7 +287,7 @@ class TestViewPublication:
             connection.commit()
 
         with Graph.open(path) as graph:
-            assert graph.view_version == 1
+            assert graph.view_version == 2
         with contextlib.closing(Fixtures.connection(path)) as connection:
             assert Fixtures.columns(connection, "graph_nodes") == [
                 ("id", "INTEGER"),
@@ -282,13 +302,13 @@ class TestViewPublication:
         with contextlib.closing(Fixtures.connection(path)) as connection:
             Fixtures.drop_views(connection)
             connection.execute(
-                "CREATE VIEW graph_meta AS SELECT 'view_version' AS key, '2' AS value"
+                "CREATE VIEW graph_meta AS SELECT 'view_version' AS key, '3' AS value"
             )
             connection.execute("CREATE VIEW graph_nodes AS SELECT 1 AS marker")
             connection.commit()
 
         with Graph.open(path) as graph:
-            assert graph.view_version == 2
+            assert graph.view_version == 3
         with contextlib.closing(Fixtures.connection(path)) as connection:
             assert Fixtures.columns(connection, "graph_nodes") == [("marker", "")]
 
@@ -301,7 +321,7 @@ class TestViewPublication:
             connection.commit()
 
         with Graph.open(path) as graph:
-            assert graph.view_version == 1
+            assert graph.view_version == 2
         with contextlib.closing(Fixtures.connection(path)) as connection:
             assert Fixtures.columns(connection, "graph_nodes") == [
                 ("id", "INTEGER"),

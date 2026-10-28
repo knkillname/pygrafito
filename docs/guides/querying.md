@@ -35,9 +35,10 @@ statements are rejected.
 
 ## Match nodes and relationships
 
-A pattern can bind variables, require labels and relationship types, filter with an inline
-property map, and follow a direction. The arrow determines direction: `->` is outgoing, `<-` is
-incoming, and `-` matches either direction.
+A pattern can bind variables, require labels on nodes and relationships, filter with an inline
+property map, and follow a direction. The arrow determines direction: `->` follows a directed
+relationship forward, `<-` follows it backward, and `-` matches any incident relationship,
+including an undirected one. A relationship may carry several labels at once.
 
 ```python
 from pygrafito import Graph

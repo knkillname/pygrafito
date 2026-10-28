@@ -90,34 +90,34 @@ class TraversalSupport:
         return Direction.BOTH
 
     @staticmethod
-    def normalize_types(
-        rel_types: Iterable[str] | None,
+    def normalize_labels(
+        labels: Iterable[str] | None,
     ) -> frozenset[str] | None:
-        """Normalize a relationship type filter.
+        """Normalize a relationship label filter.
 
         Parameters
         ----------
-        rel_types : Iterable[str] | None
-            Relationship types to allow.
+        labels : Iterable[str] | None
+            Relationship labels to allow.
 
         Returns
         -------
         frozenset[str] | None
-            The allowed types, or ``None`` when every type is allowed.
+            The allowed labels, or ``None`` when every label is allowed.
 
         Raises
         ------
         ValidationError
-            If a type is not a non-empty string.
+            If a label is not a non-empty string.
         """
-        if rel_types is None:
+        if labels is None:
             return None
         normalized: set[str] = set()
-        for rel_type in rel_types:
-            if not isinstance(rel_type, str) or not rel_type:
-                message = "relationship types must be non-empty strings"
+        for label in labels:
+            if not isinstance(label, str) or not label:
+                message = "relationship labels must be non-empty strings"
                 raise ValidationError(message)
-            normalized.add(rel_type)
+            normalized.add(label)
         return frozenset(normalized) or None
 
     @staticmethod
@@ -201,7 +201,7 @@ class TraversalSource:
         self,
         frontier: Sequence[int],
         direction: Direction,
-        rel_types: frozenset[str] | None,
+        labels: frozenset[str] | None,
     ) -> Iterator[tuple[int, Relationship, int]]:
         """Yield the edges leaving one ordered frontier.
 
@@ -211,8 +211,8 @@ class TraversalSource:
             Ordered node identifiers to expand.
         direction : Direction
             Direction to follow.
-        rel_types : frozenset[str] | None
-            Allowed relationship types, or ``None`` for all types.
+        labels : frozenset[str] | None
+            Allowed relationship labels, or ``None`` for all labels.
 
         Yields
         ------
@@ -240,13 +240,19 @@ class AdjacencySnapshot(TraversalSource):
     ) -> None:
         self._nodes = {node.id: node for node in nodes}
         edges = tuple(relationships)
-        outgoing: dict[int, list[Relationship]] = {}
-        incoming: dict[int, list[Relationship]] = {}
+        outgoing: dict[int, dict[int, Relationship]] = {}
+        incoming: dict[int, dict[int, Relationship]] = {}
         for relationship in edges:
-            outgoing.setdefault(relationship.start_id, []).append(relationship)
-            incoming.setdefault(relationship.end_id, []).append(relationship)
-        self._outgoing = {node_id: tuple(values) for node_id, values in outgoing.items()}
-        self._incoming = {node_id: tuple(values) for node_id, values in incoming.items()}
+            if relationship.directed:
+                outgoing.setdefault(relationship.start_id, {})[relationship.id] = relationship
+                incoming.setdefault(relationship.end_id, {})[relationship.id] = relationship
+                continue
+            outgoing.setdefault(relationship.start_id, {})[relationship.id] = relationship
+            outgoing.setdefault(relationship.end_id, {})[relationship.id] = relationship
+            incoming.setdefault(relationship.start_id, {})[relationship.id] = relationship
+            incoming.setdefault(relationship.end_id, {})[relationship.id] = relationship
+        self._outgoing = {node_id: tuple(values.values()) for node_id, values in outgoing.items()}
+        self._incoming = {node_id: tuple(values.values()) for node_id, values in incoming.items()}
 
     @typing.override
     def contains(self, node_id: int) -> bool:
@@ -310,7 +316,7 @@ class AdjacencySnapshot(TraversalSource):
         self,
         frontier: Sequence[int],
         direction: Direction,
-        rel_types: frozenset[str] | None,
+        labels: frozenset[str] | None,
     ) -> Iterator[tuple[int, Relationship, int]]:
         """Yield edges leaving one ordered frontier.
 
@@ -320,8 +326,8 @@ class AdjacencySnapshot(TraversalSource):
             Ordered node identifiers to expand.
         direction : Direction
             Direction to follow.
-        rel_types : frozenset[str] | None
-            Allowed relationship types, or ``None`` for all types.
+        labels : frozenset[str] | None
+            Allowed relationship labels, or ``None`` for all labels.
 
         Yields
         ------
@@ -329,14 +335,14 @@ class AdjacencySnapshot(TraversalSource):
             The frontier node, the edge, and the node reached through it.
         """
         for node_id in frontier:
-            for relationship, target in self.edges(node_id, direction, rel_types):
+            for relationship, target in self.edges(node_id, direction, labels):
                 yield node_id, relationship, target
 
     def edges(
         self,
         node_id: int,
         direction: Direction,
-        rel_types: frozenset[str] | None,
+        labels: frozenset[str] | None,
     ) -> Iterator[tuple[Relationship, int]]:
         """Iterate over relationships and the node they lead to.
 
@@ -346,36 +352,65 @@ class AdjacencySnapshot(TraversalSource):
             Current node.
         direction : Direction
             Direction to follow.
-        rel_types : frozenset[str] | None
-            Allowed relationship types, or ``None`` for all types.
+        labels : frozenset[str] | None
+            Allowed relationship labels, or ``None`` for all labels.
 
         Yields
         ------
         tuple[Relationship, int]
             Each followable relationship and the node reached through it.
         """
+        emitted: set[int] = set()
         if direction in (
             Direction.OUTGOING,
             Direction.BOTH,
         ):
             for relationship in self._outgoing.get(node_id, ()):
-                if rel_types is None or relationship.rel_type in rel_types:
-                    yield relationship, relationship.end_id
+                if labels is not None and not set(relationship.labels) & labels:
+                    continue
+                target = self._target(relationship, node_id, outgoing=True)
+                emitted.add(relationship.id)
+                yield relationship, target
         if direction in (
             Direction.INCOMING,
             Direction.BOTH,
         ):
             for relationship in self._incoming.get(node_id, ()):
-                if direction is Direction.BOTH and relationship.start_id == node_id:
+                if direction is Direction.BOTH and relationship.id in emitted:
                     continue
-                if rel_types is None or relationship.rel_type in rel_types:
-                    yield relationship, relationship.start_id
+                if labels is not None and not set(relationship.labels) & labels:
+                    continue
+                yield relationship, self._target(relationship, node_id, outgoing=False)
+
+    @staticmethod
+    def _target(relationship: Relationship, node_id: int, *, outgoing: bool) -> int:
+        """Return the node reached through one relationship.
+
+        Parameters
+        ----------
+        relationship : Relationship
+            Relationship being traversed.
+        node_id : int
+            Node currently being expanded.
+        outgoing : bool
+            Whether the relationship is being followed from the outgoing arm.
+
+        Returns
+        -------
+        int
+            Identifier of the node reached.
+        """
+        if relationship.directed:
+            return relationship.end_id if outgoing else relationship.start_id
+        if relationship.start_id == node_id:
+            return relationship.end_id
+        return relationship.start_id
 
     def distances_to(
         self,
         target_id: int,
         direction: Direction,
-        rel_types: frozenset[str] | None,
+        labels: frozenset[str] | None,
     ) -> dict[int, int]:
         """Compute shortest hop distances from every node to a target.
 
@@ -385,8 +420,8 @@ class AdjacencySnapshot(TraversalSource):
             Node that paths should end at.
         direction : Direction
             Direction in which paths advance.
-        rel_types : frozenset[str] | None
-            Allowed relationship types, or ``None`` for all types.
+        labels : frozenset[str] | None
+            Allowed relationship labels, or ``None`` for all labels.
 
         Returns
         -------
@@ -400,7 +435,7 @@ class AdjacencySnapshot(TraversalSource):
         while queue:
             current = queue.popleft()
             next_distance = distances[current] + 1
-            for _, neighbor in self.edges(current, reverse, rel_types):
+            for _, neighbor in self.edges(current, reverse, labels):
                 if neighbor not in distances:
                     distances[neighbor] = next_distance
                     queue.append(neighbor)
@@ -481,7 +516,7 @@ class DatabaseNeighborhood(TraversalSource):
         self,
         frontier: Sequence[int],
         direction: Direction,
-        rel_types: frozenset[str] | None,
+        labels: frozenset[str] | None,
     ) -> Iterator[tuple[int, Relationship, int]]:
         """Read one ordered adjacency level from the database.
 
@@ -491,15 +526,15 @@ class DatabaseNeighborhood(TraversalSource):
             Ordered node identifiers to expand.
         direction : Direction
             Direction to follow.
-        rel_types : frozenset[str] | None
-            Allowed relationship types, or ``None`` for all types.
+        labels : frozenset[str] | None
+            Allowed relationship labels, or ``None`` for all labels.
 
         Yields
         ------
         tuple[int, Relationship, int]
             The frontier node, the edge, and the node reached through it.
         """
-        yield from self._relationships.frontier(frontier, direction, rel_types)
+        yield from self._relationships.frontier(frontier, direction, labels)
 
 
 class TraversalCapture:
@@ -530,7 +565,7 @@ class TraversalCapture:
         start: Node | int,
         max_depth: int,
         direction: Direction = Direction.OUTGOING,
-        rel_types: Iterable[str] | None = None,
+        labels: Iterable[str] | None = None,
         include: Iterable[int] = (),
     ) -> AdjacencySnapshot:
         """Capture the bounded region around a start node.
@@ -543,8 +578,8 @@ class TraversalCapture:
             Maximum number of relationships to follow.
         direction : Direction, optional
             Direction to follow, by default outgoing.
-        rel_types : Iterable[str] | None, optional
-            Allowed relationship types, by default all types.
+        labels : Iterable[str] | None, optional
+            Allowed relationship labels, by default all labels.
         include : Iterable[int], optional
             Extra node ids that must be present even when the region cannot
             reach them, by default none.
@@ -564,7 +599,7 @@ class TraversalCapture:
         start_id = TraversalSupport.node_id(start)
         TraversalSupport.validate_depth(max_depth, "max_depth")
         TraversalSupport.validate_direction(direction)
-        types = TraversalSupport.normalize_types(rel_types)
+        types = TraversalSupport.normalize_labels(labels)
         nodes_by_id: dict[int, Node] = {start_id: self._nodes.get(start_id)}
         relationships: dict[int, Relationship] = {}
         frontier: tuple[int, ...] = (start_id,)
@@ -607,8 +642,8 @@ class ReachabilityEvaluator:
         Maximum number of relationships to follow.
     direction : Direction, optional
         Direction to follow, by default outgoing.
-    rel_types : Iterable[str] | None, optional
-        Allowed relationship types, by default all types.
+    labels : Iterable[str] | None, optional
+        Allowed relationship labels, by default all labels.
     """
 
     def __init__(
@@ -617,7 +652,7 @@ class ReachabilityEvaluator:
         start: Node | int,
         max_depth: int,
         direction: Direction = Direction.OUTGOING,
-        rel_types: Iterable[str] | None = None,
+        labels: Iterable[str] | None = None,
     ) -> None:
         self._snapshot = snapshot
         self._start = TraversalSupport.node_id(start)
@@ -625,7 +660,7 @@ class ReachabilityEvaluator:
         TraversalSupport.validate_depth(max_depth, "max_depth")
         TraversalSupport.validate_direction(direction)
         self._direction = direction
-        self._types = TraversalSupport.normalize_types(rel_types)
+        self._types = TraversalSupport.normalize_labels(labels)
         if not snapshot.contains(self._start):
             message = f"node {self._start} does not exist"
             raise NotFoundError(message)
@@ -673,8 +708,8 @@ class ShortestPathEvaluator:
         End node or its id.
     direction : Direction, optional
         Direction in which paths advance, by default outgoing.
-    rel_types : Iterable[str] | None, optional
-        Allowed relationship types, by default all types.
+    labels : Iterable[str] | None, optional
+        Allowed relationship labels, by default all labels.
     max_depth : int | None, optional
         Maximum path length, by default unbounded.
     """
@@ -685,7 +720,7 @@ class ShortestPathEvaluator:
         start: Node | int,
         end: Node | int,
         direction: Direction = Direction.OUTGOING,
-        rel_types: Iterable[str] | None = None,
+        labels: Iterable[str] | None = None,
         max_depth: int | None = None,
     ) -> None:
         self._source = source
@@ -693,7 +728,7 @@ class ShortestPathEvaluator:
         self._end = TraversalSupport.node_id(end)
         TraversalSupport.validate_direction(direction)
         self._direction = direction
-        self._types = TraversalSupport.normalize_types(rel_types)
+        self._types = TraversalSupport.normalize_labels(labels)
         if max_depth is not None:
             TraversalSupport.validate_depth(max_depth, "max_depth")
         self._max_depth = max_depth
@@ -867,8 +902,8 @@ class TrailEnumerator:
         Inclusive maximum number of relationships.
     direction : Direction, optional
         Direction in which paths advance, by default outgoing.
-    rel_types : Iterable[str] | None, optional
-        Allowed relationship types, by default all types.
+    labels : Iterable[str] | None, optional
+        Allowed relationship labels, by default all labels.
     limit : int | None, optional
         Maximum number of paths to produce, by default unlimited.
     """
@@ -881,7 +916,7 @@ class TrailEnumerator:
         min_depth: int,
         max_depth: int,
         direction: Direction = Direction.OUTGOING,
-        rel_types: Iterable[str] | None = None,
+        labels: Iterable[str] | None = None,
         limit: int | None = None,
     ) -> None:
         self._snapshot = snapshot
@@ -896,7 +931,7 @@ class TrailEnumerator:
             raise ValidationError(message)
         TraversalSupport.validate_direction(direction)
         self._direction = direction
-        self._types = TraversalSupport.normalize_types(rel_types)
+        self._types = TraversalSupport.normalize_labels(labels)
         if limit is not None:
             TraversalSupport.validate_depth(limit, "limit")
         self._limit = limit

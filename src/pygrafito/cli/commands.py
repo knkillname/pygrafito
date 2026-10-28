@@ -619,7 +619,7 @@ class Commands:
 
     def _command_schema(self, _argument: str) -> bool:
         labels, keys = self._node_inventory()
-        types = self._type_inventory()
+        relationship_labels, directions = self._relationship_inventory()
         indexes = self._session.graph.indexes()
         constraints = self._session.graph.constraints()
         lines = ["Labels"]
@@ -628,13 +628,20 @@ class Commands:
         )
         if not labels:
             lines.append("  (none)")
-        lines.append("Relationship types")
+        lines.append("Relationship labels")
         lines.extend(
-            f"  {rel_type:<{self.WIDTH}}{self._count(count, 'relationship')}"
-            for rel_type, count in sorted(types.items())
+            f"  {label:<{self.WIDTH}}{self._count(count, 'relationship')}"
+            for label, count in sorted(relationship_labels.items())
         )
-        if not types:
+        if not relationship_labels:
             lines.append("  (none)")
+        lines.append("Directions")
+        lines.append(
+            f"  {'directed':<{self.WIDTH}}{self._count(directions['directed'], 'relationship')}"
+        )
+        lines.append(
+            f"  {'undirected':<{self.WIDTH}}{self._count(directions['undirected'], 'relationship')}"
+        )
         lines.append("Indexes")
         lines.extend(f"  {index.kind.value} {index.key}" for index in indexes)
         if not indexes:
@@ -652,6 +659,24 @@ class Commands:
     def _constraint_line(constraint: Constraint) -> str:
         return f"  {constraint.kind.value} {constraint.scope} {constraint.key}"
 
+    @staticmethod
+    def _relationship_labels(relationship: Relationship) -> str:
+        """Render a relationship's labels for introspection.
+
+        Parameters
+        ----------
+        relationship : Relationship
+            Relationship to describe.
+
+        Returns
+        -------
+        str
+            Colon-separated labels, or ``(none)``.
+        """
+        if not relationship.labels:
+            return "(none)"
+        return "".join(f":{label}" for label in relationship.labels)
+
     def _schema_label_line(self, label: str, count: int, keys: set[str]) -> str:
         properties = ", ".join(sorted(keys)) if keys else "(none)"
         return f"  {label:<{self.WIDTH}}{self._count(count, 'node')}   {properties}"
@@ -666,10 +691,10 @@ class Commands:
         return True
 
     def _command_reltypes(self, _argument: str) -> bool:
-        types = self._type_inventory()
+        labels, _directions = self._relationship_inventory()
         lines = [
-            f"  {rel_type:<{self.WIDTH}}{self._count(count, 'relationship')}"
-            for rel_type, count in sorted(types.items())
+            f"  {label:<{self.WIDTH}}{self._count(count, 'relationship')}"
+            for label, count in sorted(labels.items())
         ]
         self._session.emit_lines(lines or ["  (none)"])
         return True
@@ -697,11 +722,15 @@ class Commands:
             "  relationships",
         ]
         for relationship, neighbor in relationships:
-            incoming = relationship.end_id == node.id
-            arrow = "<-" if incoming and relationship.start_id != node.id else "->"
+            labels = self._relationship_labels(relationship)
+            if not relationship.directed:
+                arrow = "~"
+            elif relationship.end_id == node.id and relationship.start_id != node.id:
+                arrow = "<-"
+            else:
+                arrow = "->"
             lines.append(
-                f"    {arrow} {relationship.rel_type} {self._formatter.cell(neighbor)}"
-                f" id={relationship.id}"
+                f"    {arrow} {labels} {self._formatter.cell(neighbor)} id={relationship.id}"
             )
         if not relationships:
             lines.append("    (none)")
@@ -713,7 +742,8 @@ class Commands:
         relationship = self._session.graph.relationship(relationship_id)
         lines = [
             f"Relationship {relationship.id}",
-            f"  type: {relationship.rel_type}",
+            f"  labels: {self._relationship_labels(relationship)}",
+            f"  directed: {relationship.directed}",
             f"  start: {relationship.start_id}",
             f"  end: {relationship.end_id}",
             f"  properties: {self._properties(dict(relationship))}",
@@ -784,13 +814,20 @@ class Commands:
                 keys.setdefault(label, set()).update(properties)
         return (counts, keys)
 
-    def _type_inventory(self) -> dict[str, int]:
+    def _relationship_inventory(self) -> tuple[dict[str, int], dict[str, int]]:
         counts: dict[str, int] = {}
-        result = self._session.execute("MATCH ()-[r]->() RETURN type(r) AS type")
+        directions = {"directed": 0, "undirected": 0}
+        result = self._session.execute("MATCH ()-[r]-() RETURN r")
+        found: dict[int, Relationship] = {}
         for row in result.rows:
-            rel_type = typing.cast(str, row["type"])
-            counts[rel_type] = counts.get(rel_type, 0) + 1
-        return counts
+            relationship = typing.cast(Relationship, row["r"])
+            found[relationship.id] = relationship
+        for relationship in found.values():
+            key = "directed" if relationship.directed else "undirected"
+            directions[key] += 1
+            for label in relationship.labels or ("(none)",):
+                counts[label] = counts.get(label, 0) + 1
+        return (counts, directions)
 
     def _incident(self, node_id: int) -> list[tuple[Relationship, Node]]:
         result = self._session.execute(f"MATCH (n)-[r]-(m) WHERE id(n) = {node_id} RETURN r, m")
@@ -798,7 +835,7 @@ class Commands:
         for row in result.rows:
             relationship = typing.cast(Relationship, row["r"])
             found[relationship.id] = (relationship, typing.cast(Node, row["m"]))
-        ordered = sorted(found, key=lambda value: (found[value][0].rel_type, value))
+        ordered = sorted(found, key=lambda value: (found[value][0].labels, value))
         return [found[key] for key in ordered]
 
     def _expand_tree(
@@ -828,7 +865,7 @@ class Commands:
                 bucket = found.get(node.id, {})
                 ordered = [
                     bucket[key]
-                    for key in sorted(bucket, key=lambda value: (bucket[value][0].rel_type, value))
+                    for key in sorted(bucket, key=lambda value: (bucket[value][0].labels, value))
                 ]
                 for relationship, neighbor in ordered:
                     if neighbor.id in visited:
@@ -849,10 +886,12 @@ class Commands:
         entries = children.get(node.id, [])
         for position, (relationship, neighbor) in enumerate(entries):
             last = position == len(entries) - 1
-            arrow = "->" if relationship.start_id == node.id else "<-"
-            lines.append(
-                f"{prefix}+-[:{relationship.rel_type}]{arrow} {self._formatter.cell(neighbor)}"
-            )
+            if not relationship.directed:
+                arrow = "~"
+            else:
+                arrow = "->" if relationship.start_id == node.id else "<-"
+            labels = self._relationship_labels(relationship)
+            lines.append(f"{prefix}+-[{labels}]{arrow} {self._formatter.cell(neighbor)}")
             self._render_tree(
                 lines,
                 children,

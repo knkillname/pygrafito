@@ -7,6 +7,7 @@
 - Target Python 3.14, runtime standard library only.
 - Durable specs live in `openspec/specs/` and are authoritative.
 - Implement through `/opsx-apply`; planning and exploration must not write code.
+- Every `/opsx-apply` run MUST update the Sphinx documentation under `docs/` (see [Documentation](#documentation)).
 
 ## Commands
 
@@ -72,5 +73,11 @@ Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do n
 
 ## Documentation
 
+- **Mandatory for every `/opsx-apply` run:** update the Sphinx sources under `docs/` for every
+  behavior, public API, CLI, or configuration change the run implements. Add or update pages,
+  guides, references, and `toctree` entries as needed; document the change where a reader would
+  look for it. Then run `hatch run docs:build` and fix every warning before marking the affected
+  tasks complete. An apply run that changes behavior without a matching docs update is incomplete;
+  do not mark its tasks `- [x]`.
 - Keep `README.md` examples runnable as features land; verify the snippets.
 - Describe graph semantics directly; avoid product-name shorthand in specs and docs.

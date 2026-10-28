@@ -125,36 +125,46 @@ MATCH (n) WHERE n.`a b` = 2 RETURN n
 
 ## Relationship patterns
 
-Relationship patterns bind an optional variable, zero or more types, a
+Relationship patterns bind an optional variable, zero or more labels, a
 direction, and an optional property map:
 
 ```text
-(a)-[r:ALLIES_WITH]->(b)          outgoing
-(a)<-[r:ALLIES_WITH]-(b)          incoming
-(a)-[r:ALLIES_WITH]-(b)           either stored direction
-(a)-[r:ALLIES_WITH|TRUSTS]->(b)   type alternatives
+(a)-[r:ALLIES_WITH]->(b)          directed, forward
+(a)<-[r:ALLIES_WITH]-(b)          directed, reverse
+(a)-[r:ALLIES_WITH]-(b)           any incident relationship
+(a)-[r:ALLIES_WITH|TRUSTS]->(b)   label alternatives
 (a)-[r {since_cycle: 2020}]->(b)  property filter
-(a)-->(b)                         anonymous outgoing relationship
+(a)-->(b)                         anonymous directed relationship
 (a)-[:ALLIES_WITH*1..3]->(b)      quantified, bounded
 ```
 
-A bound relationship snapshot preserves its stored start node, end node, and
-type even when the pattern traverses it against its stored direction.
+A bound relationship snapshot preserves its endpoints, labels, and directed
+flag even when the pattern traverses it against its stored direction. A
+`:LABEL` filter matches a relationship carrying that label; a relationship may
+carry several labels at once.
+
+The arrows are storage-direction constraints: `-->` matches only directed
+relationships traversed forward, and `<--` matches only directed relationships
+traversed backward. The undirected form `--` matches every incident
+relationship, including an undirected one. An undirected relationship does not
+match `-->` or `<--` in this transitional dialect.
 
 ## Variable-length relationships
 
-A relationship may carry a quantifier after its types:
+A relationship may carry a quantifier after its labels:
 
 ```text
 (a)-[:ALLIES_WITH*2]->(b)          exactly two hops
 (a)-[:ALLIES_WITH*1..3]->(b)       between one and three hops
 (a)-[:ALLIES_WITH*0..2]->(b)       zero through two hops
-(a)-[*1..2]->(b)                   anonymous, any type
+(a)-[*1..2]->(b)                   anonymous, any label
 ```
 
-Every hop applies the pattern's direction, type alternatives, and property map.
-The upper bound is required: a bare `*` or an open range such as `*1..` is
-rejected, because the engine never explores an unbounded trail space. Bounds are
+Every hop applies the pattern's direction, label alternatives, and property
+map. An arrow quantified pattern cannot follow an undirected relationship; use
+the `--` form to include undirected relationships in a quantified path. The
+upper bound is required: a bare `*` or an open range such as `*1..` is rejected,
+because the engine never explores an unbounded trail space. Bounds are
 non-negative integers and the lower bound cannot exceed the upper bound.
 
 Trails are relationship-unique: one match never uses the same relationship
@@ -278,8 +288,9 @@ source order, and each one observes the mutations of the clauses before it.
 
 `CREATE` creates nodes and relationships from one pattern. A node pattern whose
 variable is not yet bound creates a node; a node pattern whose variable is
-already bound refers to that node. A created relationship needs exactly one
-type, the `-->` direction, and both endpoints already bound:
+already bound refers to that node. A created relationship needs at most one
+label, the `-->` direction, and both endpoints already bound. An unlabeled
+relationship is created when the pattern names no label:
 
 ```python
 graph.query(
@@ -287,6 +298,11 @@ graph.query(
     "CREATE (a)-[r:TRUSTS {since_cycle: 2020}]->(b)"
 )
 graph.query("CREATE (n:Program {designation: 'Quorra', cycles: 37})")
+# An unlabeled relationship:
+graph.query(
+    "MATCH (a:Program {designation: 'Kevin Flynn'}), "
+    "(b:Program {designation: 'Quorra'}) CREATE (a)-[r]->(b)"
+)
 ```
 
 `CREATE` never matches an existing element. Property values in a create pattern
@@ -321,7 +337,7 @@ self-loop.
 to rows it matched. Each may appear at most once, and `ON CREATE` must come
 first. Assignments follow `SET` rules.
 
-A merged pattern must contain one path, an explicit type and the `-->` direction
+A merged pattern must contain one path, one explicit label and the `-->` direction
 for every relationship, no path variable, and no quantified relationship. It
 cannot rebind a relationship variable. A null property value in a merged pattern
 is a query error.
@@ -333,11 +349,13 @@ removes a property or labels:
 
 ```python
 graph.query("MATCH (n:Program) SET n.cycles = n.cycles + 1, n:SystemMonitor")
+graph.query("MATCH ()-[r:ALLIES_WITH]->() SET r:TRUSTS")
 graph.query("MATCH (n:Program) REMOVE n.cycles, n:ISO")
 ```
 
-Assigning null removes the property. Labels can only be added to or removed from
-nodes. Removing a property or label that is absent leaves the element unchanged.
+Assigning null removes the property. Labels can be added to or removed from
+nodes and relationships. Removing a property or label that is absent leaves the
+element unchanged.
 
 ### DELETE and DETACH DELETE
 
@@ -430,8 +448,8 @@ Function names are case-insensitive.
 | Function | Behavior |
 | --- | --- |
 | `id(x)` | id of a node or relationship |
-| `labels(n)` | sorted labels of a node |
-| `type(r)` | stored type of a relationship |
+| `labels(x)` | sorted labels of a node or relationship |
+| `type(r)` | first sorted label of a relationship, or null when it has none |
 | `properties(x)` | property mapping of a node or relationship |
 | `keys(x)` | sorted property keys of a node or relationship |
 | `size(x)` | length of a list or string |
@@ -628,13 +646,12 @@ connections.
 
 ## Identifier casing and quoting
 
-Keywords and function names are case-insensitive. Variable names, labels,
-relationship types, and property keys are case-sensitive, so `Program` and
-`program` are different labels.
+Keywords and function names are case-insensitive. Variable names, labels, and
+property keys are case-sensitive, so `Program` and `program` are different
+labels.
 
 Backtick-quoted identifiers may contain spaces, dots, and escaped backticks
-(written as doubled backticks) in labels, relationship types, property keys, and
-variables.
+(written as doubled backticks) in labels, property keys, and variables.
 
 ## Grammar summary
 
@@ -663,9 +680,9 @@ return-clause    = "RETURN" ["DISTINCT"] return-item { "," return-item }
 path-pattern     = [identifier "="] node-pattern
                    { relationship-pattern node-pattern }
 node-pattern     = "(" [identifier] { ":" label } [property-map] ")"
-relationship     = "-" [ "[" [identifier] [":" type {"|" type}]
+relationship     = "-" [ "[" [identifier] [":" label {"|" label}]
                    [quantifier] [property-map] "]" ] "-" [">"]
-                 | "<" "-" [ "[" [identifier] [":" type {"|" type}]
+                 | "<" "-" [ "[" [identifier] [":" label {"|" label}]
                    [quantifier] [property-map] "]" ] "-"
 quantifier       = "*" [ INTEGER [ ".." [ INTEGER ] ] ]
 property-map     = "{" [ key ":" expression { "," key ":" expression } ] "}"
@@ -677,8 +694,8 @@ skip-clause      = "SKIP" expression
 limit-clause     = "LIMIT" expression
 ```
 
-An identifier is a plain name or a backtick-quoted name. A label, type, key, or
-alias may be backtick-quoted. A write clause may omit `MATCH` and `RETURN`, and
+An identifier is a plain name or a backtick-quoted name. A label, key, or alias
+may be backtick-quoted. A write clause may omit `MATCH` and `RETURN`, and
 `RETURN` is always the final clause. Expression precedence is listed in
 [Filtering expressions](#filtering-expressions).
 
