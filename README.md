@@ -14,7 +14,7 @@ pip install pygrafito
 ```
 
 `pygrafito` requires Python 3.13 or newer and SQLite 3.38 or newer. Linux with glibc is the
-supported 1.0 platform; macOS and Windows are tested nightly as a non-blocking portability signal.
+supported 1.x platform; macOS and Windows are tested nightly as a non-blocking portability signal.
 The package is pure Python, so installation needs no compiler or system SQLite build step.
 
 Google Colab currently runs Python 3.13. Install the package in a notebook cell and keep database

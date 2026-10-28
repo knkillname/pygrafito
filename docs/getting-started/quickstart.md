@@ -34,7 +34,7 @@ pip install pygrafito
 
 ## Supported platforms
 
-Linux with glibc is the supported platform for the 1.0 release. macOS and Windows run the same
+Linux with glibc is the supported platform for the 1.x series. macOS and Windows run the same
 test suite nightly as a portability signal, but they are not supported platforms until that signal
 is green. The package is pure Python and installs without a compiler. See
 [Platform support](../reference/platform-support.md) for the full contract.
@@ -90,9 +90,11 @@ from pygrafito import Graph
 with Graph.open(":memory:") as graph:
     kevin = graph.add_node("Program", "User", designation="Kevin Flynn", cycles=36)
     quorra = graph.add_node("Program", "ISO", designation="Quorra", cycles=37)
+    bit = graph.add_node("Program", designation="Bit", cycles=1, active=True)
 
     print(sorted(kevin.labels))  # ['Program', 'User']
     print(quorra["designation"], quorra["cycles"])  # Quorra 37
+    print(bit["designation"], bit["active"])  # Bit True
 ```
 
 `find_nodes` matches every supplied label and every exact property value:
@@ -104,9 +106,13 @@ with Graph.open(":memory:") as graph:
     graph.add_node("Program", designation="Kevin Flynn", cycles=36)
     graph.add_node("Program", designation="Quorra", cycles=37)
     graph.add_node("ISO", designation="Quorra", cycles=37)
+    graph.add_node("Program", designation="Bit", cycles=1, active=True)
 
     found = graph.find_nodes("Program", cycles=37)
     print([node["designation"] for node in found])  # ['Quorra']
+
+    active = graph.find_nodes("Program", active=True)
+    print([node["designation"] for node in active])  # ['Bit']
 ```
 
 ## 4. Add a relationship

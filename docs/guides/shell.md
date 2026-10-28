@@ -35,7 +35,7 @@ flowchart LR
 
 ```console
 $ pygrafito grid.db
-pygrafito 0.9.0 | grid.db | type ".help" for commands
+pygrafito 1.0.0 | grid.db | type ".help" for commands
 grid.db> INSERT (n:Program {designation: 'Tron', cycles: 40});
 1 node created
 grid.db> MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles;
@@ -190,7 +190,7 @@ usable. Ending the session with an open transaction rolls it back.
 
 ```console
 $ pygrafito --readonly grid.db
-pygrafito 0.9.0 | grid.db (read-only) | type ".help" for commands
+pygrafito 1.0.0 | grid.db (read-only) | type ".help" for commands
 grid.db> INSERT (n:Program {designation: 'Clu'});
 error: graph handle is read-only
 ```

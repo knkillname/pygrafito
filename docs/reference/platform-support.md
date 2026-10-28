@@ -3,13 +3,13 @@
 :::{admonition} tl;dr
 :class: tldr
 
-Linux with glibc is the supported 1.0 platform, and Python 3.13 and 3.14 are supported. macOS and
+Linux with glibc is the supported 1.x platform, and Python 3.13 and 3.14 are supported. macOS and
 Windows are nightly portability signals, not supported platforms yet.
 :::
 
 This page states what a 1.x user can rely on. The contract is deliberately narrow: Linux is the
-supported platform for 1.0, and the other operating systems are tested nightly without blocking a
-release.
+supported platform for the 1.x series, and the other operating systems are tested nightly without
+blocking a release.
 
 ## Supported Python
 
@@ -28,7 +28,7 @@ pip install pygrafito
 
 ## Supported operating systems
 
-Linux with glibc and SQLite 3.38 or newer is the supported 1.0 platform. The continuous integration
+Linux with glibc and SQLite 3.38 or newer is the supported 1.x platform. The continuous integration
 gate runs the full suite on Linux for Python 3.13 and 3.14, and a failure blocks a release.
 
 macOS and Windows run the same suite nightly for Python 3.13 and 3.14. That run is a portability

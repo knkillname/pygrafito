@@ -12,7 +12,7 @@ in the query dialect. Start with the querying guide for tasks; use this page for
 
 This page describes the dialect the current release executes. GQL spellings are canonical; the
 compatibility aliases in the [GQL profile](gql-profile.md) are accepted with identical semantics.
-The profile is also the 1.0 contract: every in-scope construct is `supported`, and every
+The profile is also the 1.x contract: every in-scope construct is `supported`, and every
 `out of profile` construct is rejected. See [Unsupported constructs](#unsupported-constructs) for
 the boundary.
 :::

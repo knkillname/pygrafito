@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-28
+
 ### Added
 
 - Contributors can now run the test suite against the same SQLite release as CI with
@@ -18,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Existing imports and calls keep working throughout 1.x; additive changes arrive in minor
   releases, and removals wait for a major release.
 - `pygrafito` now installs and runs on Python 3.13 as well as 3.14, including Google Colab. Linux
-  with SQLite 3.38 or newer is the supported 1.0 platform; macOS and Windows are exercised nightly
+  with SQLite 3.38 or newer is the supported 1.x platform; macOS and Windows are exercised nightly
   as a non-blocking portability signal.
 - Queries can now repeat a whole path shape with grouped terms such as
   `((a)-[r:TRUSTS]->(b)){2}`. Variables introduced inside a group bind ordered lists, nested groups
@@ -46,13 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default behavior. `INTERSECT ALL` keeps as many copies as both sides share, and `EXCEPT ALL`
   removes one copy from the left for each copy on the right.
 - `WITH *` now keeps the full current scope without listing every variable.
-- The GQL profile now publishes the complete 1.0 target, including the expression, subquery,
-  set-operation, and path surfaces, and distinguishes what works today, what is planned for 1.0,
-  and what is intentionally unsupported. The profile also defines the 1.0 completion gate and the
-  policy for changing it after release.
+- The GQL profile publishes the complete 1.0 surface, including the expression, subquery,
+  set-operation, and path features, and distinguishes what works from what is intentionally
+  unsupported. The profile also defines the completion gate and the policy for changing it after
+  release.
 - The GQL profile now explains how path modes, match modes, repetition counts, and shortest-path
   selection work together, including what each form binds when it matches nothing, which
-  combinations are rejected, and how to migrate a query when the planned path features arrive.
+  combinations are rejected, and how to migrate a query to the new path features.
 
 ### Changed
 
@@ -66,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   catalog statement now fail with a clear message that names the construct and the supported
   alternative. The words involved, such as `date` and `select`, remain usable as names in
   supported statements.
-- The GQL profile is now the frozen 1.0 language contract: every listed construct works, every
+- The GQL profile is now the frozen 1.x language contract: every listed construct works, every
   unsupported form names the error it raises and the supported alternative, and nothing is left in
   a planned state.
 - **BREAKING:** `WHEN`, `THEN`, `ELSE`, `END`, `UNION`, `INTERSECT`, and `EXCEPT` are now reserved
@@ -77,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   becomes `` `edges` ``.
 - **BREAKING:** `ANY` and `SHORTEST` are now reserved keywords. Wrap an existing variable or alias
   that uses one of these words in backticks; for example, `any` becomes `` `any` ``.
-- Query results are now documented as a materialized 1.0 contract. A call returns every row before
+- Query results are now documented as a materialized 1.x contract. A call returns every row before
   it returns, and the row budget (100,000 by default) bounds the result; lower it for
   memory-sensitive embeddings. Streaming results are not part of the 1.x API.
 - Crash recovery is now documented and tested: committed writes survive an abrupt termination, open

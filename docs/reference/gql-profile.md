@@ -8,10 +8,9 @@ constructs, extensions, path and budget policy, and the conformance matrix. Use 
 whether a spelling is portable GQL or a `pygrafito` extension.
 :::
 
-This page is the target language profile for `pygrafito`. It defines the canonical GQL surface,
-the compatibility aliases and constructs, the pygrafito extensions, the path-mode and query-budget
-policy, the 1.0 release gate, and how conformance is claimed. It is the contract for the
-query-language changes that lead to 1.0.
+This page is the language profile for `pygrafito`. It defines the canonical GQL surface, the
+compatibility aliases and constructs, the pygrafito extensions, the path-mode and query-budget
+policy, the 1.0 release gate, and how conformance is claimed.
 
 :::{admonition} Remember
 :class: important
@@ -36,20 +35,20 @@ modes, path search, and grouped quantified paths. Every path-engine row is suppo
 outside the profile are rejected with a positioned query error, and the matrix records their
 status.
 
-| Area | Current release | 1.0 target |
-| --- | --- | --- |
-| Pattern matching | `MATCH`, `OPTIONAL MATCH`, multiple patterns, repeated variables, inline `WHERE`, path variables | Same surface |
-| Data modification | `INSERT`, `SET`, `REMOVE`, `DELETE`, `DETACH DELETE`, `NODETACH DELETE`; `CREATE` alias; `MERGE` extension | Same surface |
-| Iteration and filtering | `FOR`, `UNWIND` alias, `FILTER`, stage `WHERE` alias, `MATCH ... WHERE` | Same surface |
-| Binding, composition, and grouping | `LET`, `NEXT` with `YIELD`, `FINISH`, `GROUP BY`, `WITH` extension, implicit grouping | Same surface |
-| Projection, ordering, and pagination | `RETURN`, `RETURN DISTINCT`, `RETURN ALL`, `RETURN *`, `RETURN NO BINDINGS`; `ORDER BY`, `OFFSET`, `SKIP`, `LIMIT` | Same surface |
-| Quantifiers | Closed `{n}`, `{m,n}`, `{,n}`; open `{m,}`, `*`, `+`; legacy `*n`, `*n..m`, `*0..m`, `*n..` | Same surface |
-| Path modes | `WALK` default; `TRAIL`, `SIMPLE`, `ACYCLIC` explicit; match modes `REPEATABLE ELEMENTS` and `DIFFERENT EDGES`; path search `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | Same modes plus grouped quantified paths |
-| Expressions | Current operators, property access, list literals, `CASE`, map literals, list indexing and slicing, list comprehensions, string concatenation, path functions, core and extended scalar functions, aggregates | Same surface |
-| Subqueries | Read-only `EXISTS { ... }` and `COUNT { ... }` | Same surface |
-| Set operations | `UNION`, `INTERSECT`, `EXCEPT`, each with optional `ALL` or `DISTINCT` | Same surface |
-| Query budget | Expansion, row, and optional time counters with per-query override | Same surface |
-| Out of profile | Rejected with an explicit query error | Rejected with an explicit query error |
+| Area | Supported surface |
+| --- | --- |
+| Pattern matching | `MATCH`, `OPTIONAL MATCH`, multiple patterns, repeated variables, inline `WHERE`, path variables |
+| Data modification | `INSERT`, `SET`, `REMOVE`, `DELETE`, `DETACH DELETE`, `NODETACH DELETE`; `CREATE` alias; `MERGE` extension |
+| Iteration and filtering | `FOR`, `UNWIND` alias, `FILTER`, stage `WHERE` alias, `MATCH ... WHERE` |
+| Binding, composition, and grouping | `LET`, `NEXT` with `YIELD`, `FINISH`, `GROUP BY`, `WITH` extension, implicit grouping |
+| Projection, ordering, and pagination | `RETURN`, `RETURN DISTINCT`, `RETURN ALL`, `RETURN *`, `RETURN NO BINDINGS`; `ORDER BY`, `OFFSET`, `SKIP`, `LIMIT` |
+| Quantifiers | Closed `{n}`, `{m,n}`, `{,n}`; open `{m,}`, `*`, `+`; legacy `*n`, `*n..m`, `*0..m`, `*n..` |
+| Path modes | `WALK` default; `TRAIL`, `SIMPLE`, `ACYCLIC` explicit; match modes `REPEATABLE ELEMENTS` and `DIFFERENT EDGES`; path search `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k`; grouped quantified paths |
+| Expressions | Operators, property access, list literals, `CASE`, map literals, list indexing and slicing, list comprehensions, string concatenation, path functions, core and extended scalar functions, aggregates |
+| Subqueries | Read-only `EXISTS { ... }` and `COUNT { ... }` |
+| Set operations | `UNION`, `INTERSECT`, `EXCEPT`, each with optional `ALL` or `DISTINCT` |
+| Query budget | Expansion, row, and optional time counters with per-query override |
+| Out of profile | Rejected with an explicit query error |
 
 The runnable examples in `README.md`, the quickstart, and the guides use the canonical spellings
 where the release supports them; compatibility aliases appear only in the migration guidance.
@@ -511,14 +510,14 @@ and labeled pygrafito-only wherever they appear.
 
 ## Out of profile and the reserved statuses
 
-Out of profile means the construct is rejected and is not a 1.0 promise. `Gated` and `deferred`
-remain in the vocabulary, but no row uses either status: every in-scope construct is supported,
-and every other construct is rejected.
+Out of profile means the construct is rejected and is not part of the 1.0 profile. `Gated` and
+`deferred` remain in the vocabulary, but no row uses either status: every in-scope construct is
+supported, and every other construct is rejected.
 
 ### Out of profile
 
 Out of profile means the construct is rejected with an explicit query error. It is a non-goal for
-1.0, not a deferred backlog item. Promoting one requires a separate proposal.
+the 1.x series, not a deferred backlog item. Promoting one requires a separate proposal.
 
 | Construct | Why it is out | Error contract |
 | --- | --- | --- |
@@ -552,8 +551,7 @@ future proposal; reintroducing one requires its own change.
 
 Rejected forms are invalid combinations of supported features, or unsupported operations that are
 not separate matrix features. Each is rejected with a positioned query error before any statement
-text executes. The test owner column records the current focused test; the 1.0 release gate adds
-any missing rejection test before the gate can pass.
+text executes. The test owner column records the focused test or corpus case that covers the form.
 
 | Form | Why it is rejected | Error contract | Test owner |
 | --- | --- | --- | --- |
@@ -563,7 +561,7 @@ any missing rejection test before the gate can pass.
 | `MERGE` over a relationship without one explicit label and the `-->` direction | The merged pattern must be unambiguous and create only directed relationships. | `QuerySemanticError` naming the missing label or direction. | `TestUnwindAndMergeAnalysis::test_merge_rejects_a_missing_type` and `test_merge_rejects_an_undirected_relationship` |
 | `MERGE` that rebinds a relationship variable or changes a bound node | `MERGE` reuses bound anchors but does not rewrite them. | `QuerySemanticError` naming the bound element. | `TestUnwindAndMergeAnalysis::test_merge_rejects_a_bound_relationship` and `test_merge_rejects_changing_a_bound_node` |
 | Mixing a legacy and a canonical quantifier in one path without an explicit mode | The two forms have different legacy defaults, so the profile refuses to guess. | `QuerySemanticError` naming the mixed quantifiers. | `TestPathModeResolution::test_mixed_quantifiers_are_rejected` |
-| Catalog operations such as `INSERT GRAPH` and `CREATE GRAPH` | The library has one embedded graph and no catalog. | `QuerySemanticError` naming the catalog operation; no statement text runs. | 1.0 gate: add a focused parser test in `complete-gql-profile` |
+| Catalog operations such as `INSERT GRAPH` and `CREATE GRAPH` | The library has one embedded graph and no catalog. | `QuerySemanticError` naming the catalog operation; no statement text runs. | `catalog-insert-graph-is-rejected` corpus case |
 
 ## Construct inventory
 
@@ -853,8 +851,8 @@ Every case uses a TRON-themed fixture and tags `canonical` or `compatibility` as
 
 ## 1.0 release gate
 
-The 1.0 profile is a release gate. The gate blocks 1.0 until every item is checked. Tests in
-`tests/test_gql_profile.py` enforce the profile-side items automatically:
+The 1.0 release met this gate before publication. Tests in `tests/test_gql_profile.py` enforce the
+profile-side items automatically:
 
 1. **No gated or deferred rows.** Every matrix row is `supported` or `out of profile`. Checked by
    `TestGqlProfile::test_release_gate`, which fails on either status.
@@ -868,19 +866,21 @@ The 1.0 profile is a release gate. The gate blocks 1.0 until every item is check
    the grammar summary and tours.
 5. **Quality checks pass.** `hatch check --fix`, `hatch test`, and `hatch run docs:build` pass;
    coverage is at least 80%.
-6. **The 1.0 hardening checklist is complete.** Owned by `harden-for-1.0`.
+6. **The 1.0 hardening work is complete.** Fuzz and property tests, crash and recovery tests,
+   cross-platform CI, the frozen formats, the migration policy, and the public API contract shipped
+   with 1.0.
 7. **Package smoke tests pass.** The built wheel installs in a clean environment, and `py.typed`
    and `LICENSE.txt` are packaged; checked by the package CI job.
-8. **Release notes are ready.** The 1.0 changelog section, migration notes, and out-of-profile list
-   exist.
-9. **The version is set with `hatch version 1.0.0`.** Never edit the version file directly.
+8. **Release material exists.** The 1.0 changelog section exists, and the migration guidance and
+   out-of-profile list on this page are current.
+9. **The version is 1.0.0.**
 
-`complete-gql-profile` implemented the profile-side checks. Later feature changes update their own
-cases and status rows; the gate fails if they drift.
+The profile-side checks were implemented before 1.0. Later feature changes update their own cases
+and status rows; the gate fails if they drift.
 
 ## Profile freeze policy
 
-The 1.0 profile is frozen at release.
+The 1.0 profile is frozen.
 
 - After 1.0, a construct may be added in a minor release only when it does not change the meaning
   of an existing supported construct. The same change updates the profile, matrix, inventory,
@@ -889,12 +889,12 @@ The 1.0 profile is frozen at release.
   migration section.
 - Promoting an out-of-profile construct requires a separate proposal. It is not a deferred
   backlog item.
-- `deferred` remains available for post-1.0 direction, but a deferred construct is not a 1.0
-  promise.
+- `deferred` remains available for post-1.0 direction, but a deferred construct is not part of the
+  1.0 profile.
 
 ## Migration guidance
 
-The profile is a pre-1.0 target. The current dialect remains accepted through the compatibility
+The profile is the 1.x contract. Earlier spellings remain accepted through the compatibility
 surface, so migration can be incremental.
 
 | Transitional form | Target form | Migration note |
