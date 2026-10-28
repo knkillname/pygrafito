@@ -71,14 +71,14 @@
 
 ## 5. Release commit and tag
 
-- [ ] 5.1 Review `git status` and `git diff`; ensure the release commit contains only the version,
+- [x] 5.1 Review `git status` and `git diff`; ensure the release commit contains only the version,
   changelog, documentation, `AGENTS.md`, and this OpenSpec change, with no build output or local
   artifacts. Commit the release changes as `chore: release 0.9.0` and verify the commit with `git
   show --stat HEAD`.
-- [ ] 5.2 Create an annotated `v0.9.0` tag on the release commit. Verify `git tag -n v0.9.0` shows
+- [x] 5.2 Create an annotated `v0.9.0` tag on the release commit. Verify `git tag -n v0.9.0` shows
   the annotation and `git rev-parse v0.9.0^{}` matches `git rev-parse HEAD`. Do not push the tag
   in this task.
-- [ ] 5.3 After explicit maintainer approval, push the release branch and the `v0.9.0` tag. Verify
+- [X] 5.3 After explicit maintainer approval, push the release branch and the `v0.9.0` tag. Verify
   the tag-triggered release workflow starts and its check, test, tag/version, build, twine, and
   publish steps succeed; confirm PyPI serves `pygrafito 0.9.0`.
 

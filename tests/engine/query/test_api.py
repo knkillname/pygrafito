@@ -67,6 +67,22 @@ class TestPublicApi:
         assert write.is_write is True
         assert write.parameters == frozenset({"rows"})
 
+    def test_explain_compound_query(self, graph: Graph) -> None:
+        lines = graph.explain(
+            "MATCH (n:Program) RETURN n.designation AS name "
+            "UNION MATCH (m:Program) RETURN m.designation AS name"
+        )
+        assert "UNION" in lines
+
+    def test_prepared_compound_columns_before_execution(self, graph: Graph) -> None:
+        prepared = graph.prepare(
+            "MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles "
+            "UNION ALL MATCH (m:Program) RETURN m.designation AS name, m.cycles AS cycles"
+        )
+        assert prepared.columns == ("name", "cycles")
+        assert prepared.is_write is False
+        assert len(prepared.execute()) == 6
+
     def test_prepared_query_reuses_the_statement(self, graph: Graph) -> None:
         prepared = graph.prepare(
             "MATCH (n:Program) WHERE n.cycles > $minimum RETURN n.designation AS name ORDER BY name"

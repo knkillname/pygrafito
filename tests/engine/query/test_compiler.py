@@ -385,7 +385,9 @@ class TestPlanPipeline:
 
     def plan(self, text: str) -> Plan:
         analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
-        return PlanBuilder.build(analysis)
+        plan = PlanBuilder.build(analysis)
+        assert isinstance(plan, Plan)
+        return plan
 
     def test_projection_only(self) -> None:
         plan = self.plan("MATCH (n) RETURN n")
@@ -507,7 +509,9 @@ class TestCompositionPlanPipeline:
 
     def plan(self, text: str) -> Plan:
         analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
-        return PlanBuilder.build(analysis)
+        plan = PlanBuilder.build(analysis)
+        assert isinstance(plan, Plan)
+        return plan
 
     def test_interleaved_write_and_read(self) -> None:
         plan = self.plan(

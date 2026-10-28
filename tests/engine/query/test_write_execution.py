@@ -44,6 +44,11 @@ def graph() -> Iterator[Graph]:
 class TestCreateClause:
     """Verify CREATE creation, binding, and cardinality."""
 
+    def test_map_property_is_rejected(self, graph: Graph) -> None:
+        with pytest.raises(QueryExecutionError, match="property value"):
+            graph.query("INSERT (n:Program {metadata: {role: 'system'}})")
+        assert len(list(graph.find_nodes("Program"))) == 5
+
     def test_create_standalone_node_and_return(self, graph: Graph) -> None:
         result = graph.query(
             "CREATE (n:Program {designation: 'Quorra', cycles: 37}) RETURN n.designation AS name"

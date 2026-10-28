@@ -21,9 +21,10 @@ from pygrafito.engine.query.ast import (
     Variable,
 )
 from pygrafito.engine.query.parser import Parser
-from pygrafito.engine.query.plan import PlanBuilder
+from pygrafito.engine.query.plan import Plan, PlanBuilder
 from pygrafito.engine.query.semantic import (
     Analysis,
+    CompoundAnalysis,
     LetStage,
     MatchStage,
     NextBoundary,
@@ -42,7 +43,9 @@ class TestScopesAndKinds:
     """Verify pattern variables, their kinds, and scope rules."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_node_relationship_and_path_kinds(self) -> None:
         analysis = self.analyze("MATCH p = (a)-[r]->(b) RETURN a, r, b, p")
@@ -107,7 +110,9 @@ class TestFunctionChecks:
     """Verify scalar and aggregate function validation."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_valid_scalar_functions(self) -> None:
         analysis = self.analyze(
@@ -191,7 +196,9 @@ class TestGroupingAndColumns:
     """Verify column names, duplicate rejection, and grouping discovery."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_alias_and_expression_text_column_names(self) -> None:
         analysis = self.analyze("MATCH (n) RETURN n.designation AS name, n.cycles")
@@ -260,7 +267,9 @@ class TestParametersAndPagination:
     """Verify parameter collection, missing-parameter checks, and pagination."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_parameters_are_collected_everywhere(self) -> None:
         analysis = self.analyze(
@@ -315,7 +324,9 @@ class TestOrderingResolution:
     """Verify aliases and projected expressions resolve to output columns."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_alias_resolves_to_column(self) -> None:
         analysis = self.analyze("MATCH (n) RETURN n.designation AS name ORDER BY name DESC")
@@ -350,7 +361,9 @@ class TestStagePipeline:
     """Verify read clauses are analysed into ordered stages."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_single_match_is_one_stage(self) -> None:
         analysis = self.analyze("MATCH (n:Program) RETURN n")
@@ -377,7 +390,9 @@ class TestWithStage:
     """Verify WITH projection, scope, and aggregation boundaries."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_scope_is_reset(self) -> None:
         analysis = self.analyze("MATCH (a:Program) WITH a.designation AS name RETURN name")
@@ -412,7 +427,9 @@ class TestVariableLength:
     """Verify quantified relationship bounds and the list variable kind."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_relationship_variable_is_a_list(self) -> None:
         analysis = self.analyze("MATCH (a)-[r:ALLIES_WITH*1..3]->(b) RETURN r")
@@ -453,18 +470,109 @@ class TestVariableLength:
             self.analyze("MATCH (a), (b) CREATE (a)-[*1..2]->(b)")
 
 
+class TestQuerySurfaceAnalysis:
+    """Verify semantic checks for the new expression and query surface."""
+
+    def analyze(self, text: str) -> Analysis:
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
+
+    def analyze_compound(self, text: str) -> CompoundAnalysis:
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, CompoundAnalysis)
+        return analysis
+
+    def test_with_star_preserves_kinds(self) -> None:
+        analysis = self.analyze(
+            "MATCH (a:Program)-[r:TRUSTS]->(b:Program) "
+            "WITH * RETURN a.designation AS a, b.designation AS b"
+        )
+        assert analysis.variable_kinds["a"] is VariableKind.NODE
+        assert analysis.variable_kinds["b"] is VariableKind.NODE
+        assert analysis.variable_kinds["r"] is VariableKind.RELATIONSHIP
+
+    def test_with_star_is_the_only_projection(self) -> None:
+        with pytest.raises(QuerySyntaxError):
+            self.analyze("MATCH (n:Program) WITH *, n.cycles AS cycles RETURN n")
+
+    def test_list_comprehension_variable_cannot_shadow(self) -> None:
+        with pytest.raises(QuerySemanticError, match="already bound"):
+            self.analyze("MATCH (n:Program) RETURN [n IN [1, 2] | n] AS values")
+
+    def test_non_list_index_target_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (n:Program) RETURN 36[0] AS value")
+
+    def test_non_list_comprehension_source_is_rejected(self) -> None:
+        with pytest.raises(QuerySemanticError):
+            self.analyze("MATCH (n:Program) RETURN [x IN 36 | x] AS values")
+
+    def test_subquery_analysis_is_recorded(self) -> None:
+        analysis = self.analyze(
+            "MATCH (n:Program) WHERE EXISTS { MATCH (n)-[:TRUSTS]->(m:Program) } "
+            "RETURN n.designation"
+        )
+        assert analysis.subquery_analyses
+
+    def test_subquery_requires_a_row_source(self) -> None:
+        with pytest.raises(QuerySemanticError, match="row source"):
+            self.analyze("MATCH (n:Program) RETURN EXISTS { WITH n } AS found")
+
+    def test_subquery_scope_does_not_leak(self) -> None:
+        with pytest.raises(QuerySemanticError, match="not bound"):
+            self.analyze(
+                "MATCH (n:Program) RETURN EXISTS { MATCH (m:Program) } AS found, m.designation"
+            )
+
+    def test_subquery_cannot_shadow_with_let(self) -> None:
+        with pytest.raises(QuerySemanticError, match="already bound"):
+            self.analyze("MATCH (n:Program) RETURN EXISTS { LET n = 1 } AS found")
+
+    def test_compound_columns_must_match(self) -> None:
+        with pytest.raises(QuerySemanticError, match="same names"):
+            self.analyze_compound(
+                "MATCH (n:Program) RETURN n.designation AS name "
+                "UNION MATCH (m:Program) RETURN m.designation AS label"
+            )
+
+    def test_compound_columns_come_from_the_first_operand(self) -> None:
+        analysis = self.analyze_compound(
+            "MATCH (n:Program) RETURN n.designation AS name "
+            "UNION ALL MATCH (m:User) RETURN m.designation AS name"
+        )
+        assert analysis.columns == ("name",)
+
+    def test_compound_rejects_writes(self) -> None:
+        with pytest.raises(QuerySemanticError, match="read-only"):
+            self.analyze_compound("CREATE (n:Program) UNION MATCH (m:Program) RETURN m")
+
+    def test_compound_rejects_finish(self) -> None:
+        with pytest.raises(QuerySemanticError, match="FINISH"):
+            self.analyze_compound("MATCH (n:Program) FINISH UNION MATCH (m:Program) RETURN m")
+
+    def test_compound_rejects_return_no_bindings(self) -> None:
+        with pytest.raises(QuerySemanticError, match="NO BINDINGS"):
+            self.analyze_compound(
+                "MATCH (n:Program) RETURN NO BINDINGS UNION MATCH (m:Program) RETURN m"
+            )
+
+    def test_compound_order_must_name_a_column(self) -> None:
+        with pytest.raises(QuerySemanticError, match="output column"):
+            self.analyze_compound(
+                "MATCH (n:Program) RETURN n.designation AS name "
+                "UNION MATCH (m:Program) RETURN m.designation AS name "
+                "ORDER BY n.designation"
+            )
+
+
 class TestUnsupportedConstructs:
     """Verify every recognized unsupported construct raises a query error."""
 
     @pytest.mark.parametrize(
         "text",
         [
-            "MATCH (a) WITH * RETURN a",
-            "MATCH (a) RETURN CASE WHEN true THEN 1 END",
-            "MATCH (a) RETURN {x: 1}",
-            "MATCH (a) RETURN a.list[0]",
             "MATCH (a) CALL { MATCH (b) RETURN b } RETURN a",
-            "MATCH (a) WHERE EXISTS { MATCH (b) RETURN b } RETURN a",
         ],
     )
     def test_each_boundary_is_rejected(self, text: str) -> None:
@@ -476,7 +584,9 @@ class TestExpressionChecks:
     """Verify static arithmetic and string-predicate operand checks."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     @pytest.mark.parametrize(
         "text",
@@ -527,7 +637,9 @@ class TestWriteAnalysis:
     """Verify static analysis of statements that mutate the graph."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_read_statement_is_not_a_write(self) -> None:
         analysis = self.analyze("MATCH (n:Program) RETURN n.designation AS name")
@@ -639,7 +751,9 @@ class TestUnwindAndMergeAnalysis:
     """Verify UNWIND stages and MERGE write analysis."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_unwind_stage_and_scalar_kind(self) -> None:
         analysis = self.analyze("UNWIND $rows AS row RETURN row.designation")
@@ -749,7 +863,9 @@ class TestPathModeResolution:
     """Verify the effective path mode and the quantifier mixing rule."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def mode(self, text: str) -> PathMode | None:
         analysis = self.analyze(text)
@@ -811,6 +927,7 @@ class TestPlanCarriesPathModes:
             Parser.parse_statement("MATCH TRAIL (a)-[:TRUSTS*1..2]->(b) RETURN b")
         )
         plan = PlanBuilder.build(analysis)
+        assert isinstance(plan, Plan)
         stage = plan.stages[0].stage
         if not isinstance(stage, MatchStage):
             raise AssertionError("expected a match stage")
@@ -821,7 +938,9 @@ class TestOperationPipeline:
     """Verify the analysed operations preserve source order and composition."""
 
     def analyze(self, text: str) -> Analysis:
-        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
+        assert isinstance(analysis, Analysis)
+        return analysis
 
     def test_write_stage_sits_between_read_stages(self) -> None:
         analysis = self.analyze(

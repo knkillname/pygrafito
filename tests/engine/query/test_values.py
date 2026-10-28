@@ -325,6 +325,82 @@ class TestScalarFunctions:
         with pytest.raises(QueryExecutionError):
             functions.call("concat", ["a", 1])
 
+    def test_range_and_list_functions(self, functions: ScalarFunctions) -> None:
+        assert functions.call("range", [36, 38]) == [36, 37, 38]
+        assert functions.call("range", [36, 40, 2]) == [36, 38, 40]
+        assert functions.call("range", [40, 36, -2]) == [40, 38, 36]
+        assert functions.call("range", [36, 40, -1]) == []
+        assert functions.call("range", [36, None]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("range", [36, 38, 0])
+        with pytest.raises(QueryExecutionError):
+            functions.call("range", [36.5, 38])
+        assert functions.call("head", [[36, 37]]) == 36
+        assert functions.call("last", [[36, 37]]) == 37
+        assert functions.call("tail", [[36, 37]]) == [37]
+        assert functions.call("head", [[]]) is None
+        assert functions.call("last", [[]]) is None
+        assert functions.call("tail", [[]]) == []
+        assert functions.call("head", [None]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("tail", [36])
+        assert functions.call("reverse", [[36, 37]]) == [37, 36]
+        assert functions.call("reverse", ["Tron"]) == "norT"
+        assert functions.call("reverse", [None]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("reverse", [36])
+
+    def test_string_functions(self, functions: ScalarFunctions) -> None:
+        assert functions.call("split", ["Tron|Quorra", "|"]) == ["Tron", "Quorra"]
+        assert functions.call("split", [None, "|"]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("split", ["Tron", ""])
+        assert functions.call("substring", ["Quorra", 1]) == "uorra"
+        assert functions.call("substring", ["Quorra", 1, 3]) == "uor"
+        assert functions.call("substring", [None, 1]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("substring", ["Quorra", -1])
+        with pytest.raises(QueryExecutionError):
+            functions.call("substring", ["Quorra", 0, -1])
+        assert functions.call("replace", ["Tron|Tron", "Tron", "Rinzler"]) == "Rinzler|Rinzler"
+        assert functions.call("replace", [None, "Tron", "Clu"]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("replace", ["Tron", "", "Clu"])
+        with pytest.raises(QueryExecutionError):
+            functions.call("replace", [36, "3", "4"])
+
+    def test_boolean_and_numeric_functions(self, functions: ScalarFunctions) -> None:
+        assert functions.call("toBoolean", [True]) is True
+        assert functions.call("toBoolean", ["TRUE"]) is True
+        assert functions.call("toBoolean", ["false"]) is False
+        assert functions.call("toBoolean", [0]) is False
+        assert functions.call("toBoolean", [1]) is True
+        assert functions.call("toBoolean", ["maybe"]) is None
+        assert functions.call("toBoolean", [None]) is None
+        assert functions.call("round", [36.5]) == 37
+        assert functions.call("round", [-36.5]) == -37
+        assert functions.call("round", [36.346, 2]) == 36.35
+        assert functions.call("round", [None]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("round", [36.5, -1])
+        assert functions.call("ceil", [36.1]) == 37
+        assert functions.call("floor", [36.9]) == 36
+        assert functions.call("ceil", [None]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("floor", ["36"])
+
+    def test_path_functions(self, functions: ScalarFunctions) -> None:
+        path = Path(
+            nodes=(Node(id=1), Node(id=2)),
+            relationships=(Relationship(1, 1, 2, labels=("TRUSTS",)),),
+        )
+        assert functions.call("nodes", [path]) == list(path.nodes)
+        assert functions.call("relationships", [path]) == list(path.relationships)
+        assert functions.call("length", [path]) == 1
+        assert functions.call("nodes", [None]) is None
+        with pytest.raises(QueryExecutionError):
+            functions.call("length", [1])
+
     def test_start_and_end_node(self, functions: ScalarFunctions) -> None:
         relationship = Relationship(1, 1, 2, labels=("TRUSTS",))
         start = functions.call("startNode", [relationship])

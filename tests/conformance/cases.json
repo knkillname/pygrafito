@@ -2137,6 +2137,335 @@
       "tags": [
         "extension"
       ]
+    },
+    {
+      "name": "case-searched-classifies-programs",
+      "feature": "case",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name, CASE WHEN n.cycles > 40 THEN 'veteran' ELSE 'active' END AS state ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program",
+            "state": "veteran"
+          },
+          {
+            "name": "Quorra",
+            "state": "active"
+          },
+          {
+            "name": "Tron",
+            "state": "active"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "case-null-never-matches",
+      "feature": "case",
+      "fixture": "tron-labels",
+      "query": "UNWIND [1] AS row RETURN CASE null WHEN null THEN 'same' ELSE 'other' END AS result",
+      "expect": {
+        "rows": [
+          {
+            "result": "other"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "map-literal-projects-fields",
+      "feature": "map-literals",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) RETURN {designation: n.designation, cycles: n.cycles} AS program",
+      "expect": {
+        "rows": [
+          {
+            "program": {
+              "designation": "Quorra",
+              "cycles": 37
+            }
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "list-index-and-slice",
+      "feature": "list-indexing-and-slicing",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) RETURN [n.cycles, 38, 39][0] AS first, [n.cycles, 38, 39][1:3] AS tail",
+      "expect": {
+        "rows": [
+          {
+            "first": 37,
+            "tail": [
+              38,
+              39
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "list-comprehension-filters-and-doubles",
+      "feature": "list-comprehensions",
+      "fixture": "tron-labels",
+      "query": "UNWIND [[1, 2, 3]] AS values RETURN [x IN values WHERE x > 1 | x * 2] AS doubled",
+      "expect": {
+        "rows": [
+          {
+            "doubled": [
+              4,
+              6
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "string-concatenation-and-plus-alias",
+      "feature": "string-concatenation",
+      "fixture": "tron-labels",
+      "query": "UNWIND [1] AS row RETURN 'Kevin' || ' ' || 'Flynn' AS name, 'Quorra' + ' ISO' AS alias",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn",
+            "alias": "Quorra ISO"
+          }
+        ]
+      },
+      "tags": [
+        "canonical",
+        "compatibility"
+      ]
+    },
+    {
+      "name": "path-functions-expose-a-path",
+      "feature": "path-functions",
+      "fixture": "tron-cycle",
+      "query": "MATCH p = (a:Program {designation: 'Quorra'})-[:TRUSTS]->(b:Program {designation: 'Tron'}) RETURN length(p) AS hops, [n IN nodes(p) | n.designation] AS names, [r IN relationships(p) | type(r)] AS types",
+      "expect": {
+        "rows": [
+          {
+            "hops": 1,
+            "names": [
+              "Quorra",
+              "Tron"
+            ],
+            "types": [
+              "TRUSTS"
+            ]
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "extended-scalar-functions",
+      "feature": "extended-scalar-functions",
+      "fixture": "tron-labels",
+      "query": "UNWIND [1] AS row RETURN range(1, 3) AS range, head([1, 2]) AS head, last([1, 2]) AS last, tail([1, 2]) AS tail, reverse([1, 2]) AS reversed, split('Tron|Quorra', '|') AS split, substring('Quorra', 1, 3) AS substring, replace('Tron', 'T', 'R') AS replaced, toBoolean('TRUE') AS toboolean, round(36.5) AS rounded, ceil(36.1) AS ceiling, floor(36.9) AS flooring",
+      "expect": {
+        "rows": [
+          {
+            "range": [
+              1,
+              2,
+              3
+            ],
+            "head": 1,
+            "last": 2,
+            "tail": [
+              2
+            ],
+            "reversed": [
+              2,
+              1
+            ],
+            "split": [
+              "Tron",
+              "Quorra"
+            ],
+            "substring": "uor",
+            "replaced": "Rron",
+            "toboolean": true,
+            "rounded": 37,
+            "ceiling": 37,
+            "flooring": 36
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "with-star-preserves-scope",
+      "feature": "with",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a:Program)-[r:TRUSTS]->(b:Program) WITH * RETURN a.designation AS a, b.designation AS b, type(r) AS rel ORDER BY a",
+      "expect": {
+        "rows": [
+          {
+            "a": "Quorra",
+            "b": "Tron",
+            "rel": "TRUSTS"
+          }
+        ]
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "exists-correlated-programs",
+      "feature": "exists",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n:Program) WHERE EXISTS { MATCH (n)-[:TRUSTS]->(m:Program) } RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "count-correlated-trusts",
+      "feature": "count",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n:Program) RETURN n.designation AS name, COUNT { MATCH (n)-[:TRUSTS]->(m) } AS trusts ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra",
+            "trusts": 1
+          },
+          {
+            "name": "Tron",
+            "trusts": 1
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "union-deduplicates-program-and-user",
+      "feature": "union",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n:Program) RETURN n.designation AS name UNION MATCH (n:User) RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "union-all-preserves-duplicates",
+      "feature": "union-all",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n:Program {designation: 'Tron'}) RETURN n.designation AS name UNION ALL MATCH (m:Program {designation: 'Tron'}) RETURN m.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Tron"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "intersect-keeps-program-names",
+      "feature": "intersect",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n) RETURN n.designation AS name INTERSECT MATCH (m:Program) RETURN m.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "except-removes-program-names",
+      "feature": "except",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n) RETURN n.designation AS name EXCEPT MATCH (m:Program) RETURN m.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "union-order-and-limit",
+      "feature": "union",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n) RETURN n.designation AS name UNION MATCH (m:Program) RETURN m.designation AS name ORDER BY name DESC LIMIT 2",
+      "expect": {
+        "rows": [
+          {
+            "name": "Tron"
+          },
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
     }
   ]
 }

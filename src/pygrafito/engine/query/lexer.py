@@ -25,6 +25,7 @@ class Lexer:
     """
 
     OPERATORS: typing.ClassVar[tuple[str, ...]] = (
+        "||",
         "<->",
         "<--",
         "-->",

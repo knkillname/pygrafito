@@ -4,6 +4,15 @@
 UNWIND [36, 37, 39, 40] AS cycles
 RETURN cycles ORDER BY cycles;
 
+
+LET template = {designation: 'Example A', cycles: 10}
+RETURN template.designation AS name, template.cycles AS cycles;
+
+MATCH (p:Program)
+RETURN p.designation AS name,
+       CASE WHEN p.cycles >= 40 THEN 'veteran' ELSE 'active' END AS state
+ORDER BY name LIMIT 3;
+
 FOR name IN ['Tron', 'Quorra', 'Ares'] WITH ORDINALITY position
 MATCH (p:Program {designation: name})
 RETURN name, position, p.cycles AS cycles ORDER BY position;

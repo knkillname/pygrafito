@@ -9,6 +9,7 @@ import typing
 from pygrafito.engine.query.ast import Binary, Create, Delete, Merge, Operators, Remove, Set
 from pygrafito.engine.query.semantic import (
     Analysis,
+    CompoundAnalysis,
     FilterStage,
     LetStage,
     MatchStage,
@@ -170,6 +171,40 @@ class Plan:
         return operator in self.operators
 
 
+@dataclasses.dataclass(frozen=True, slots=True)
+class CompoundPlan:
+    """Planned set-operation pipeline for one compound analysis.
+
+    Parameters
+    ----------
+    analysis : CompoundAnalysis
+        Static analysis that drives the compound.
+    terms : tuple[Plan, ...]
+        Planned linear operands in source order.
+    """
+
+    analysis: CompoundAnalysis
+    terms: tuple[Plan, ...]
+
+    @property
+    def operators(self) -> tuple[str, ...]:
+        """Return the set operators and projection operators.
+
+        Returns
+        -------
+        tuple[str, ...]
+            Set operators between operands followed by the compound
+            projection pipeline.
+        """
+        operators: list[str] = [self.analysis.operators[0].value]
+        for operator in self.analysis.operators[1:]:
+            operators.append(operator.value)
+        return tuple(operators)
+
+
+type PlannedStatement = Plan | CompoundPlan
+
+
 class PlanBuilder:
     """Build the operator pipeline from a static analysis."""
 
@@ -182,19 +217,24 @@ class PlanBuilder:
     }
 
     @classmethod
-    def build(cls, analysis: Analysis) -> Plan:
+    def build(cls, analysis: Analysis | CompoundAnalysis) -> PlannedStatement:
         """Build the physical plan for an analysed statement.
 
         Parameters
         ----------
-        analysis : Analysis
+        analysis : Analysis | CompoundAnalysis
             Static analysis of the statement.
 
         Returns
         -------
-        Plan
+        PlannedStatement
             Ordered operations and final projection operators.
         """
+        if isinstance(analysis, CompoundAnalysis):
+            return CompoundPlan(
+                analysis=analysis,
+                terms=tuple(typing.cast(Plan, cls.build(term)) for term in analysis.terms),
+            )
         entries = cls._build_entries(analysis.operations)
         return_operators = (
             (PlanOperator.FINISH,) if analysis.finish else cls._return_operators(analysis)
@@ -363,9 +403,11 @@ class PlanBuilder:
 
 
 __all__ = [
+    "CompoundPlan",
     "Plan",
     "PlanBuilder",
     "PlanEntry",
     "PlanOperator",
     "PlanStage",
+    "PlannedStatement",
 ]

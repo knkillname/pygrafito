@@ -7,6 +7,8 @@ import pytest
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Case,
+    CompoundStatement,
     Create,
     Delete,
     EdgeDirection,
@@ -15,8 +17,12 @@ from pygrafito.engine.query.ast import (
     IsNull,
     LabelOr,
     Let,
+    ListAccess,
+    ListComprehension,
     ListLiteral,
+    ListSlice,
     Literal,
+    MapLiteral,
     Match,
     Merge,
     Next,
@@ -28,7 +34,10 @@ from pygrafito.engine.query.ast import (
     Remove,
     Return,
     Set,
+    SetOperation,
     Star,
+    Subquery,
+    SubqueryKind,
     Unary,
     Unwind,
     Variable,
@@ -533,12 +542,7 @@ class TestParserErrors:
     @pytest.mark.parametrize(
         ("text", "fragment"),
         [
-            ("MATCH (a) WITH * RETURN a", "WITH *"),
-            ("MATCH (a) RETURN CASE WHEN true THEN 1 END", "CASE"),
-            ("MATCH (a) RETURN {x: 1}", "map literals"),
-            ("MATCH (a) RETURN a.list[0]", "index access"),
             ("MATCH (a) CALL { MATCH (b) RETURN b } RETURN a", "subqueries"),
-            ("MATCH (a) WHERE EXISTS { MATCH (b) RETURN b } RETURN a", "subqueries"),
         ],
     )
     def test_unsupported_constructs_are_semantic_errors(
@@ -830,3 +834,108 @@ class TestCompositionSyntax:
     def test_finish_rejects_a_following_next(self) -> None:
         with pytest.raises(QuerySyntaxError, match="FINISH"):
             Parser.parse_statement("MATCH (n:Program) FINISH NEXT RETURN n")
+
+
+class TestExpressionSurfaceParsing:
+    """Verify parsing of the expression surface added for 1.0."""
+
+    @staticmethod
+    def expression(text: str) -> object:
+        """Return the first projected expression.
+
+        Parameters
+        ----------
+        text : str
+            Expression source.
+
+        Returns
+        -------
+        object
+            Parsed expression node.
+        """
+        statement = Parser.parse_statement(f"MATCH (n:Program) RETURN {text} AS value")
+        clause = statement.clauses[-1]
+        assert isinstance(clause, Return)
+        return clause.items[0].expression
+
+    def test_simple_case(self) -> None:
+        expression = self.expression("CASE n.cycles WHEN 36 THEN 'old' ELSE 'new' END")
+        assert isinstance(expression, Case)
+        assert isinstance(expression.operand, Property)
+        assert expression.operand.key == "cycles"
+        assert len(expression.branches) == 1
+        assert expression.default is not None
+
+    def test_searched_case(self) -> None:
+        expression = self.expression("CASE WHEN n.cycles > 36 THEN 'old' END")
+        assert isinstance(expression, Case)
+        assert expression.operand is None
+        assert expression.default is None
+
+    def test_map_literal_rejects_duplicate_keys(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="duplicate map key"):
+            self.expression("{designation: 'Tron', designation: 'Clu'}")
+
+    def test_map_literal(self) -> None:
+        expression = self.expression("{designation: n.designation, cycles: 36}")
+        assert isinstance(expression, MapLiteral)
+        assert [entry.key for entry in expression.entries] == ["designation", "cycles"]
+
+    def test_list_access_and_slice(self) -> None:
+        access = self.expression("n.tags[0]")
+        slice_ = self.expression("n.tags[1:3]")
+        assert isinstance(access, ListAccess)
+        assert isinstance(slice_, ListSlice)
+        assert slice_.start == Literal(value=1)
+        assert slice_.end == Literal(value=3)
+
+    def test_list_comprehension(self) -> None:
+        expression = self.expression("[x IN n.tags WHERE x STARTS WITH 'ISO' | x]")
+        assert isinstance(expression, ListComprehension)
+        assert expression.variable == "x"
+        assert expression.where is not None
+        assert expression.projection is not None
+
+    def test_string_concatenation(self) -> None:
+        expression = self.expression("'Tron' || ' ' || 'Clu'")
+        assert isinstance(expression, Binary)
+        assert expression.operator == Operators.CONCAT
+
+    def test_star_projection(self) -> None:
+        statement = Parser.parse_statement("MATCH (n:Program) WITH * RETURN n")
+        clause = statement.clauses[0]
+        assert isinstance(clause, Match)
+        with_clause = statement.clauses[1]
+        assert isinstance(with_clause, With)
+        assert with_clause.star
+
+    def test_with_star_cannot_mix_items(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="WITH \\* cannot be combined"):
+            Parser.parse_statement("MATCH (n:Program) WITH *, n.cycles AS cycles RETURN n")
+
+    def test_exists_and_count_subqueries(self) -> None:
+        exists = self.expression("EXISTS { MATCH (n)-[:TRUSTS]->(m) }")
+        count = self.expression("COUNT { MATCH (n)-[:TRUSTS]->(m) }")
+        assert isinstance(exists, Subquery)
+        assert exists.kind is SubqueryKind.EXISTS
+        assert isinstance(count, Subquery)
+        assert count.kind is SubqueryKind.COUNT
+
+    def test_subquery_rejects_result_clause(self) -> None:
+        with pytest.raises(QuerySemanticError, match="result clause"):
+            self.expression("EXISTS { MATCH (n) RETURN n }")
+
+    def test_compound_query(self) -> None:
+        statement = Parser.parse_statement(
+            "MATCH (n:Program) RETURN n.designation AS name "
+            "UNION ALL MATCH (m:User) RETURN m.designation AS name"
+        )
+        assert isinstance(statement, CompoundStatement)
+        assert len(statement.terms) == 2
+        assert statement.operators == (SetOperation.UNION_ALL,)
+
+    def test_operand_ordering_is_rejected(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="set operand cannot carry"):
+            Parser.parse_statement(
+                "MATCH (n:Program) RETURN n ORDER BY n UNION MATCH (m:Program) RETURN m"
+            )

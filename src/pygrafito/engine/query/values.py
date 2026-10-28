@@ -4,20 +4,28 @@
 """Query values, equality, ordering, functions, and expression evaluation."""
 
 import math
+import types
 import typing
 from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Case,
     Expression,
     FunctionCall,
     IsNull,
+    ListAccess,
+    ListComprehension,
     ListLiteral,
+    ListSlice,
     Literal,
+    MapLiteral,
     Operators,
     Parameter,
     Property,
+    Subquery,
+    SubqueryKind,
     Unary,
     Variable,
 )
@@ -450,6 +458,36 @@ class FunctionCatalog:
         "concat": FunctionSpec("concat", 1, None, (ArgumentKind.STRING,)),
         "startnode": FunctionSpec("startnode", 1, 1, (ArgumentKind.RELATIONSHIP,)),
         "endnode": FunctionSpec("endnode", 1, 1, (ArgumentKind.RELATIONSHIP,)),
+        "range": FunctionSpec("range", 2, 3, (ArgumentKind.NUMBER,) * 3),
+        "head": FunctionSpec("head", 1, 1, (ArgumentKind.LIST,)),
+        "last": FunctionSpec("last", 1, 1, (ArgumentKind.LIST,)),
+        "tail": FunctionSpec("tail", 1, 1, (ArgumentKind.LIST,)),
+        "reverse": FunctionSpec("reverse", 1, 1, (ArgumentKind.ANY,)),
+        "split": FunctionSpec("split", 2, 2, (ArgumentKind.STRING, ArgumentKind.STRING)),
+        "substring": FunctionSpec(
+            "substring",
+            2,
+            3,
+            (ArgumentKind.STRING, ArgumentKind.NUMBER, ArgumentKind.NUMBER),
+        ),
+        "replace": FunctionSpec(
+            "replace",
+            3,
+            3,
+            (ArgumentKind.STRING, ArgumentKind.STRING, ArgumentKind.STRING),
+        ),
+        "toboolean": FunctionSpec("toboolean", 1, 1, (ArgumentKind.ANY,)),
+        "round": FunctionSpec(
+            "round",
+            1,
+            2,
+            (ArgumentKind.NUMBER, ArgumentKind.NUMBER),
+        ),
+        "ceil": FunctionSpec("ceil", 1, 1, (ArgumentKind.NUMBER,)),
+        "floor": FunctionSpec("floor", 1, 1, (ArgumentKind.NUMBER,)),
+        "nodes": FunctionSpec("nodes", 1, 1, (ArgumentKind.PATH,)),
+        "relationships": FunctionSpec("relationships", 1, 1, (ArgumentKind.PATH,)),
+        "length": FunctionSpec("length", 1, 1, (ArgumentKind.PATH,)),
         "count": FunctionSpec("count", 1, 1, (ArgumentKind.ANY,)),
         "collect": FunctionSpec("collect", 1, 1, (ArgumentKind.ANY,)),
         "sum": FunctionSpec("sum", 1, 1, (ArgumentKind.NUMBER,)),
@@ -505,6 +543,38 @@ class FunctionCatalog:
             ``True`` for an aggregate function.
         """
         return name.lower() in cls.AGGREGATES
+
+
+class SubqueryRunner(typing.Protocol):
+    """Execute a read-only subquery for one outer binding."""
+
+    def count(
+        self,
+        subquery: Subquery,
+        binding: Mapping[str, QueryValue],
+        parameters: Mapping[str, QueryValue],
+        *,
+        limit: int | None = None,
+    ) -> int:
+        """Count rows produced by one inner query.
+
+        Parameters
+        ----------
+        subquery : Subquery
+            Subquery expression to run.
+        binding : Mapping[str, QueryValue]
+            Outer variable binding.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        limit : int | None, optional
+            Stop after this many rows, by default no limit.
+
+        Returns
+        -------
+        int
+            Number of rows produced, capped by ``limit`` when supplied.
+        """
+        ...
 
 
 class SnapshotSource:
@@ -833,6 +903,8 @@ class ScalarFunctions:
         Source used by ``startNode`` and ``endNode``.
     """
 
+    TWO_ARGUMENTS: typing.ClassVar[int] = 2
+
     def __init__(self, source: SnapshotSource) -> None:
         self._source = source
         self._handlers: Mapping[str, typing.Callable[[Sequence[QueryValue]], QueryValue]] = {
@@ -853,6 +925,21 @@ class ScalarFunctions:
             "concat": self._concat,
             "startnode": self._start_node,
             "endnode": self._end_node,
+            "range": self._range,
+            "head": self._head,
+            "last": self._last,
+            "tail": self._tail,
+            "reverse": self._reverse,
+            "split": self._split,
+            "substring": self._substring,
+            "replace": self._replace,
+            "toboolean": self._to_boolean,
+            "round": self._round,
+            "ceil": self._ceil,
+            "floor": self._floor,
+            "nodes": self._nodes,
+            "relationships": self._relationships,
+            "length": self._length,
         }
 
     def call(self, name: str, arguments: Sequence[QueryValue]) -> QueryValue:
@@ -1258,6 +1345,411 @@ class ScalarFunctions:
             return self._source.node(value.end_id)
         return self._type_error("endNode", "a relationship", value)
 
+    def _range(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Build an inclusive integer range.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            Start, end, and optional step.
+
+        Returns
+        -------
+        QueryValue
+            Inclusive range, or null when any argument is null.
+        """
+        if any(value is None for value in arguments):
+            return None
+        start = self._require_integer("range", arguments[0])
+        end = self._require_integer("range", arguments[1])
+        step = (
+            1
+            if len(arguments) == self.TWO_ARGUMENTS
+            else self._require_integer("range", arguments[2])
+        )
+        if step == 0:
+            message = "range() step must not be zero"
+            raise QueryExecutionError(message)
+        if (step > 0 and start > end) or (step < 0 and start < end):
+            return typing.cast(QueryValue, [])
+        stop = end + (1 if step > 0 else -1)
+        return typing.cast(QueryValue, list(range(start, stop, step)))
+
+    def _head(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return the first element of a list.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One list argument.
+
+        Returns
+        -------
+        QueryValue
+            First element, null for an empty list, or null for null.
+        """
+        values = self._require_list("head", arguments[0])
+        if values is None:
+            return None
+        return values[0] if values else None
+
+    def _last(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return the last element of a list.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One list argument.
+
+        Returns
+        -------
+        QueryValue
+            Last element, null for an empty list, or null for null.
+        """
+        values = self._require_list("last", arguments[0])
+        if values is None:
+            return None
+        return values[-1] if values else None
+
+    def _tail(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return all but the first list element.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One list argument.
+
+        Returns
+        -------
+        QueryValue
+            Tail list, or null for null.
+        """
+        values = self._require_list("tail", arguments[0])
+        if values is None:
+            return None
+        return typing.cast(QueryValue, list(values[1:]))
+
+    def _reverse(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Reverse a list or string.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One list or string argument.
+
+        Returns
+        -------
+        QueryValue
+            Reversed value, or null for null.
+        """
+        value = arguments[0]
+        if value is None:
+            return None
+        if isinstance(value, str):
+            return value[::-1]
+        if isinstance(value, list):
+            return typing.cast(QueryValue, list(reversed(value)))
+        return self._type_error("reverse", "a list or string", value)
+
+    def _split(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Split a string on a non-empty delimiter.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            String and delimiter.
+
+        Returns
+        -------
+        QueryValue
+            List of string segments, or null when either argument is null.
+        """
+        value = arguments[0]
+        delimiter = arguments[1]
+        if value is None or delimiter is None:
+            return None
+        if not isinstance(value, str):
+            return self._type_error("split", "strings", value)
+        if not isinstance(delimiter, str):
+            return self._type_error("split", "strings", delimiter)
+        if not delimiter:
+            message = "split() delimiter must not be empty"
+            raise QueryExecutionError(message)
+        return typing.cast(QueryValue, value.split(delimiter))
+
+    def _substring(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return a substring with a zero-based start.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            String, start, and optional length.
+
+        Returns
+        -------
+        QueryValue
+            Substring, or null when an argument is null.
+        """
+        value = arguments[0]
+        start = arguments[1]
+        has_length = len(arguments) > self.TWO_ARGUMENTS
+        length = arguments[2] if has_length else None
+        if value is None or start is None or (has_length and length is None):
+            return None
+        if not isinstance(value, str):
+            return self._type_error("substring", "strings", value)
+        start_index = self._require_integer("substring", start)
+        if start_index < 0:
+            message = "substring() start must be non-negative"
+            raise QueryExecutionError(message)
+        if len(arguments) == self.TWO_ARGUMENTS:
+            return value[start_index:]
+        assert length is not None
+        length_value = self._require_integer("substring", length)
+        if length_value < 0:
+            message = "substring() length must be non-negative"
+            raise QueryExecutionError(message)
+        return value[start_index : start_index + length_value]
+
+    def _replace(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Replace every non-empty search occurrence in a string.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            String, search text, and replacement.
+
+        Returns
+        -------
+        QueryValue
+            Replaced string, or null when any argument is null.
+        """
+        value, search, replacement = arguments
+        if value is None or search is None or replacement is None:
+            return None
+        if (
+            not isinstance(value, str)
+            or not isinstance(search, str)
+            or not isinstance(replacement, str)
+        ):
+            return self._type_error("replace", "strings", value)
+        if not search:
+            message = "replace() search text must not be empty"
+            raise QueryExecutionError(message)
+        return value.replace(search, replacement)
+
+    def _to_boolean(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Convert compatible scalars to booleans.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One scalar argument.
+
+        Returns
+        -------
+        QueryValue
+            Boolean value, or null when conversion is impossible.
+        """
+        value = arguments[0]
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized == "true":
+                return True
+            if normalized == "false":
+                return False
+            return None
+        if Values.is_number(value):
+            if value == 0:
+                return False
+            if value == 1:
+                return True
+        return None
+
+    def _round(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Round a number to an optional non-negative precision.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            Number and optional precision.
+
+        Returns
+        -------
+        QueryValue
+            Rounded value, or null when an argument is null.
+        """
+        value = arguments[0]
+        precision_value = arguments[1] if len(arguments) > 1 else 0
+        if value is None or precision_value is None:
+            return None
+        if not Values.is_number(value):
+            return self._type_error("round", "a number", value)
+        precision = self._require_integer("round", precision_value)
+        if precision < 0:
+            message = "round() precision must be non-negative"
+            raise QueryExecutionError(message)
+        factor = 10**precision
+        scaled = float(typing.cast(int | float, value)) * factor
+        rounded = math.floor(scaled + 0.5) if scaled >= 0 else math.ceil(scaled - 0.5)
+        if precision == 0:
+            return int(rounded)
+        return rounded / factor
+
+    def _ceil(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return the smallest integer not below a number.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One numeric argument.
+
+        Returns
+        -------
+        QueryValue
+            Ceiling, or null for null.
+        """
+        value = arguments[0]
+        if value is None:
+            return None
+        if not Values.is_number(value):
+            return self._type_error("ceil", "a number", value)
+        return math.ceil(typing.cast(int | float, value))
+
+    def _floor(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return the largest integer not above a number.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One numeric argument.
+
+        Returns
+        -------
+        QueryValue
+            Floor, or null for null.
+        """
+        value = arguments[0]
+        if value is None:
+            return None
+        if not Values.is_number(value):
+            return self._type_error("floor", "a number", value)
+        return math.floor(typing.cast(int | float, value))
+
+    def _nodes(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return a path's nodes in traversal order.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One path argument.
+
+        Returns
+        -------
+        QueryValue
+            Node list, or null for null.
+        """
+        value = arguments[0]
+        if value is None:
+            return None
+        if isinstance(value, Path):
+            return typing.cast(QueryValue, list(value.nodes))
+        return self._type_error("nodes", "a path", value)
+
+    def _relationships(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return a path's relationships in traversal order.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One path argument.
+
+        Returns
+        -------
+        QueryValue
+            Relationship list, or null for null.
+        """
+        value = arguments[0]
+        if value is None:
+            return None
+        if isinstance(value, Path):
+            return typing.cast(QueryValue, list(value.relationships))
+        return self._type_error("relationships", "a path", value)
+
+    def _length(self, arguments: Sequence[QueryValue]) -> QueryValue:
+        """Return the number of relationships in a path.
+
+        Parameters
+        ----------
+        arguments : Sequence[QueryValue]
+            One path argument.
+
+        Returns
+        -------
+        QueryValue
+            Path length, or null for null.
+        """
+        value = arguments[0]
+        if value is None:
+            return None
+        if isinstance(value, Path):
+            return len(value.relationships)
+        return self._type_error("length", "a path", value)
+
+    def _require_integer(self, function: str, value: QueryValue) -> int:
+        """Require one integer function argument.
+
+        Parameters
+        ----------
+        function : str
+            Function name.
+        value : QueryValue
+            Candidate value.
+
+        Returns
+        -------
+        int
+            Integer value.
+
+        Raises
+        ------
+        QueryExecutionError
+            If the value is not a non-boolean integer.
+        """
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+        return typing.cast(int, self._type_error(function, "an integer", value))
+
+    def _require_list(self, function: str, value: QueryValue) -> list[QueryValue] | None:
+        """Require one list argument.
+
+        Parameters
+        ----------
+        function : str
+            Function name.
+        value : QueryValue
+            Candidate value.
+
+        Returns
+        -------
+        list[QueryValue] | None
+            List value, or null when the argument is null.
+
+        Raises
+        ------
+        QueryExecutionError
+            If the value is not a list.
+        """
+        if value is None:
+            return None
+        if isinstance(value, list):
+            return value
+        return typing.cast(list[QueryValue], self._type_error(function, "a list", value))
+
     @staticmethod
     def _type_error(function: str, expected: str, value: QueryValue) -> typing.Never:
         """Raise a query execution error for a bad argument type.
@@ -1432,8 +1924,13 @@ class ExpressionEvaluator:
         Scalar function implementation.
     """
 
-    def __init__(self, functions: ScalarFunctions) -> None:
+    def __init__(
+        self,
+        functions: ScalarFunctions,
+        subquery_runner: SubqueryRunner | None = None,
+    ) -> None:
         self._functions = functions
+        self._subquery_runner = subquery_runner
 
     def evaluate(
         self,
@@ -1461,6 +1958,46 @@ class ExpressionEvaluator:
             return expression.value
         if isinstance(expression, ListLiteral):
             return [self.evaluate(item, binding, parameters) for item in expression.items]
+        if isinstance(expression, Case):
+            return self._evaluate_case(expression, binding, parameters)
+        if isinstance(expression, MapLiteral):
+            return types.MappingProxyType(
+                {
+                    entry.key: self.evaluate(entry.value, binding, parameters)
+                    for entry in expression.entries
+                }
+            )
+        if isinstance(expression, ListAccess):
+            target = self.evaluate(expression.target, binding, parameters)
+            index = self.evaluate(expression.index, binding, parameters)
+            return self.apply_list_access(target, index)
+        if isinstance(expression, ListSlice):
+            target = self.evaluate(expression.target, binding, parameters)
+            start = (
+                None
+                if expression.start is None
+                else self.evaluate(expression.start, binding, parameters)
+            )
+            end = (
+                None
+                if expression.end is None
+                else self.evaluate(expression.end, binding, parameters)
+            )
+            return self.apply_list_slice(target, start, end)
+        if isinstance(expression, ListComprehension):
+            return self._evaluate_comprehension(expression, binding, parameters)
+        if isinstance(expression, Subquery):
+            if self._subquery_runner is None:
+                message = "subqueries are not available in this evaluation context"
+                raise QueryExecutionError(message)
+            limit = 1 if expression.kind is SubqueryKind.EXISTS else None
+            count = self._subquery_runner.count(
+                expression,
+                binding,
+                parameters,
+                limit=limit,
+            )
+            return count > 0 if expression.kind is SubqueryKind.EXISTS else count
         if isinstance(expression, Variable):
             if expression.name not in binding:
                 message = f"variable {expression.name!r} is not bound"
@@ -1514,6 +2051,153 @@ class ExpressionEvaluator:
             return self.apply_is_null(value, expression.negated)
         message = "cannot evaluate this expression form"
         raise QueryExecutionError(message)
+
+    def _evaluate_case(
+        self,
+        expression: Case,
+        binding: Mapping[str, QueryValue],
+        parameters: Mapping[str, QueryValue],
+    ) -> QueryValue:
+        """Evaluate one simple or searched case expression.
+
+        Parameters
+        ----------
+        expression : Case
+            Case expression to evaluate.
+        binding : Mapping[str, QueryValue]
+            Current variable binding.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        QueryValue
+            Selected branch value, or the default.
+        """
+        operand = (
+            None
+            if expression.operand is None
+            else self.evaluate(expression.operand, binding, parameters)
+        )
+        for branch in expression.branches:
+            candidate = self.evaluate(branch.match, binding, parameters)
+            if expression.operand is None:
+                matched = self._truth(candidate) is True
+            else:
+                matched = Values.equals(operand, candidate) is True
+            if matched:
+                return self.evaluate(branch.result, binding, parameters)
+        return (
+            None
+            if expression.default is None
+            else self.evaluate(expression.default, binding, parameters)
+        )
+
+    def _evaluate_comprehension(
+        self,
+        expression: ListComprehension,
+        binding: Mapping[str, QueryValue],
+        parameters: Mapping[str, QueryValue],
+    ) -> QueryValue:
+        """Evaluate one list comprehension.
+
+        Parameters
+        ----------
+        expression : ListComprehension
+            Comprehension to evaluate.
+        binding : Mapping[str, QueryValue]
+            Current variable binding.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        QueryValue
+            Result list, or null when the source is null.
+        """
+        source = self.evaluate(expression.source, binding, parameters)
+        if source is None:
+            return None
+        if not isinstance(source, list):
+            message = "a list comprehension requires a list source"
+            raise QueryExecutionError(message)
+        result: list[QueryValue] = []
+        for item in source:
+            scope = {**binding, expression.variable: item}
+            if (
+                expression.where is not None
+                and self._truth(self.evaluate(expression.where, scope, parameters)) is not True
+            ):
+                continue
+            if expression.projection is None:
+                result.append(item)
+            else:
+                result.append(self.evaluate(expression.projection, scope, parameters))
+        return result
+
+    def apply_list_access(self, target: QueryValue, index: QueryValue) -> QueryValue:
+        """Apply one list index.
+
+        Parameters
+        ----------
+        target : QueryValue
+            Value being indexed.
+        index : QueryValue
+            Index expression value.
+
+        Returns
+        -------
+        QueryValue
+            Selected element, or null for an out-of-range index or null list.
+        """
+        if target is None:
+            return None
+        if not isinstance(target, list):
+            message = "list indexing requires a list target"
+            raise QueryExecutionError(message)
+        if not isinstance(index, int) or isinstance(index, bool):
+            message = "list indexing requires an integer index"
+            raise QueryExecutionError(message)
+        if index < 0:
+            index += len(target)
+        if index < 0 or index >= len(target):
+            return None
+        return target[index]
+
+    def apply_list_slice(
+        self,
+        target: QueryValue,
+        start: QueryValue,
+        end: QueryValue,
+    ) -> QueryValue:
+        """Apply one list slice.
+
+        Parameters
+        ----------
+        target : QueryValue
+            Value being sliced.
+        start : QueryValue
+            Optional start bound.
+        end : QueryValue
+            Optional end bound.
+
+        Returns
+        -------
+        QueryValue
+            Sliced list, or null for a null list.
+        """
+        if target is None:
+            return None
+        if not isinstance(target, list):
+            message = "list slicing requires a list target"
+            raise QueryExecutionError(message)
+        if start is not None and (not isinstance(start, int) or isinstance(start, bool)):
+            message = "list slice bounds must be integers"
+            raise QueryExecutionError(message)
+        if end is not None and (not isinstance(end, int) or isinstance(end, bool)):
+            message = "list slice bounds must be integers"
+            raise QueryExecutionError(message)
+        return typing.cast(QueryValue, target[start:end])
 
     def apply_property(self, target: QueryValue, key: str) -> QueryValue:
         """Read one property from an already evaluated target.
@@ -1614,7 +2298,41 @@ class ExpressionEvaluator:
             Operators.CONTAINS,
         }:
             return self._string_predicate(operator, left, right)
+        if operator == Operators.CONCAT:
+            if left is None or right is None:
+                return None
+            return self._concatenate(left, right)
+        if operator == Operators.ADD and (isinstance(left, str) or isinstance(right, str)):
+            if left is None or right is None:
+                return None
+            return self._concatenate(left, right)
         return Arithmetic.operate(operator, left, right)
+
+    @staticmethod
+    def _concatenate(left: QueryValue, right: QueryValue) -> str:
+        """Concatenate two string operands.
+
+        Parameters
+        ----------
+        left : QueryValue
+            Left operand.
+        right : QueryValue
+            Right operand.
+
+        Returns
+        -------
+        str
+            Concatenated text.
+
+        Raises
+        ------
+        QueryExecutionError
+            If either operand is not a string.
+        """
+        if not isinstance(left, str) or not isinstance(right, str):
+            message = "string concatenation requires string operands"
+            raise QueryExecutionError(message)
+        return left + right
 
     @staticmethod
     def apply_is_null(value: QueryValue, negated: bool) -> bool:
@@ -1789,6 +2507,7 @@ __all__ = [
     "QueryValue",
     "ScalarFunctions",
     "SnapshotSource",
+    "SubqueryRunner",
     "ValueKey",
     "Values",
 ]

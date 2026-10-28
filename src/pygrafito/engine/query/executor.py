@@ -8,24 +8,32 @@ import dataclasses
 import functools
 import json
 import sqlite3
+import types
 import typing
 from collections.abc import Mapping, Sequence
 from sqlite3 import Connection
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Case,
     Expression,
     FunctionCall,
     IsNull,
+    ListAccess,
+    ListComprehension,
     ListLiteral,
+    ListSlice,
     Literal,
+    MapLiteral,
     Match,
     NodePattern,
     OrdinalityKind,
     Parameter,
     PathPattern,
     Property,
+    SetOperation,
     Star,
+    Subquery,
     Unary,
     Variable,
 )
@@ -38,9 +46,10 @@ from pygrafito.engine.query.compiler import (
 )
 from pygrafito.engine.query.mutation import MutationExecutor
 from pygrafito.engine.query.pattern import PatternEngine
-from pygrafito.engine.query.plan import Plan
-from pygrafito.engine.query.results import QueryResult, Row
+from pygrafito.engine.query.plan import CompoundPlan, Plan, PlannedStatement
+from pygrafito.engine.query.results import MutationSummary, QueryResult, Row
 from pygrafito.engine.query.semantic import (
+    Analysis,
     FilterStage,
     LetStage,
     MatchStage,
@@ -148,6 +157,70 @@ class RepositorySnapshots(SnapshotSource):
         return cached
 
 
+class SubqueryExecutor:
+    """Execute read-only subqueries against one running statement.
+
+    Parameters
+    ----------
+    executor : QueryExecutor
+        Executor that runs the inner stages.
+    functions : ScalarFunctions
+        Scalar functions shared with the enclosing statement.
+    tracker : BudgetTracker
+        Budget counters shared with the enclosing statement.
+    analyses : Mapping[int, Analysis]
+        Pre-analysed inner queries keyed by subquery identity.
+    """
+
+    def __init__(
+        self,
+        executor: QueryExecutor,
+        functions: ScalarFunctions,
+        tracker: BudgetTracker,
+        analyses: Mapping[int, Analysis],
+    ) -> None:
+        self._executor = executor
+        self._functions = functions
+        self._tracker = tracker
+        self._analyses = analyses
+
+    def count(
+        self,
+        subquery: Subquery,
+        binding: Mapping[str, QueryValue],
+        parameters: Mapping[str, QueryValue],
+        *,
+        limit: int | None = None,
+    ) -> int:
+        """Count rows produced by one inner query.
+
+        Parameters
+        ----------
+        subquery : Subquery
+            Subquery expression to run.
+        binding : Mapping[str, QueryValue]
+            Outer binding visible to the inner query.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        limit : int | None, optional
+            Stop counting at this many rows, by default no limit.
+
+        Returns
+        -------
+        int
+            Number of inner rows, capped by ``limit``.
+        """
+        return self._executor._count_subquery(
+            subquery,
+            binding,
+            parameters,
+            self._functions,
+            self._tracker,
+            self._analyses,
+            limit,
+        )
+
+
 class GroupEvaluator:
     """Evaluate a projection over one aggregate input group.
 
@@ -197,6 +270,41 @@ class GroupEvaluator:
             return self._functions.call(expression.name, arguments)
         if isinstance(expression, ListLiteral):
             return [self.evaluate(item, group) for item in expression.items]
+        if isinstance(expression, Case):
+            operand = (
+                None if expression.operand is None else self.evaluate(expression.operand, group)
+            )
+            for branch in expression.branches:
+                candidate = self.evaluate(branch.match, group)
+                matched = (
+                    self._evaluator._truth(candidate) is True
+                    if expression.operand is None
+                    else Values.equals(operand, candidate) is True
+                )
+                if matched:
+                    return self.evaluate(branch.result, group)
+            return None if expression.default is None else self.evaluate(expression.default, group)
+        if isinstance(expression, MapLiteral):
+            return types.MappingProxyType(
+                {entry.key: self.evaluate(entry.value, group) for entry in expression.entries}
+            )
+        if isinstance(expression, ListAccess):
+            return self._evaluator.apply_list_access(
+                self.evaluate(expression.target, group),
+                self.evaluate(expression.index, group),
+            )
+        if isinstance(expression, ListSlice):
+            return self._evaluator.apply_list_slice(
+                self.evaluate(expression.target, group),
+                None if expression.start is None else self.evaluate(expression.start, group),
+                None if expression.end is None else self.evaluate(expression.end, group),
+            )
+        if isinstance(expression, (ListComprehension, Subquery)):
+            return self._evaluator.evaluate(
+                expression,
+                self._representative(group),
+                self._parameters,
+            )
         if isinstance(expression, (Literal, Parameter)):
             return self._evaluator.evaluate(expression, {}, self._parameters)
         if isinstance(expression, Star):
@@ -339,15 +447,15 @@ class QueryExecutor:
 
     def explain(
         self,
-        plan: Plan,
+        plan: PlannedStatement,
         parameters: Mapping[str, QueryValue],
     ) -> tuple[str, ...]:
         """Return the planned access path for a statement without running it.
 
         Parameters
         ----------
-        plan : Plan
-            Planned statement.
+        plan : PlannedStatement
+            Planned linear or compound statement.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
 
@@ -363,6 +471,20 @@ class QueryExecutor:
         QueryExecutionError
             If SQLite cannot plan the statement.
         """
+        if isinstance(plan, CompoundPlan):
+            plan.analysis.require_parameters(parameters)
+            lines: list[str] = []
+            for index, term in enumerate(plan.terms):
+                if index:
+                    lines.append(plan.analysis.operators[index - 1].value)
+                lines.extend(self.explain(term, parameters))
+            if plan.analysis.sorts:
+                lines.append("ORDER")
+            if plan.analysis.skip is not None:
+                lines.append("SKIP")
+            if plan.analysis.limit is not None:
+                lines.append("LIMIT")
+            return tuple(lines)
         analysis = plan.analysis
         analysis.require_parameters(parameters)
         if not plan.entries:
@@ -499,7 +621,7 @@ class QueryExecutor:
 
     def execute_graph(
         self,
-        plan: Plan,
+        plan: PlannedStatement,
         parameters: Mapping[str, QueryValue],
         budget: QueryBudget | None = None,
     ) -> QueryResult:
@@ -577,7 +699,7 @@ class QueryExecutor:
 
     def execute_active(
         self,
-        plan: Plan,
+        plan: PlannedStatement,
         parameters: Mapping[str, QueryValue],
         budget: QueryBudget | None = None,
     ) -> QueryResult:
@@ -699,7 +821,7 @@ class QueryExecutor:
 
     def _execute(
         self,
-        plan: Plan,
+        plan: PlannedStatement,
         parameters: Mapping[str, QueryValue],
         budget: QueryBudget,
     ) -> QueryResult:
@@ -707,8 +829,8 @@ class QueryExecutor:
 
         Parameters
         ----------
-        plan : Plan
-            Planned query.
+        plan : PlannedStatement
+            Planned linear or compound query.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
         budget : QueryBudget
@@ -719,6 +841,8 @@ class QueryExecutor:
         QueryResult
             Materialized result.
         """
+        if isinstance(plan, CompoundPlan):
+            return self._execute_compound(plan, parameters, budget)
         analysis = plan.analysis
         analysis.require_parameters(parameters)
         tracker = BudgetTracker(budget)
@@ -736,7 +860,8 @@ class QueryExecutor:
         )
         snapshots = RepositorySnapshots(self._nodes, self._relationships)
         functions = ScalarFunctions(snapshots)
-        evaluator = ExpressionEvaluator(functions)
+        runner = SubqueryExecutor(self, functions, tracker, analysis.subquery_analyses)
+        evaluator = ExpressionEvaluator(functions, runner)
         bindings: list[dict[str, QueryValue]] = [{}]
         mutations = MutationExecutor(self._nodes, self._relationships)
         matcher = functools.partial(
@@ -792,6 +917,237 @@ class QueryExecutor:
             rows=tuple(Row(columns=analysis.columns, row_values=row.values) for row in selected),
             summary=mutations.summary,
         )
+
+    def _execute_compound(
+        self,
+        plan: CompoundPlan,
+        parameters: Mapping[str, QueryValue],
+        budget: QueryBudget,
+    ) -> QueryResult:
+        """Execute one compound set-operation query.
+
+        Parameters
+        ----------
+        plan : CompoundPlan
+            Planned compound query.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        budget : QueryBudget
+            Budget selected for this execution.
+
+        Returns
+        -------
+        QueryResult
+            Combined materialized result.
+        """
+        analysis = plan.analysis
+        analysis.require_parameters(parameters)
+        tracker = BudgetTracker(budget)
+        tracker.check_time()
+        snapshots = RepositorySnapshots(self._nodes, self._relationships)
+        functions = ScalarFunctions(snapshots)
+        runner = SubqueryExecutor(self, functions, tracker, analysis.subquery_analyses)
+        evaluator = ExpressionEvaluator(functions, runner)
+        rows: list[ProjectedRow] = []
+        for index, term in enumerate(plan.terms):
+            term_rows = self._run_term(
+                term,
+                parameters,
+                tracker,
+                functions,
+                evaluator,
+            )
+            if index == 0:
+                rows = term_rows
+            else:
+                rows = self._combine_rows(
+                    rows,
+                    term_rows,
+                    analysis.operators[index - 1],
+                )
+        if analysis.sorts:
+            self._order(rows, analysis.sorts, evaluator, parameters)
+        skip = self._page_value(analysis.skip, parameters, "OFFSET")
+        limit = self._page_value(analysis.limit, parameters, "LIMIT")
+        start = 0 if skip is None else skip
+        end = None if limit is None else start + limit
+        selected = rows[start:end]
+        return QueryResult(
+            columns=analysis.columns,
+            rows=tuple(Row(columns=analysis.columns, row_values=row.values) for row in selected),
+            summary=MutationSummary(),
+        )
+
+    def _run_term(
+        self,
+        plan: Plan,
+        parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
+        functions: ScalarFunctions,
+        evaluator: ExpressionEvaluator,
+    ) -> list[ProjectedRow]:
+        """Run one linear operand of a compound query.
+
+        Parameters
+        ----------
+        plan : Plan
+            Planned linear operand.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        tracker : BudgetTracker
+            Shared budget counters.
+        functions : ScalarFunctions
+            Scalar function implementation.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+
+        Returns
+        -------
+        list[ProjectedRow]
+            Projected rows of the operand.
+        """
+        analysis = plan.analysis
+        bindings: list[dict[str, QueryValue]] = [{}]
+        for operation in analysis.operations:
+            tracker.check_time()
+            if isinstance(operation, NextBoundary):
+                continue
+            if isinstance(operation, WriteStage):
+                message = "set operations are read-only"
+                raise QueryExecutionError(message)
+            bindings = self._run_stage(
+                operation,
+                bindings,
+                evaluator,
+                functions,
+                parameters,
+                tracker,
+            )
+            tracker.check_time()
+        if analysis.return_clause is None:
+            return []
+        rows = self._project(
+            plan,
+            bindings,
+            evaluator,
+            functions,
+            parameters,
+        )
+        if analysis.return_clause.distinct:
+            rows = self._distinct(rows)
+        if analysis.sorts:
+            self._order(rows, analysis.sorts, evaluator, parameters)
+        skip = self._page_value(analysis.return_clause.skip, parameters, "OFFSET")
+        limit = self._page_value(analysis.return_clause.limit, parameters, "LIMIT")
+        start = 0 if skip is None else skip
+        end = None if limit is None else start + limit
+        return rows[start:end]
+
+    def _combine_rows(
+        self,
+        left: list[ProjectedRow],
+        right: list[ProjectedRow],
+        operation: SetOperation,
+    ) -> list[ProjectedRow]:
+        """Combine two projected row sets with one set operator.
+
+        Parameters
+        ----------
+        left : list[ProjectedRow]
+            Left-hand rows.
+        right : list[ProjectedRow]
+            Right-hand rows.
+        operation : SetOperation
+            Operator to apply.
+
+        Returns
+        -------
+        list[ProjectedRow]
+            Combined rows.
+        """
+        if operation is SetOperation.UNION_ALL:
+            return [*left, *right]
+        if operation is SetOperation.UNION:
+            return self._distinct([*left, *right])
+        right_keys = {tuple(ValueKey(value) for value in row.values) for row in right}
+        if operation is SetOperation.INTERSECT:
+            return self._distinct(
+                [
+                    row
+                    for row in left
+                    if tuple(ValueKey(value) for value in row.values) in right_keys
+                ]
+            )
+        if operation is SetOperation.EXCEPT:
+            return self._distinct(
+                [
+                    row
+                    for row in left
+                    if tuple(ValueKey(value) for value in row.values) not in right_keys
+                ]
+            )
+        message = f"unsupported set operator {operation.value}"
+        raise QueryExecutionError(message)
+
+    def _count_subquery(
+        self,
+        subquery: Subquery,
+        binding: Mapping[str, QueryValue],
+        parameters: Mapping[str, QueryValue],
+        functions: ScalarFunctions,
+        tracker: BudgetTracker,
+        analyses: Mapping[int, Analysis],
+        limit: int | None,
+    ) -> int:
+        """Execute one inner subquery and count its rows.
+
+        Parameters
+        ----------
+        subquery : Subquery
+            Subquery expression to run.
+        binding : Mapping[str, QueryValue]
+            Outer binding visible to the inner query.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+        functions : ScalarFunctions
+            Scalar function implementation.
+        tracker : BudgetTracker
+            Shared budget counters.
+        analyses : Mapping[int, Analysis]
+            Pre-analysed inner queries keyed by subquery identity.
+        limit : int | None
+            Maximum count to return, or ``None``.
+
+        Returns
+        -------
+        int
+            Number of rows produced by the inner query.
+        """
+        analysis = analyses.get(id(subquery))
+        if analysis is None:
+            message = "subquery analysis is missing"
+            raise QueryExecutionError(message)
+        runner = SubqueryExecutor(self, functions, tracker, analysis.subquery_analyses)
+        evaluator = ExpressionEvaluator(functions, runner)
+        bindings: list[dict[str, QueryValue]] = [dict(binding)]
+        for operation in analysis.operations:
+            tracker.check_time()
+            if isinstance(operation, NextBoundary):
+                continue
+            if isinstance(operation, WriteStage):
+                message = "subqueries are read-only"
+                raise QueryExecutionError(message)
+            bindings = self._run_stage(
+                operation,
+                bindings,
+                evaluator,
+                functions,
+                parameters,
+                tracker,
+            )
+            tracker.check_time()
+        count = len(bindings)
+        return count if limit is None else min(count, limit)
 
     def _run_stage(
         self,

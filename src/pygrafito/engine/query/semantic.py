@@ -4,13 +4,16 @@
 """Static analysis for parsed query statements."""
 
 import dataclasses
+import typing
 from collections.abc import Iterable, Mapping
 from enum import Enum
 from types import MappingProxyType
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Case,
     Clause,
+    CompoundStatement,
     Create,
     Delete,
     EdgeDirection,
@@ -21,8 +24,12 @@ from pygrafito.engine.query.ast import (
     IsNull,
     Let,
     LetAssignment,
+    ListAccess,
+    ListComprehension,
     ListLiteral,
+    ListSlice,
     Literal,
+    MapLiteral,
     Match,
     Merge,
     Next,
@@ -30,6 +37,7 @@ from pygrafito.engine.query.ast import (
     Operators,
     OrdinalityKind,
     Parameter,
+    ParsedStatement,
     PathMode,
     PathPattern,
     Property,
@@ -39,9 +47,12 @@ from pygrafito.engine.query.ast import (
     Return,
     ReturnItem,
     Set,
+    SetOperation,
     SortItem,
     Star,
     Statement,
+    Subquery,
+    SubqueryKind,
     Unary,
     Unwind,
     Variable,
@@ -347,6 +358,82 @@ class Analysis:
     operations: tuple[Operation, ...] = ()
     finish: bool = False
     grouping_explicit: bool = False
+    subquery_analyses: Mapping[int, Analysis] = dataclasses.field(default_factory=dict)
+
+    def require_parameters(self, parameters: Mapping[str, object]) -> None:
+        """Reject a parameter mapping that omits a referenced parameter.
+
+        Parameters
+        ----------
+        parameters : Mapping[str, object]
+            Supplied parameter values.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a referenced parameter is missing.
+        """
+        missing = sorted(self.parameters - set(parameters))
+        if missing:
+            message = f"missing query parameter ${missing[0]}"
+            raise QuerySemanticError(message)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CompoundAnalysis:
+    """Static analysis of a compound set-operation query.
+
+    Parameters
+    ----------
+    statement : CompoundStatement
+        Parsed compound statement.
+    terms : tuple[Analysis, ...]
+        Per-operand analyses in source order.
+    operators : tuple[SetOperation, ...]
+        Operators between adjacent terms.
+    columns : tuple[str, ...]
+        Result column names, taken from the first operand.
+    parameters : frozenset[str]
+        Parameter names referenced by any operand or compound pagination.
+    sorts : tuple[SortSpec, ...]
+        Compound ordering keys resolved to output columns.
+    skip : Expression | None
+        Compound skip expression, or ``None``.
+    limit : Expression | None
+        Compound limit expression, or ``None``.
+    """
+
+    statement: CompoundStatement
+    terms: tuple[Analysis, ...]
+    operators: tuple[SetOperation, ...]
+    columns: tuple[str, ...]
+    parameters: frozenset[str]
+    sorts: tuple[SortSpec, ...]
+    skip: Expression | None
+    limit: Expression | None
+    subquery_analyses: Mapping[int, Analysis] = dataclasses.field(default_factory=dict)
+
+    @property
+    def is_write(self) -> bool:
+        """Return whether the compound statement changes data.
+
+        Returns
+        -------
+        bool
+            Always ``False`` because set operands are read-only.
+        """
+        return False
+
+    @property
+    def finish(self) -> bool:
+        """Return whether the compound statement ends with ``FINISH``.
+
+        Returns
+        -------
+        bool
+            Always ``False`` because set operands cannot use ``FINISH``.
+        """
+        return False
 
     def require_parameters(self, parameters: Mapping[str, object]) -> None:
         """Reject a parameter mapping that omits a referenced parameter.
@@ -378,27 +465,146 @@ class SemanticAnalyzer:
 
     AGGREGATE_NAMES: frozenset[str] = FunctionCatalog.AGGREGATES
     DEFAULT_PATH_MODE: PathMode = PathMode.WALK
+    MINIMUM_SET_OPERANDS: typing.ClassVar[int] = 2
 
     def __init__(self, statement: Statement) -> None:
         self._statement = statement
         self._kinds: dict[str, VariableKind] = {}
         self._parameters: set[str] = set()
+        self._subqueries: dict[int, Analysis] = {}
 
     @classmethod
-    def analyze(cls, statement: Statement) -> Analysis:
+    def analyze(cls, statement: ParsedStatement) -> Analysis | CompoundAnalysis:
         """Analyse one parsed statement.
 
         Parameters
         ----------
-        statement : Statement
-            Parsed statement.
+        statement : ParsedStatement
+            Parsed linear or compound statement.
 
         Returns
         -------
-        Analysis
+        Analysis | CompoundAnalysis
             Output contract and resolved ordering keys.
         """
+        if isinstance(statement, CompoundStatement):
+            return cls._analyze_compound(statement)
         return cls(statement).run()
+
+    @classmethod
+    def _analyze_compound(cls, statement: CompoundStatement) -> CompoundAnalysis:
+        """Analyse a compound statement.
+
+        Parameters
+        ----------
+        statement : CompoundStatement
+            Compound statement to analyse.
+
+        Returns
+        -------
+        CompoundAnalysis
+            Combined output contract.
+
+        Raises
+        ------
+        QuerySemanticError
+            If an operand is a write, lacks a result, or has incompatible
+            columns or ordering.
+        """
+        if len(statement.terms) < cls.MINIMUM_SET_OPERANDS:
+            message = "a set operation requires at least two operands"
+            raise QuerySemanticError(message)
+        terms: list[Analysis] = []
+        for term in statement.terms:
+            analysis = cls(term).run()
+            if analysis.is_write:
+                message = "set operations are read-only"
+                raise QuerySemanticError(message)
+            if analysis.finish:
+                message = "FINISH is not allowed in a set operand"
+                raise QuerySemanticError(message)
+            if analysis.return_clause is None:
+                message = "a set operand must end with RETURN"
+                raise QuerySemanticError(message)
+            if analysis.return_clause.no_bindings:
+                message = "RETURN NO BINDINGS is not allowed in a set operand"
+                raise QuerySemanticError(message)
+            if (
+                analysis.return_clause.order_by
+                or analysis.return_clause.skip is not None
+                or analysis.return_clause.limit is not None
+            ):
+                message = "a set operand cannot carry ORDER BY, OFFSET, or LIMIT"
+                raise QuerySemanticError(message)
+            terms.append(analysis)
+        columns = terms[0].columns
+        for analysis in terms[1:]:
+            if len(analysis.columns) != len(columns):
+                message = "set operands must return the same number of columns"
+                raise QuerySemanticError(message)
+            if analysis.columns != columns:
+                message = "set operands must return columns with the same names and order"
+                raise QuerySemanticError(message)
+        parameters = set().union(*(analysis.parameters for analysis in terms))
+        subqueries: dict[int, Analysis] = {}
+        for analysis in terms:
+            subqueries.update(analysis.subquery_analyses)
+        analyzer = cls(statement.terms[0])
+        analyzer._validate_pagination(statement.skip, "OFFSET")
+        analyzer._validate_pagination(statement.limit, "LIMIT")
+        parameters.update(analyzer._parameters)
+        sorts = cls._compound_sorts(statement.order_by, columns)
+        return CompoundAnalysis(
+            statement=statement,
+            terms=tuple(terms),
+            operators=statement.operators,
+            columns=columns,
+            parameters=frozenset(parameters),
+            sorts=sorts,
+            skip=statement.skip,
+            limit=statement.limit,
+            subquery_analyses=MappingProxyType(subqueries),
+        )
+
+    @classmethod
+    def _compound_sorts(
+        cls,
+        sort_items: Iterable[SortItem],
+        columns: tuple[str, ...],
+    ) -> tuple[SortSpec, ...]:
+        """Resolve compound ordering keys to output columns.
+
+        Parameters
+        ----------
+        sort_items : Iterable[SortItem]
+            Parsed compound ordering keys.
+        columns : tuple[str, ...]
+            Output column names.
+
+        Returns
+        -------
+        tuple[SortSpec, ...]
+            Ordering keys resolved to column indexes.
+
+        Raises
+        ------
+        QuerySemanticError
+            If a key is not an output column.
+        """
+        indexes = {name: index for index, name in enumerate(columns)}
+        specs: list[SortSpec] = []
+        for sort in sort_items:
+            if not isinstance(sort.expression, Variable) or sort.expression.name not in indexes:
+                message = "compound ORDER BY keys must be output column names"
+                raise QuerySemanticError(message)
+            specs.append(
+                SortSpec(
+                    descending=sort.descending,
+                    column=indexes[sort.expression.name],
+                    nulls_first=sort.nulls_first,
+                )
+            )
+        return tuple(specs)
 
     def run(self) -> Analysis:
         """Run every static check and build the analysis.
@@ -534,6 +740,7 @@ class SemanticAnalyzer:
             operations=tuple(operations),
             finish=finish,
             grouping_explicit=grouping_explicit,
+            subquery_analyses=MappingProxyType(dict(self._subqueries)),
         )
 
     @staticmethod
@@ -864,12 +1071,24 @@ class SemanticAnalyzer:
             If an expression has no alias, two columns share a name, or an
             expression cannot be evaluated in the projected scope.
         """
-        items = tuple(self._column(item) for item in clause.items)
-        for item in clause.items:
-            if not isinstance(item.expression, Variable) and item.alias is None:
-                message = "a WITH expression must have an alias"
-                raise QuerySemanticError(message)
-        self._require_unique_columns(items)
+        if clause.star:
+            items = tuple(
+                ReturnColumn(
+                    expression=Variable(name=name),
+                    name=name,
+                    text=name,
+                    aggregate=False,
+                )
+                for name in self._kinds
+            )
+            self._require_unique_columns(items)
+        else:
+            items = tuple(self._column(item) for item in clause.items)
+            for item in clause.items:
+                if not isinstance(item.expression, Variable) and item.alias is None:
+                    message = "a WITH expression must have an alias"
+                    raise QuerySemanticError(message)
+            self._require_unique_columns(items)
         has_aggregates = any(item.aggregate for item in items)
         grouping = tuple(item.expression for item in items if not item.aggregate)
         if has_aggregates:
@@ -1476,7 +1695,10 @@ class SemanticAnalyzer:
                 if not isinstance(item, (Literal, Parameter)):
                     self._validate_grouped(item, grouping_keys)
             return
-        if isinstance(expression, (Binary, Unary, IsNull)):
+        if isinstance(
+            expression,
+            (Binary, Unary, IsNull, Case, MapLiteral, ListAccess, ListSlice, ListComprehension),
+        ):
             for child in self._children(expression):
                 if not isinstance(child, (Literal, Parameter)):
                     self._validate_grouped(child, grouping_keys)
@@ -1486,6 +1708,11 @@ class SemanticAnalyzer:
                 if not isinstance(argument, (Literal, Parameter, Star)):
                     self._validate_grouped(argument, grouping_keys)
             return
+        if isinstance(expression, Subquery):
+            message = (
+                "a correlated query expression in an aggregate projection must be a grouping key"
+            )
+            raise QuerySemanticError(message)
         message = "a non-aggregate expression in an aggregate projection must be a grouping key"
         raise QuerySemanticError(message)
 
@@ -1611,6 +1838,108 @@ class SemanticAnalyzer:
                     inside_aggregate=inside_aggregate,
                 )
             return
+        if isinstance(expression, Case):
+            if expression.operand is not None:
+                self._validate_expression(
+                    expression.operand,
+                    aggregates_allowed=aggregates_allowed,
+                    inside_aggregate=inside_aggregate,
+                )
+            for branch in expression.branches:
+                self._validate_expression(
+                    branch.match,
+                    aggregates_allowed=aggregates_allowed,
+                    inside_aggregate=inside_aggregate,
+                )
+                if expression.operand is None:
+                    self._require_kind(branch.match, ArgumentKind.BOOLEAN)
+                self._validate_expression(
+                    branch.result,
+                    aggregates_allowed=aggregates_allowed,
+                    inside_aggregate=inside_aggregate,
+                )
+            if expression.default is not None:
+                self._validate_expression(
+                    expression.default,
+                    aggregates_allowed=aggregates_allowed,
+                    inside_aggregate=inside_aggregate,
+                )
+            return
+        if isinstance(expression, MapLiteral):
+            for entry in expression.entries:
+                self._validate_expression(
+                    entry.value,
+                    aggregates_allowed=aggregates_allowed,
+                    inside_aggregate=inside_aggregate,
+                )
+            return
+        if isinstance(expression, ListAccess):
+            self._validate_expression(
+                expression.target,
+                aggregates_allowed=aggregates_allowed,
+                inside_aggregate=inside_aggregate,
+            )
+            self._validate_expression(
+                expression.index,
+                aggregates_allowed=aggregates_allowed,
+                inside_aggregate=inside_aggregate,
+            )
+            self._require_kind(expression.target, ArgumentKind.LIST)
+            self._require_kind(expression.index, ArgumentKind.NUMBER)
+            return
+        if isinstance(expression, ListSlice):
+            self._validate_expression(
+                expression.target,
+                aggregates_allowed=aggregates_allowed,
+                inside_aggregate=inside_aggregate,
+            )
+            if expression.start is not None:
+                self._validate_expression(
+                    expression.start,
+                    aggregates_allowed=aggregates_allowed,
+                    inside_aggregate=inside_aggregate,
+                )
+                self._require_kind(expression.start, ArgumentKind.NUMBER)
+            if expression.end is not None:
+                self._validate_expression(
+                    expression.end,
+                    aggregates_allowed=aggregates_allowed,
+                    inside_aggregate=inside_aggregate,
+                )
+                self._require_kind(expression.end, ArgumentKind.NUMBER)
+            self._require_kind(expression.target, ArgumentKind.LIST)
+            return
+        if isinstance(expression, ListComprehension):
+            self._validate_expression(
+                expression.source,
+                aggregates_allowed=aggregates_allowed,
+                inside_aggregate=inside_aggregate,
+            )
+            self._require_kind(expression.source, ArgumentKind.LIST)
+            if expression.variable in self._kinds:
+                message = f"variable {expression.variable!r} is already bound"
+                raise QuerySemanticError(message)
+            self._kinds[expression.variable] = VariableKind.SCALAR
+            try:
+                if expression.where is not None:
+                    self._validate_expression(
+                        expression.where,
+                        aggregates_allowed=False,
+                        inside_aggregate=inside_aggregate,
+                    )
+                    self._require_kind(expression.where, ArgumentKind.BOOLEAN)
+                if expression.projection is not None:
+                    self._validate_expression(
+                        expression.projection,
+                        aggregates_allowed=False,
+                        inside_aggregate=inside_aggregate,
+                    )
+            finally:
+                del self._kinds[expression.variable]
+            return
+        if isinstance(expression, Subquery):
+            self._validate_subquery(expression)
+            return
         if isinstance(expression, Variable):
             self._validate_variable(expression)
             return
@@ -1659,8 +1988,9 @@ class SemanticAnalyzer:
                 aggregates_allowed=aggregates_allowed,
                 inside_aggregate=inside_aggregate,
             )
-            if expression.operator in {
-                Operators.ADD,
+            if expression.operator == Operators.ADD:
+                self._validate_additive_operands(expression.left, expression.right)
+            elif expression.operator in {
                 Operators.SUBTRACT,
                 Operators.MULTIPLY,
                 Operators.DIVIDE,
@@ -1668,6 +1998,9 @@ class SemanticAnalyzer:
             }:
                 self._require_kind(expression.left, ArgumentKind.NUMBER)
                 self._require_kind(expression.right, ArgumentKind.NUMBER)
+            if expression.operator == Operators.CONCAT:
+                self._require_kind(expression.left, ArgumentKind.STRING)
+                self._require_kind(expression.right, ArgumentKind.STRING)
             if expression.operator in {
                 Operators.STARTS_WITH,
                 Operators.ENDS_WITH,
@@ -1688,6 +2021,66 @@ class SemanticAnalyzer:
             raise QuerySemanticError(message)
         message = f"unsupported expression form: {type(expression).__name__}"
         raise QuerySemanticError(message)
+
+    def _validate_additive_operands(self, left: Expression, right: Expression) -> None:
+        """Validate the numeric-or-string form of ``+``.
+
+        Parameters
+        ----------
+        left : Expression
+            Left operand.
+        right : Expression
+            Right operand.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the statically known operands cannot both be strings or both
+            be numbers.
+        """
+        left_kind = self._static_kind(left)
+        right_kind = self._static_kind(right)
+        string_kinds = {ArgumentKind.STRING, ArgumentKind.ANY, None}
+        if (
+            left_kind in string_kinds
+            and right_kind in string_kinds
+            and (left_kind is ArgumentKind.STRING or right_kind is ArgumentKind.STRING)
+        ):
+            return
+        if left_kind is ArgumentKind.STRING or right_kind is ArgumentKind.STRING:
+            message = "operator '+' requires both operands to be strings or both to be numbers"
+            raise QuerySemanticError(message)
+        self._require_kind(left, ArgumentKind.NUMBER)
+        self._require_kind(right, ArgumentKind.NUMBER)
+
+    def _validate_subquery(self, expression: Subquery) -> None:
+        """Validate one read-only query expression.
+
+        Parameters
+        ----------
+        expression : Subquery
+            Subquery expression to validate.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the inner block is not a valid read-only row source.
+        """
+        clauses = expression.clauses
+        if any(
+            isinstance(clause, (Create, Merge, Set, Remove, Delete, Return, Finish, Next, Yield))
+            for clause in clauses
+        ):
+            message = "a subquery is read-only and cannot contain a result or write clause"
+            raise QuerySemanticError(message)
+        if not any(isinstance(clause, (Match, Let, Unwind)) for clause in clauses):
+            message = "a subquery requires at least one row source"
+            raise QuerySemanticError(message)
+        inner = SemanticAnalyzer(Statement(clauses=clauses))
+        inner._kinds = dict(self._kinds)
+        analysis = inner.run()
+        self._parameters.update(analysis.parameters)
+        self._subqueries[id(expression)] = analysis
 
     def _validate_variable(self, expression: Variable) -> None:
         """Require a variable to be bound by the pattern.
@@ -1823,6 +2216,22 @@ class SemanticAnalyzer:
             return ArgumentKind.STRING
         if isinstance(expression, ListLiteral):
             return ArgumentKind.LIST
+        if isinstance(expression, MapLiteral):
+            return ArgumentKind.MAP
+        if isinstance(expression, ListComprehension):
+            return ArgumentKind.LIST
+        if isinstance(expression, Subquery):
+            if expression.kind is SubqueryKind.EXISTS:
+                return ArgumentKind.BOOLEAN
+            return ArgumentKind.NUMBER
+        if isinstance(expression, Case):
+            if expression.default is None:
+                return None
+            kinds = {self._static_kind(branch.result) for branch in expression.branches}
+            kinds.add(self._static_kind(expression.default))
+            return kinds.pop() if len(kinds) == 1 else None
+        if isinstance(expression, (ListAccess, ListSlice)):
+            return None
         if isinstance(expression, Variable):
             kind = self._kinds.get(expression.name)
             if kind is VariableKind.NODE:
@@ -1837,6 +2246,14 @@ class SemanticAnalyzer:
         if isinstance(expression, FunctionCall):
             return self._function_kind(expression.name)
         if isinstance(expression, Binary):
+            if expression.operator == Operators.CONCAT:
+                return ArgumentKind.STRING
+            if expression.operator == Operators.ADD:
+                left = self._static_kind(expression.left)
+                right = self._static_kind(expression.right)
+                if left is ArgumentKind.STRING and right is ArgumentKind.STRING:
+                    return ArgumentKind.STRING
+                return ArgumentKind.NUMBER
             if expression.operator in {
                 Operators.AND,
                 Operators.OR,
@@ -1876,14 +2293,47 @@ class SemanticAnalyzer:
             Known result kind, or ``None`` when it depends on the input.
         """
         normalized = name.lower()
-        if normalized in {"id", "size", "count", "sum", "avg", "abs", "tointeger", "tofloat"}:
+        if normalized in {
+            "id",
+            "size",
+            "count",
+            "sum",
+            "avg",
+            "abs",
+            "tointeger",
+            "tofloat",
+            "length",
+            "ceil",
+            "floor",
+            "round",
+        }:
             return ArgumentKind.NUMBER
-        if normalized in {"labels", "keys", "collect"}:
+        if normalized in {
+            "labels",
+            "keys",
+            "collect",
+            "range",
+            "tail",
+            "split",
+            "nodes",
+            "relationships",
+        }:
             return ArgumentKind.LIST
-        if normalized in {"type", "lower", "upper", "trim", "tostring", "concat"}:
+        if normalized in {
+            "type",
+            "lower",
+            "upper",
+            "trim",
+            "tostring",
+            "concat",
+            "substring",
+            "replace",
+        }:
             return ArgumentKind.STRING
         if normalized == "properties":
             return ArgumentKind.MAP
+        if normalized == "toboolean":
+            return ArgumentKind.BOOLEAN
         if normalized in {"startnode", "endnode"}:
             return ArgumentKind.NODE
         return None
@@ -1942,6 +2392,33 @@ class SemanticAnalyzer:
         """
         if isinstance(expression, ListLiteral):
             return expression.items
+        if isinstance(expression, Case):
+            children: list[Expression] = []
+            if expression.operand is not None:
+                children.append(expression.operand)
+            for branch in expression.branches:
+                children.extend((branch.match, branch.result))
+            if expression.default is not None:
+                children.append(expression.default)
+            return tuple(children)
+        if isinstance(expression, MapLiteral):
+            return tuple(entry.value for entry in expression.entries)
+        if isinstance(expression, ListAccess):
+            return (expression.target, expression.index)
+        if isinstance(expression, ListSlice):
+            bounds = [expression.target]
+            if expression.start is not None:
+                bounds.append(expression.start)
+            if expression.end is not None:
+                bounds.append(expression.end)
+            return tuple(bounds)
+        if isinstance(expression, ListComprehension):
+            children = [expression.source]
+            if expression.where is not None:
+                children.append(expression.where)
+            if expression.projection is not None:
+                children.append(expression.projection)
+            return tuple(children)
         if isinstance(expression, Property):
             return (expression.target,)
         if isinstance(expression, FunctionCall):
@@ -1972,6 +2449,48 @@ class SemanticAnalyzer:
             return ("literal", type(expression.value).__name__, expression.value)
         if isinstance(expression, ListLiteral):
             return ("list", tuple(cls._expression_key(item) for item in expression.items))
+        if isinstance(expression, Case):
+            return (
+                "case",
+                cls._expression_key(expression.operand) if expression.operand is not None else None,
+                tuple(
+                    (cls._expression_key(branch.match), cls._expression_key(branch.result))
+                    for branch in expression.branches
+                ),
+                cls._expression_key(expression.default) if expression.default is not None else None,
+            )
+        if isinstance(expression, MapLiteral):
+            return (
+                "map",
+                tuple(
+                    (entry.key, cls._expression_key(entry.value)) for entry in expression.entries
+                ),
+            )
+        if isinstance(expression, ListAccess):
+            return (
+                "list_access",
+                cls._expression_key(expression.target),
+                cls._expression_key(expression.index),
+            )
+        if isinstance(expression, ListSlice):
+            return (
+                "list_slice",
+                cls._expression_key(expression.target),
+                cls._expression_key(expression.start) if expression.start is not None else None,
+                cls._expression_key(expression.end) if expression.end is not None else None,
+            )
+        if isinstance(expression, ListComprehension):
+            return (
+                "comprehension",
+                expression.variable,
+                cls._expression_key(expression.source),
+                cls._expression_key(expression.where) if expression.where is not None else None,
+                cls._expression_key(expression.projection)
+                if expression.projection is not None
+                else None,
+            )
+        if isinstance(expression, Subquery):
+            return ("subquery", expression.kind.value, tuple(map(id, expression.clauses)))
         if isinstance(expression, Variable):
             return ("variable", expression.name)
         if isinstance(expression, Parameter):
@@ -2016,6 +2535,53 @@ class SemanticAnalyzer:
             return repr(expression.value)
         if isinstance(expression, ListLiteral):
             return "[" + ", ".join(cls._expression_text(item) for item in expression.items) + "]"
+        if isinstance(expression, Case):
+            prefix = (
+                f"CASE {cls._expression_text(expression.operand)}"
+                if expression.operand is not None
+                else "CASE"
+            )
+            branches = " ".join(
+                f"WHEN {cls._expression_text(branch.match)} THEN "
+                f"{cls._expression_text(branch.result)}"
+                for branch in expression.branches
+            )
+            default = (
+                f" ELSE {cls._expression_text(expression.default)}"
+                if expression.default is not None
+                else ""
+            )
+            return f"{prefix} {branches}{default} END"
+        if isinstance(expression, MapLiteral):
+            entries = ", ".join(
+                f"{entry.key}: {cls._expression_text(entry.value)}" for entry in expression.entries
+            )
+            return "{" + entries + "}"
+        if isinstance(expression, ListAccess):
+            target = cls._expression_text(expression.target)
+            index = cls._expression_text(expression.index)
+            return f"{target}[{index}]"
+        if isinstance(expression, ListSlice):
+            start = "" if expression.start is None else cls._expression_text(expression.start)
+            end = "" if expression.end is None else cls._expression_text(expression.end)
+            return f"{cls._expression_text(expression.target)}[{start}:{end}]"
+        if isinstance(expression, ListComprehension):
+            where = (
+                f" WHERE {cls._expression_text(expression.where)}"
+                if expression.where is not None
+                else ""
+            )
+            projection = (
+                f" | {cls._expression_text(expression.projection)}"
+                if expression.projection is not None
+                else ""
+            )
+            return (
+                f"[{expression.variable} IN {cls._expression_text(expression.source)}"
+                f"{where}{projection}]"
+            )
+        if isinstance(expression, Subquery):
+            return f"{expression.kind.value} {{ ... }}"
         if isinstance(expression, Variable):
             return expression.name
         if isinstance(expression, Parameter):
@@ -2041,6 +2607,7 @@ class SemanticAnalyzer:
 
 __all__ = [
     "Analysis",
+    "CompoundAnalysis",
     "FilterStage",
     "LetStage",
     "MatchStage",

@@ -3,12 +3,16 @@
 # SPDX-License-Identifier: MIT
 """Recursive-descent and Pratt parser for the query language."""
 
+import dataclasses
 import typing
 from collections.abc import Sequence
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Case,
+    CaseBranch,
     Clause,
+    CompoundStatement,
     Create,
     Delete,
     EdgeDirection,
@@ -27,8 +31,13 @@ from pygrafito.engine.query.ast import (
     LabelWildcard,
     Let,
     LetAssignment,
+    ListAccess,
+    ListComprehension,
     ListLiteral,
+    ListSlice,
     Literal,
+    MapEntry,
+    MapLiteral,
     Match,
     Merge,
     Next,
@@ -47,9 +56,12 @@ from pygrafito.engine.query.ast import (
     Return,
     ReturnItem,
     Set,
+    SetOperation,
     SortItem,
     Star,
     Statement,
+    Subquery,
+    SubqueryKind,
     Unary,
     Unwind,
     Variable,
@@ -84,11 +96,7 @@ class Parser:
         ">": Operators.GREATER,
         ">=": Operators.GREATER_EQUAL,
     }
-    UNSUPPORTED_CLAUSES: typing.ClassVar[frozenset[Keyword]] = frozenset(
-        {
-            Keyword.CASE,
-        }
-    )
+    UNSUPPORTED_CLAUSES: typing.ClassVar[frozenset[Keyword]] = frozenset()
 
     def __init__(self, tokens: Sequence[Token], source: str = "") -> None:
         self._tokens = tuple(tokens)
@@ -109,7 +117,7 @@ class Parser:
         Returns
         -------
         Statement
-            Parsed statement.
+            Parsed linear or compound statement.
         """
         return cls(Lexer.tokenize(text), text).parse()
 
@@ -119,7 +127,7 @@ class Parser:
         Returns
         -------
         Statement
-            Parsed statement.
+            Parsed linear or compound statement.
 
         Raises
         ------
@@ -128,11 +136,72 @@ class Parser:
         QuerySemanticError
             If the statement uses a recognized but unsupported construct.
         """
+        first = self._parse_linear_statement()
+        if not self._at_set_operator():
+            self._finish_statement()
+            return first
+        terms = [first]
+        operators: list[SetOperation] = []
+        while self._at_set_operator():
+            operators.append(self._set_operator())
+            terms.append(self._parse_linear_statement())
+        order_by: tuple[SortItem, ...] = ()
+        skip: Expression | None = None
+        limit: Expression | None = None
+        stripped: list[Statement] = []
+        for index, term in enumerate(terms):
+            final = self._final_return(term)
+            has_page = final is not None and (
+                bool(final.order_by) or final.skip is not None or final.limit is not None
+            )
+            if index < len(terms) - 1 and has_page:
+                self._fail_syntax(
+                    "a set operand cannot carry ORDER BY, OFFSET, or LIMIT",
+                    self._current(),
+                )
+            if index == len(terms) - 1 and final is not None:
+                order_by = final.order_by
+                skip = final.skip
+                limit = final.limit
+                clauses = list(term.clauses)
+                clauses[-1] = dataclasses.replace(
+                    final,
+                    order_by=(),
+                    skip=None,
+                    limit=None,
+                )
+                stripped.append(Statement(clauses=tuple(clauses)))
+            else:
+                stripped.append(term)
+        self._finish_statement()
+        return CompoundStatement(
+            clauses=(),
+            terms=tuple(stripped),
+            operators=tuple(operators),
+            order_by=order_by,
+            skip=skip,
+            limit=limit,
+        )
+
+    def _parse_linear_statement(self) -> Statement:
+        """Parse one linear statement term.
+
+        Returns
+        -------
+        Statement
+            Parsed linear term.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the term is malformed.
+        """
         clauses: list[Clause] = []
         first = self._current()
         segment_start = 0
         self._previous_segment_has_return = False
-        while not self._at_statement_end():
+        self._segment_has_input = False
+        while not self._at_linear_end():
             if self._current().is_keyword(Keyword.NEXT):
                 self._parse_next(clauses, segment_start)
                 self._advance()
@@ -149,15 +218,109 @@ class Parser:
                 continue
             clauses.append(self._next_clause(clauses[segment_start:]))
         self._validate_clause_shape(clauses, first)
+        return Statement(clauses=tuple(clauses))
+
+    def _finish_statement(self) -> None:
+        """Consume an optional terminator and reject trailing statements.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If more than one statement is present.
+        QuerySemanticError
+            If a keyword starts another statement.
+        """
         self._match_punctuation(";")
-        if self._current().kind is not TokenKind.EOF:
-            if self._current().kind is TokenKind.KEYWORD:
+        if self._current().kind is TokenKind.EOF:
+            return
+        if self._current().kind is TokenKind.KEYWORD:
+            self._reject_unsupported(
+                self._current(),
+                "multiple statements are not supported",
+            )
+        self._fail_syntax("unexpected token after the statement", self._current())
+
+    @staticmethod
+    def _final_return(statement: Statement) -> Return | None:
+        """Return the final clause when it is a ``RETURN``.
+
+        Parameters
+        ----------
+        statement : Statement
+            Linear term to inspect.
+
+        Returns
+        -------
+        Return | None
+            Final return clause, or ``None``.
+        """
+        if statement.clauses and isinstance(statement.clauses[-1], Return):
+            return statement.clauses[-1]
+        return None
+
+    def _at_linear_end(self) -> bool:
+        """Report whether a linear statement term has ended.
+
+        Returns
+        -------
+        bool
+            ``True`` at the end of input, a terminator, or a set operator.
+        """
+        current = self._current()
+        return (
+            current.kind is TokenKind.EOF
+            or (current.kind is TokenKind.PUNCTUATION and current.value == ";")
+            or self._at_set_operator()
+        )
+
+    def _at_set_operator(self) -> bool:
+        """Report whether the current token starts a set operator.
+
+        Returns
+        -------
+        bool
+            ``True`` for UNION, INTERSECT, or EXCEPT.
+        """
+        return (
+            self._current().is_keyword(Keyword.UNION)
+            or self._current().is_keyword(Keyword.INTERSECT)
+            or self._current().is_keyword(Keyword.EXCEPT)
+        )
+
+    def _set_operator(self) -> SetOperation:
+        """Parse one set operator.
+
+        Returns
+        -------
+        SetOperation
+            Parsed set operator.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the token is not a set operator.
+        QuerySemanticError
+            If an out-of-profile ``ALL`` form is used.
+        """
+        if self._match_keyword(Keyword.UNION):
+            if self._match_keyword(Keyword.ALL):
+                return SetOperation.UNION_ALL
+            return SetOperation.UNION
+        if self._match_keyword(Keyword.INTERSECT):
+            if self._current().is_keyword(Keyword.ALL):
                 self._reject_unsupported(
                     self._current(),
-                    "multiple statements are not supported",
+                    "INTERSECT ALL is out of profile",
                 )
-            self._fail_syntax("unexpected token after the statement", self._current())
-        return Statement(clauses=tuple(clauses))
+            return SetOperation.INTERSECT
+        if self._match_keyword(Keyword.EXCEPT):
+            if self._current().is_keyword(Keyword.ALL):
+                self._reject_unsupported(
+                    self._current(),
+                    "EXCEPT ALL is out of profile",
+                )
+            return SetOperation.EXCEPT
+        self._fail_syntax("expected a set operator", self._current())
 
     def _parse_next(self, clauses: Sequence[Clause], segment_start: int) -> None:
         """Validate the segment before ``NEXT`` and record its result shape.
@@ -778,12 +941,15 @@ class Parser:
         With
             Parsed ``WITH`` clause.
         """
-        if self._check_operator("*"):
-            self._reject_unsupported(self._current(), "WITH * is not supported")
         distinct = self._match_keyword(Keyword.DISTINCT)
-        items = [self._return_item()]
-        while self._match_punctuation(","):
+        star = self._match_operator("*")
+        items: list[ReturnItem] = []
+        if not star:
             items.append(self._return_item())
+            while self._match_punctuation(","):
+                items.append(self._return_item())
+        elif self._check_punctuation(","):
+            self._fail_syntax("WITH * cannot be combined with other items", self._current())
         where: Expression | None = None
         if self._match_keyword(Keyword.WHERE):
             where = self._expression()
@@ -801,6 +967,7 @@ class Parser:
             order_by=order_by,
             skip=skip,
             limit=limit,
+            star=star,
         )
 
     def _return_clause(self) -> Return:
@@ -1588,7 +1755,7 @@ bool, LabelExpression | None, Expression | None]
             return left
 
     def _additive_expression(self) -> Expression:
-        """Parse addition and subtraction.
+        """Parse addition, subtraction, and string concatenation.
 
         Returns
         -------
@@ -1607,6 +1774,12 @@ bool, LabelExpression | None, Expression | None]
                 left = Binary(
                     left=left,
                     operator=Operators.SUBTRACT,
+                    right=self._multiplicative_expression(),
+                )
+            elif self._match_operator("||"):
+                left = Binary(
+                    left=left,
+                    operator=Operators.CONCAT,
                     right=self._multiplicative_expression(),
                 )
             else:
@@ -1650,7 +1823,7 @@ bool, LabelExpression | None, Expression | None]
         return self._postfix_expression()
 
     def _postfix_expression(self) -> Expression:
-        """Parse property access after a primary expression.
+        """Parse property access and list indexing after a primary expression.
 
         Returns
         -------
@@ -1658,19 +1831,32 @@ bool, LabelExpression | None, Expression | None]
             Parsed expression.
         """
         expression = self._primary_expression()
-        while self._match_punctuation("."):
-            token = self._current()
-            if not self._is_identifier(token):
-                self._fail_syntax("expected a property key after '.'", token)
-            self._advance()
-            expression = Property(
-                target=expression,
-                key=self._identifier_text(token),
-                span=token.span,
-            )
-        if self._check_punctuation("["):
-            self._reject_unsupported(self._current(), "index access is not supported")
-        return expression
+        while True:
+            if self._match_punctuation("."):
+                token = self._current()
+                if not self._is_identifier(token):
+                    self._fail_syntax("expected a property key after '.'", token)
+                self._advance()
+                expression = Property(
+                    target=expression,
+                    key=self._identifier_text(token),
+                    span=token.span,
+                )
+                continue
+            if not self._match_punctuation("["):
+                return expression
+            start: Expression | None = None
+            if not self._check_punctuation(":"):
+                start = self._expression()
+            if self._match_punctuation(":"):
+                end = None if self._check_punctuation("]") else self._expression()
+                self._expect_punctuation("]", "expected ']' to close the list slice")
+                expression = ListSlice(target=expression, start=start, end=end)
+                continue
+            if start is None:
+                self._fail_syntax("expected a list index or a slice", self._current())
+            self._expect_punctuation("]", "expected ']' to close the list index")
+            expression = ListAccess(target=expression, index=start)
 
     def _primary_expression(self) -> Expression:
         """Parse a literal, variable, parameter, call, or parenthesized expression.
@@ -1697,28 +1883,164 @@ bool, LabelExpression | None, Expression | None]
             self._advance()
             return Literal(value=None)
         if token.is_keyword(Keyword.CASE):
-            self._reject_unsupported(token, "CASE expressions are not supported")
+            self._advance()
+            return self._case_expression()
         if token.is_keyword(Keyword.CALL):
             self._reject_unsupported(token, "subqueries are not supported")
+        if self._is_identifier(token) and self._peek_is_punctuation("("):
+            return self._function_call()
         if token.kind is TokenKind.KEYWORD:
             self._fail_syntax(f"unexpected token {token.text!r}", token)
-        if token.kind is TokenKind.IDENTIFIER and self._peek_is_punctuation("("):
-            return self._function_call()
         if self._is_identifier(token):
             self._advance()
             name = self._identifier_text(token)
-            if name.upper() == "EXISTS" and self._check_punctuation("{"):
-                self._reject_unsupported(token, "subqueries are not supported")
+            if name.upper() in {"EXISTS", "COUNT"} and self._check_punctuation("{"):
+                kind = SubqueryKind(name.upper())
+                return self._subquery_expression(kind)
             return Variable(name=name, span=token.span)
         if self._match_punctuation("("):
             expression = self._expression()
             self._expect_punctuation(")", "expected ')' to close the expression")
             return expression
         if self._match_punctuation("["):
+            if self._is_identifier(self._current()) and self._peek_is_keyword(Keyword.IN):
+                return self._list_comprehension()
             return self._list_literal()
         if token.kind is TokenKind.PUNCTUATION and token.value == "{":
-            self._reject_unsupported(token, "map literals are not supported")
+            return self._map_literal()
         self._fail_syntax(f"unexpected token {token.text!r}", token)
+
+    def _case_expression(self) -> Case:
+        """Parse a simple or searched ``CASE`` after the keyword.
+
+        Returns
+        -------
+        Case
+            Parsed case expression.
+        """
+        operand: Expression | None = None
+        if not self._current().is_keyword(Keyword.WHEN):
+            operand = self._expression()
+        branches: list[CaseBranch] = []
+        while self._match_keyword(Keyword.WHEN):
+            match = self._expression()
+            self._expect_keyword(Keyword.THEN, "expected THEN after a CASE branch")
+            branches.append(CaseBranch(match=match, result=self._expression()))
+        if not branches:
+            self._fail_syntax("CASE requires at least one WHEN branch", self._current())
+        default: Expression | None = None
+        if self._match_keyword(Keyword.ELSE):
+            default = self._expression()
+        self._expect_keyword(Keyword.END, "expected END to close the CASE expression")
+        return Case(operand=operand, branches=tuple(branches), default=default)
+
+    def _map_literal(self) -> MapLiteral:
+        """Parse a map literal whose opening brace is the current token.
+
+        Returns
+        -------
+        MapLiteral
+            Parsed map literal.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If a key is duplicated or the map is malformed.
+        """
+        self._expect_punctuation("{", "expected '{' to start a map literal")
+        entries: list[MapEntry] = []
+        keys: set[str] = set()
+        if self._match_punctuation("}"):
+            return MapLiteral(entries=())
+        while True:
+            key = self._property_key()
+            if key in keys:
+                self._fail_syntax(f"duplicate map key {key!r}", self._current())
+            keys.add(key)
+            self._expect_punctuation(":", "expected ':' after a map key")
+            entries.append(MapEntry(key=key, value=self._expression()))
+            if not self._match_punctuation(","):
+                break
+        self._expect_punctuation("}", "expected '}' to close the map literal")
+        return MapLiteral(entries=tuple(entries))
+
+    def _list_comprehension(self) -> ListComprehension:
+        """Parse a list comprehension after its opening bracket.
+
+        Returns
+        -------
+        ListComprehension
+            Parsed comprehension.
+        """
+        token = self._current()
+        if not self._is_identifier(token):
+            self._fail_syntax("expected a variable in the list comprehension", token)
+        variable = self._identifier_text(self._advance())
+        self._expect_keyword(Keyword.IN, "expected IN after the list variable")
+        source = self._expression()
+        where: Expression | None = None
+        if self._match_keyword(Keyword.WHERE):
+            where = self._expression()
+        projection: Expression | None = None
+        if self._match_punctuation("|"):
+            projection = self._expression()
+        self._expect_punctuation("]", "expected ']' to close the list comprehension")
+        return ListComprehension(
+            variable=variable,
+            source=source,
+            where=where,
+            projection=projection,
+        )
+
+    def _subquery_expression(self, kind: SubqueryKind) -> Subquery:
+        """Parse a read-only subquery expression.
+
+        Parameters
+        ----------
+        kind : SubqueryKind
+            Whether the expression is ``EXISTS`` or ``COUNT``.
+
+        Returns
+        -------
+        Subquery
+            Parsed subquery expression.
+        """
+        self._expect_punctuation("{", "expected '{' to start a subquery")
+        clauses: list[Clause] = []
+        while not self._check_punctuation("}"):
+            current = self._current()
+            if current.kind is TokenKind.EOF:
+                self._fail_syntax("expected '}' to close the subquery", current)
+            if current.is_keyword(Keyword.RETURN) or current.is_keyword(Keyword.FINISH):
+                self._reject_unsupported(
+                    current,
+                    "a subquery cannot contain a result clause",
+                )
+            if current.is_keyword(Keyword.NEXT) or current.is_keyword(Keyword.YIELD):
+                self._reject_unsupported(
+                    current,
+                    "NEXT and YIELD are not supported in a subquery",
+                )
+            write_keywords = {
+                Keyword.CREATE,
+                Keyword.INSERT,
+                Keyword.MERGE,
+                Keyword.SET,
+                Keyword.REMOVE,
+                Keyword.DELETE,
+                Keyword.DETACH,
+                Keyword.NODETACH,
+            }
+            if current.kind is TokenKind.KEYWORD and Keyword(current.value) in write_keywords:
+                self._reject_unsupported(
+                    current,
+                    "a subquery is read-only",
+                )
+            clauses.append(self._next_clause(clauses))
+        self._expect_punctuation("}", "expected '}' to close the subquery")
+        if not clauses:
+            self._fail_syntax("a subquery requires a read stage", self._current())
+        return Subquery(kind=kind, clauses=tuple(clauses))
 
     def _function_call(self) -> FunctionCall:
         """Parse a function call whose name is the current identifier.

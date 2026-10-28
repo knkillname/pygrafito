@@ -3,7 +3,9 @@
 :::{note}
 This page describes the dialect the current release executes. GQL spellings are canonical; the
 compatibility aliases in the [GQL profile](gql-profile.md) are accepted with identical semantics.
-Open-ended traversal is the only remaining gated construct; see [Gated constructs](#gated-constructs).
+The profile is also the 1.0 target contract: `supported` rows work today, `gated` rows do not
+execute in this release, and `out of profile` rows are rejected. See
+[Gated constructs](#gated-constructs) and [Unsupported constructs](#unsupported-constructs).
 :::
 
 This page is the complete reference for the `pygrafito` query dialect: grammar, pattern
@@ -34,14 +36,17 @@ with Graph.open(":memory:") as graph:
 
 `Graph.prepare` parses, validates, and plans once, then returns a reusable
 `PreparedQuery`. A statement that contains any write clause is classified as a
-write and runs in its own transaction.
+write and runs in its own transaction. A compound query built with a set
+operator is read-only and runs in one transaction and one snapshot.
 
 ## Core dialect profile
 
 A statement is one or more linear segments separated by `NEXT`:
 
 ```text
-statement        = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment } [;]
+statement        = query-term { set-operator query-term } [order-clause] [offset-clause] [limit-clause] [;]
+query-term       = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment }
+set-operator     = "UNION" [ "ALL" ] | "INTERSECT" | "EXCEPT"
 segment          = { [OPTIONAL] MATCH <path pattern> [, ...] [WHERE <expression>]
                    | FOR <identifier> IN <expression> [ordinality]
                    | UNWIND <expression> AS <identifier> [ordinality]
@@ -57,6 +62,13 @@ ordinality       = "WITH" ( "ORDINALITY" | "OFFSET" ) <identifier>
 group-by         = "GROUP" "BY" ( "(" ")" | <expression> { "," <expression> } )
 yield-item       = <identifier> [ "AS" <identifier> ]
 ```
+
+A compound query combines two or more read-only linear queries with `UNION`,
+`UNION ALL`, `INTERSECT`, or `EXCEPT`. Every operand must return the same number
+of columns in the same order with the same names; the first operand names the
+result columns. A trailing `ORDER BY`, `OFFSET`, or `LIMIT` applies to the
+combined result, and an operand's final `RETURN` cannot carry those clauses.
+Operators are left-associative. See [Set operations](#set-operations).
 
 A `MATCH` clause carries one or more comma-separated path patterns and an
 optional `WHERE`; `OPTIONAL MATCH` uses the same shape with left-join semantics.
@@ -256,7 +268,7 @@ and `{,n}` for at most `n` hops:
 The canonical form does not imply `TRAIL`: its mode comes from the
 [path-mode rule](#path-modes), so a canonical path without an explicit mode is a
 `WALK`. The legacy `*n..m` form keeps its `TRAIL` default. An open-ended upper
-bound is deferred: `*`, `+`, `*n..`, and `{m,}` raise a positioned error naming
+bound is gated for 1.0: `*`, `+`, `*n..`, and `{m,}` raise a positioned error naming
 `add-gql-unbounded-traversal`.
 
 `TRAIL` is relationship-unique: one match never uses the same relationship
@@ -419,6 +431,17 @@ WHERE friends > 2 RETURN a
 `WHERE` after `WITH` sees only the projected scope. A `MATCH` may follow a
 `WITH`, and a write clause may follow one too. A statement cannot end with
 `WITH`: it must be followed by another read stage, a write clause, or `RETURN`.
+
+`WITH *` projects every variable in the current scope in introduction order and
+preserves each variable's kind. It is the only projection item in the clause and
+may carry `DISTINCT`, `WHERE`, `ORDER BY`, `OFFSET`, and `LIMIT`:
+
+```text
+MATCH (a:Program)-[r:TRUSTS]->(b:Program)
+WITH * RETURN a.designation AS a, b.designation AS b, type(r) AS rel
+
+MATCH (n:Program) WITH DISTINCT * RETURN count(*) AS total
+```
 
 `WITH` remains a pygrafito extension. The canonical composition form is `LET`
 plus `RETURN`/`NEXT` plus `GROUP BY`.
@@ -636,14 +659,16 @@ Aggregates also skip null inputs: `count(expr)`, `sum`, `avg`, `min`, `max`, and
 
 `WHERE` supports comparisons (`=`, `<>`, `!=`, `<`, `<=`, `>`, `>=`), `AND`,
 `OR`, `NOT`, `IN`, `IS NULL`, `IS NOT NULL`, `STARTS WITH`, `ENDS WITH`,
-`CONTAINS`, arithmetic, list literals, parameters, and parentheses.
+`CONTAINS`, arithmetic, string concatenation, list and map literals, list
+access and comprehensions, `CASE`, path functions, scalar functions, and
+read-only query expressions. Parentheses group expressions.
 
 Precedence, tightest first:
 
-1. Property access and function calls
+1. Property access, list access, and function calls
 2. Unary `-` and unary `+`
 3. `*`, `/`, `%`
-4. `+`, `-`
+4. `+`, `-`, `||`
 5. `=`, `<>`, `!=`, `<`, `<=`, `>`, `>=`, `IN`, `IS NULL`, `IS NOT NULL`,
    `STARTS WITH`, `ENDS WITH`, `CONTAINS`
 6. `NOT`
@@ -652,6 +677,64 @@ Precedence, tightest first:
 
 String predicates are case-sensitive. `STARTS WITH ''`, `ENDS WITH ''`, and
 `CONTAINS ''` follow ordinary string semantics.
+
+## CASE and map expressions
+
+`CASE` has a searched form and a simple form. The first matching branch wins,
+null never matches, and a missing `ELSE` produces null. Only the selected branch
+is evaluated:
+
+```text
+CASE WHEN n.cycles > 36 THEN 'veteran' ELSE 'rookie' END
+CASE n.cycles WHEN 36 THEN 'old' WHEN 37 THEN 'new' ELSE 'unknown' END
+```
+
+A map literal has static keys and expression values. Values evaluate left to
+right; duplicate keys are rejected. Maps are query values and can appear in
+projections, lists, and function arguments, but they are not storable property
+values. Maps compare by key set and dialect equality and cannot be ordered:
+
+```text
+MATCH (n:Program) RETURN {designation: n.designation, cycles: n.cycles} AS program
+RETURN {designation: 'Tron'} = {designation: 'Tron'} AS same
+```
+
+## List expressions
+
+List access is zero-based. A negative index counts from the end; an
+out-of-range index produces null. Slices are end-exclusive and clamp to the list
+bounds. A null list produces null, and a non-list target is an error:
+
+```text
+n.tags[0]
+n.tags[-1]
+n.tags[1:3]
+n.tags[:2]
+n.tags[2:]
+n.tags[:]
+```
+
+A list comprehension evaluates its source once, binds a local loop variable,
+optionally filters with `WHERE`, and optionally projects with the vertical-bar
+operator. Without a projection it emits the element. The loop variable cannot
+shadow an enclosing variable. A null source produces null; a non-list source is
+an error:
+
+```text
+[x IN [36, 37, 38] WHERE x > 36 | x * 2]
+[x IN n.tags WHERE x STARTS WITH 'ISO']
+```
+
+## String concatenation
+
+The canonical concatenation operator is `||`. Both operands must be strings and
+null propagates. Numeric `+` remains arithmetic, and mixing a string with a
+number is an error:
+
+```text
+'Kevin' || ' ' || 'Flynn'
+'Quorra' + ' ISO'
+```
 
 ## Scalar functions
 
@@ -676,9 +759,28 @@ Function names are case-insensitive.
 | `concat(a, b, ...)` | concatenate strings |
 | `startNode(r)` | node snapshot where a relationship starts |
 | `endNode(r)` | node snapshot where a relationship ends |
+| `range(start, end[, step])` | inclusive integer range |
+| `head(list)` | first element, or null for an empty list |
+| `last(list)` | last element, or null for an empty list |
+| `tail(list)` | all but the first element |
+| `reverse(list_or_string)` | reversed list or string |
+| `split(string, delimiter)` | split on a non-empty delimiter |
+| `substring(string, start[, length])` | zero-based substring |
+| `replace(string, search, replacement)` | replace every non-empty occurrence |
+| `toBoolean(value)` | boolean conversion, or null when impossible |
+| `round(number[, precision])` | round to a nearest value, ties away from zero |
+| `ceil(number)` | smallest integer not below the value |
+| `floor(number)` | largest integer not above the value |
+| `nodes(path)` | path nodes in traversal order |
+| `relationships(path)` | path relationships in traversal order |
+| `length(path)` | number of relationships in a path |
 
 Unknown functions and statically invalid argument kinds raise a semantic
-error. Null arguments propagate to null for the metadata and string functions.
+error. Null arguments propagate to null for the metadata, string, list, path,
+and numeric conversion functions. `range` requires a non-zero step; `split` and
+`replace` reject an empty delimiter or search text; `substring` rejects negative
+positions; and `round` rejects a negative precision. Path functions require a
+path value, and list element functions require a list.
 
 ## Arithmetic
 
@@ -686,6 +788,52 @@ error. Null arguments propagate to null for the metadata and string functions.
 integer and float arithmetic promotes to float. Division always returns a
 float. Division by zero and signed 64-bit integer overflow raise a query
 execution error rather than returning a coerced value.
+
+## Query expression subqueries
+
+`EXISTS { ... }` and `COUNT { ... }` are read-only query expressions. The inner
+block contains read stages (`MATCH`, `OPTIONAL MATCH`, `FILTER`, `LET`, `FOR`,
+and `WITH`) with at least one row source and no `RETURN` or `FINISH`. Outer
+variables are visible inside, so the inner pattern can constrain an existing
+binding; new inner names do not leak. `EXISTS` returns true when at least one
+inner row is produced, and `COUNT` returns the number of inner rows:
+
+```text
+MATCH (n:Program)
+WHERE EXISTS { MATCH (n)-[:TRUSTS]->(m:Program) }
+RETURN n.designation AS name
+
+MATCH (n:Program)
+RETURN n.designation AS name, COUNT { MATCH (n)-[:TRUSTS]->(m:Program) } AS trusts
+```
+
+Subqueries share the enclosing statement's transaction, snapshot, and query
+budget. Writes, `RETURN`, `FINISH`, `NEXT`, `YIELD`, and `CALL` are rejected
+inside a subquery.
+
+## Set operations
+
+A compound query combines read-only linear queries with `UNION`, `UNION ALL`,
+`INTERSECT`, or `EXCEPT`. `UNION ALL` preserves duplicate rows; the other forms
+use set semantics and keep the first occurrence. Operators are left-associative.
+The first operand defines the result column names, and every operand must return
+the same number of columns in the same order with the same names:
+
+```text
+MATCH (n:Program) RETURN n.designation AS name
+UNION
+MATCH (n:User) RETURN n.designation AS name
+ORDER BY name
+
+MATCH (n) RETURN n.designation AS name
+EXCEPT
+MATCH (n:Program) RETURN n.designation AS name
+```
+
+`ORDER BY`, `OFFSET`, and `LIMIT` after the compound apply to the combined
+result. A compound `ORDER BY` key must be an output column name. An operand's
+final `RETURN` cannot carry ordering or pagination. A compound query cannot
+contain a write, `FINISH`, or `RETURN NO BINDINGS`.
 
 ## Projection and result columns
 
@@ -887,12 +1035,12 @@ Write failures follow the same rule. A storage failure such as a protected
 deletion, a missing element, or an invalid stored value is raised as
 `QueryExecutionError` rather than as a storage or domain exception.
 
-A construct that the GQL profile lists but this release cannot execute is
-rejected with a positioned `QuerySemanticError` that names the construct and the
-follow-up change. An open-ended upper bound (`*`, `+`, `*n..`, or `{m,}`)
-reports `add-gql-unbounded-traversal`. A gated construct stops the whole
-statement before execution, so a gated clause never writes data. Constructs the
-profile does not list remain out of profile and keep their existing explicit
+A construct that the GQL profile marks `gated` is in the 1.0 target but cannot
+execute in this release. It is rejected with a positioned syntax or semantic query
+error; the profile names the follow-up change. An open-ended upper bound (`*`, `+`,
+`*n..`, or `{m,}`) reports `add-gql-unbounded-traversal`. A gated construct stops
+the whole statement before execution, so a gated clause never writes data.
+Constructs the profile marks out of profile keep their existing explicit
 rejection.
 
 ## Consistent execution snapshot
@@ -917,8 +1065,10 @@ segment rolls back every mutation of the statement.
 
 Keywords and function names are case-insensitive. Variable names, labels, and
 property keys are case-sensitive, so `Program` and `program` are different
-labels. `LET`, `NEXT`, `YIELD`, `GROUP`, `ORDINALITY`, and `FINISH` are reserved
-keywords; quote a name with backticks when it collides with one, as in
+labels. `LET`, `NEXT`, `YIELD`, `GROUP`, `ORDINALITY`, `FINISH`, `WHEN`, `THEN`,
+`ELSE`, `END`, `UNION`, `INTERSECT`, and `EXCEPT` are reserved keywords. Quote a
+name with backticks when it collides with one. Existing variables or aliases
+using the newly reserved spellings must be backtick-quoted. For example:
 ```text
 LET `next` = 1 RETURN `next`
 ```
@@ -929,7 +1079,9 @@ Backtick-quoted identifiers may contain spaces, dots, and escaped backticks
 ## Grammar summary
 
 ```text
-statement        = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment } [";"]
+statement        = query-term { set-operator query-term } [order-clause] [offset-clause] [limit-clause] [";"]
+query-term       = segment { "NEXT" [ "YIELD" yield-item { "," yield-item } ] segment }
+set-operator     = "UNION" [ "ALL" ] | "INTERSECT" | "EXCEPT"
 segment          = { match-clause | for-clause | unwind-clause | filter-clause
                  | with-clause | let-clause | insert-clause | create-clause
                  | merge-clause | set-clause | remove-clause | delete-clause }
@@ -942,7 +1094,7 @@ for-clause       = "FOR" identifier "IN" expression [ordinality]
 unwind-clause    = "UNWIND" expression "AS" identifier [ordinality]
 ordinality       = "WITH" ( "ORDINALITY" | "OFFSET" ) identifier
 filter-clause    = "FILTER" [ "WHERE" ] expression
-with-clause      = "WITH" [ "DISTINCT" ] return-item { "," return-item }
+with-clause      = "WITH" [ "DISTINCT" ] ( "*" | return-item { "," return-item } )
                    [where-clause] [order-clause] [offset-clause] [limit-clause]
 let-clause       = "LET" assignment { "," assignment }
 assignment       = identifier "=" expression
@@ -987,6 +1139,14 @@ sort-item        = expression [ "ASC" | "DESC" | "ASCENDING" | "DESCENDING" ]
                    [ "NULLS" ( "FIRST" | "LAST" ) ]
 offset-clause    = ( "OFFSET" | "SKIP" ) expression
 limit-clause     = "LIMIT" expression
+case-expression  = "CASE" [expression] { "WHEN" expression "THEN" expression }
+                   [ "ELSE" expression ] "END"
+map-literal      = "{" [ key ":" expression { "," key ":" expression } ] "}"
+list-access      = primary "[" expression "]"
+list-slice       = primary "[" [expression] ":" [expression] "]"
+list-comprehension = "[" identifier "IN" expression [ "WHERE" expression ]
+                   [ "|" expression ] "]"
+subquery         = ( "EXISTS" | "COUNT" ) "{" { read-stage } "}"
 ```
 
 An identifier is a plain name or a backtick-quoted name. A label, key, or alias
@@ -1013,25 +1173,48 @@ Use `-` for an undirected relationship.
 
 ## Gated constructs
 
-A construct the profile lists but this release cannot execute raises a
-positioned `QuerySemanticError` that names the construct and the follow-up
-change, and the statement does not execute:
+A construct that the profile marks `gated` is in the 1.0 target but cannot execute
+in this release. It is rejected with a positioned query error before the statement
+runs. The [GQL profile](gql-profile.md#gated-for-10) is the authoritative list of
+statuses and follow-up changes; this table mirrors the recognized forms.
 
 | Construct | Follow-up change |
 | --- | --- |
-| Open-ended quantifiers `*`, `+`, `*n..`, `{m,}` | `add-gql-unbounded-traversal` |
+| `DIFFERENT EDGES`, `REPEATABLE ELEMENTS` | `add-gql-match-modes` |
+| Grouped quantified paths | `add-gql-grouped-quantified-paths` |
+| `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | `add-gql-path-search` |
+| Open-ended quantifiers (`*`, `+`, `*n..`, `{m,}`) | `add-gql-unbounded-traversal` |
+
+The path constructs also depend on `define-gql-path-semantics`, which owns their
+interaction with the supported path modes, and on `add-gql-unbounded-traversal`
+where they need an open-ended walk.
 
 ## Unsupported constructs
 
-The following are recognized and rejected with a query error before execution:
+The following are outside the 1.0 profile and are rejected with an explicit query
+error before execution. The [GQL profile](gql-profile.md#out-of-profile) records
+the reason and error contract for each entry.
 
-- `WITH *`
-- subqueries (`CALL { ... }`, `EXISTS { ... }`)
-- `CASE` expressions and map literals
-- whole-map assignment (`SET n = {...}`) and merge assignment (`SET n += {...}`)
-- index access such as `n.list[0]`
-- `MERGE` over a quantified pattern, a path variable, or more than one pattern
-- `INSERT GRAPH` and `CREATE GRAPH`
+- `CALL { ... }`; use `EXISTS { ... }` or `COUNT { ... }`, or separate
+  statements.
+- Whole-map assignment (`SET n = {...}`, `SET n += {...}`); assign or remove
+  properties individually.
+- `exists(n.prop)`; use `n.prop IS NOT NULL`.
+- Regex predicates; use `STARTS WITH`, `ENDS WITH`, and `CONTAINS` for literal
+  predicates.
+- `shortestPath()` and `allShortestPaths()`; use `Graph.shortest_path` or the
+  target path-search prefixes.
+- `INSERT GRAPH` and `CREATE GRAPH`, and other catalog operations.
+- Non-language capabilities: graph types, sessions, procedures, in-language
+  transactions, `SELECT`, full temporal values, servers and drivers, clustering,
+  authentication, multi-tenancy, multi-graph storage, graph-algorithm APIs, full
+  Cypher compatibility, vector search, and full-text search.
 
-These boundaries are deliberate. Extending the dialect requires its own
-specification change rather than silently accepting partial behavior.
+Invalid uses of supported features, such as `MERGE` over a quantified pattern, a
+path variable, more than one pattern, or an invalid relationship shape, are also
+rejected. The [rejected forms](gql-profile.md#rejected-forms) table and the
+query-language analysis document the exact restrictions.
+
+The path constructs are gated for 1.0, not out of profile. Extending the dialect
+requires its own specification change rather than silently accepting partial
+behavior.

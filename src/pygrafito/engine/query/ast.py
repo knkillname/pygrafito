@@ -27,6 +27,7 @@ class Operators:
     ENDS_WITH: str = "ENDS WITH"
     CONTAINS: str = "CONTAINS"
     ADD: str = "+"
+    CONCAT: str = "||"
     SUBTRACT: str = "-"
     MULTIPLY: str = "*"
     DIVIDE: str = "/"
@@ -59,6 +60,150 @@ class ListLiteral:
     """
 
     items: tuple[Expression, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CaseBranch:
+    """One ``WHEN ... THEN ...`` branch of a ``CASE`` expression.
+
+    Parameters
+    ----------
+    match : Expression
+        Value or predicate compared or tested by the branch.
+    result : Expression
+        Result produced when the branch matches.
+    """
+
+    match: Expression
+    result: Expression
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Case:
+    """A simple or searched ``CASE`` expression.
+
+    Parameters
+    ----------
+    operand : Expression | None
+        Simple-case operand, or ``None`` for a searched case.
+    branches : tuple[CaseBranch, ...]
+        Branches in evaluation order.
+    default : Expression | None
+        Optional ``ELSE`` result.
+    """
+
+    operand: Expression | None
+    branches: tuple[CaseBranch, ...]
+    default: Expression | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class MapEntry:
+    """One key-value entry in an expression map literal.
+
+    Parameters
+    ----------
+    key : str
+        Static key name.
+    value : Expression
+        Value expression.
+    """
+
+    key: str
+    value: Expression
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class MapLiteral:
+    """A map literal such as ``{designation: 'Tron'}``.
+
+    Parameters
+    ----------
+    entries : tuple[MapEntry, ...]
+        Entries in source order.
+    """
+
+    entries: tuple[MapEntry, ...]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ListAccess:
+    """A list index access.
+
+    Parameters
+    ----------
+    target : Expression
+        List-producing expression.
+    index : Expression
+        Zero-based index expression.
+    """
+
+    target: Expression
+    index: Expression
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ListSlice:
+    """A list slice such as ``values[start:end]``.
+
+    Parameters
+    ----------
+    target : Expression
+        List-producing expression.
+    start : Expression | None
+        Inclusive start bound, or ``None`` for the beginning.
+    end : Expression | None
+        Exclusive end bound, or ``None`` for the end.
+    """
+
+    target: Expression
+    start: Expression | None
+    end: Expression | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class ListComprehension:
+    """A list comprehension.
+
+    Parameters
+    ----------
+    variable : str
+        Local loop variable.
+    source : Expression
+        Source list expression.
+    where : Expression | None
+        Optional filter predicate.
+    projection : Expression | None
+        Optional projection expression; the element is emitted when absent.
+    """
+
+    variable: str
+    source: Expression
+    where: Expression | None = None
+    projection: Expression | None = None
+
+
+class SubqueryKind(Enum):
+    """Kind of query expression used inside a scalar expression."""
+
+    EXISTS = "EXISTS"
+    COUNT = "COUNT"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Subquery:
+    """A read-only ``EXISTS { ... }`` or ``COUNT { ... }`` expression.
+
+    Parameters
+    ----------
+    kind : SubqueryKind
+        Whether the expression tests existence or counts inner rows.
+    clauses : tuple[Clause, ...]
+        Read-stage clauses of the inner query.
+    """
+
+    kind: SubqueryKind
+    clauses: tuple[Clause, ...]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -201,6 +346,12 @@ type Expression = (
     | Binary
     | IsNull
     | Star
+    | Case
+    | MapLiteral
+    | ListAccess
+    | ListSlice
+    | ListComprehension
+    | Subquery
 )
 
 
@@ -677,6 +828,9 @@ class With:
         Skip expression, by default ``None``.
     limit : Expression | None, optional
         Limit expression, by default ``None``.
+    star : bool, optional
+        Whether the clause projects every variable in scope, by default
+        ``False``.
     """
 
     items: tuple[ReturnItem, ...]
@@ -685,6 +839,7 @@ class With:
     order_by: tuple[SortItem, ...] = ()
     skip: Expression | None = None
     limit: Expression | None = None
+    star: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -829,7 +984,7 @@ type Clause = (
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Statement:
-    """One complete statement as an ordered clause sequence.
+    """One linear statement as an ordered clause sequence.
 
     Parameters
     ----------
@@ -840,9 +995,49 @@ class Statement:
     clauses: tuple[Clause, ...]
 
 
+class SetOperation(Enum):
+    """Set operator between two linear query terms."""
+
+    UNION = "UNION"
+    UNION_ALL = "UNION ALL"
+    INTERSECT = "INTERSECT"
+    EXCEPT = "EXCEPT"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class CompoundStatement(Statement):
+    """A compound query made of read-only linear statements.
+
+    Parameters
+    ----------
+    terms : tuple[Statement, ...]
+        Linear query terms in source order.
+    operators : tuple[SetOperation, ...]
+        Set operators between adjacent terms.
+    order_by : tuple[SortItem, ...], optional
+        Compound-level ordering keys, by default none.
+    skip : Expression | None, optional
+        Compound-level skip expression, by default ``None``.
+    limit : Expression | None, optional
+        Compound-level limit expression, by default ``None``.
+    """
+
+    terms: tuple[Statement, ...]
+    operators: tuple[SetOperation, ...]
+    order_by: tuple[SortItem, ...] = ()
+    skip: Expression | None = None
+    limit: Expression | None = None
+
+
+type ParsedStatement = Statement
+
+
 __all__ = [
     "Binary",
+    "Case",
+    "CaseBranch",
     "Clause",
+    "CompoundStatement",
     "Create",
     "Delete",
     "EdgeDirection",
@@ -855,8 +1050,13 @@ __all__ = [
     "LabelRemoval",
     "Let",
     "LetAssignment",
+    "ListAccess",
+    "ListComprehension",
     "ListLiteral",
+    "ListSlice",
     "Literal",
+    "MapEntry",
+    "MapLiteral",
     "Match",
     "Merge",
     "Next",
@@ -864,6 +1064,7 @@ __all__ = [
     "Operators",
     "OrdinalityKind",
     "Parameter",
+    "ParsedStatement",
     "PathMode",
     "PathPattern",
     "Property",
@@ -875,9 +1076,12 @@ __all__ = [
     "Return",
     "ReturnItem",
     "Set",
+    "SetOperation",
     "SortItem",
     "Star",
     "Statement",
+    "Subquery",
+    "SubqueryKind",
     "Unary",
     "Unwind",
     "Variable",

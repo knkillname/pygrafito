@@ -100,9 +100,10 @@ class TestLexer:
         assert tokens[1].value == "under_score"
 
     def test_operators_and_punctuation(self) -> None:
-        tokens = Lexer.tokenize("<> != <= >= = < > + - * / % ( ) [ ] { } : , . | ;")
+        tokens = Lexer.tokenize("|| <> != <= >= = < > + - * / % ( ) [ ] { } : , . | ;")
         values = [str(token.value) for token in tokens[:-1]]
-        assert values[:12] == [
+        assert values[:13] == [
+            "||",
             "<>",
             "!=",
             "<=",
@@ -116,9 +117,9 @@ class TestLexer:
             "/",
             "%",
         ]
-        assert values[12:] == ["(", ")", "[", "]", "{", "}", ":", ",", ".", "|", ";"]
-        assert all(token.kind is TokenKind.OPERATOR for token in tokens[:12])
-        assert all(token.kind is TokenKind.PUNCTUATION for token in tokens[12:-1])
+        assert values[13:] == ["(", ")", "[", "]", "{", "}", ":", ",", ".", "|", ";"]
+        assert all(token.kind is TokenKind.OPERATOR for token in tokens[:13])
+        assert all(token.kind is TokenKind.PUNCTUATION for token in tokens[13:-1])
         assert tokens[-1].kind is TokenKind.EOF
 
     def test_line_and_block_comments_are_ignored(self) -> None:
@@ -163,6 +164,29 @@ class TestLexer:
             token = Lexer.tokenize(name.lower())[0]
             assert token.kind is TokenKind.KEYWORD
             assert token.value == name
+
+    @pytest.mark.parametrize(
+        "name",
+        ["WHEN", "THEN", "ELSE", "END", "UNION", "INTERSECT", "EXCEPT"],
+    )
+    def test_expression_and_set_keywords_are_reserved(self, name: str) -> None:
+        token = Lexer.tokenize(name.lower())[0]
+        assert token.kind is TokenKind.KEYWORD
+        assert token.value == name
+
+    def test_new_keywords_quote_as_identifiers(self) -> None:
+        tokens = Lexer.tokenize("`when` `then` `else` `end` `union` `intersect` `except`")
+        assert len(tokens) == 8
+        assert all(token.kind is TokenKind.QUOTED_IDENTIFIER for token in tokens[:-1])
+        assert [str(token.value) for token in tokens[:-1]] == [
+            "when",
+            "then",
+            "else",
+            "end",
+            "union",
+            "intersect",
+            "except",
+        ]
 
     @pytest.mark.parametrize(
         ("text", "line", "column", "fragment"),

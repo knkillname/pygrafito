@@ -487,8 +487,8 @@ class TestTours:
     def test_deferred_syntax_is_absent(self) -> None:
         """Reject syntax that the current release still cannot execute."""
         forbidden = re.compile(
-            r"\b(?:CASE|CALL)\b|\bEXISTS\s*\{|\bWITH\s*\*"
-            r"|\[\s*\*\s*\]|\[\s*\+\s*\]|\{\s*\d+\s*,\s*\}|\{\s*,\s*\d+\s*\}",
+            r"\bCALL\b|\[\s*\*\s*\]|\[\s*\+\s*\]"
+            r"|\{\s*\d+\s*,\s*\}|\{\s*,\s*\d+\s*\}",
             flags=re.MULTILINE,
         )
         for path in sorted(self.DIRECTORY.glob("*.gql")):

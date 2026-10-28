@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Queries can now use `CASE`, map literals, list indexing, slicing, and comprehensions,
+  `||` string concatenation, path functions, and the extended scalar functions.
+- Queries can now use read-only `EXISTS { ... }` and `COUNT { ... }` subqueries, including
+  correlated forms that refer to the current row.
+- Queries can now combine read-only results with `UNION`, `UNION ALL`, `INTERSECT`, and `EXCEPT`,
+  with ordering and pagination over the combined rows.
+- `WITH *` now keeps the full current scope without listing every variable.
+- The GQL profile now publishes the complete 1.0 target, including the expression, subquery,
+  set-operation, and path surfaces, and distinguishes what works today, what is planned for 1.0,
+  and what is intentionally unsupported. The profile also defines the 1.0 completion gate and the
+  policy for changing it after release.
+
+### Changed
+
+- **BREAKING:** `WHEN`, `THEN`, `ELSE`, `END`, `UNION`, `INTERSECT`, and `EXCEPT` are now reserved
+  keywords. If an existing query uses one of these words as a variable or alias, wrap it in
+  backticks; for example, `when` becomes `` `when` ``.
+
 ## [0.9.0] - 2026-10-27
 
 This is a pre-1.0 release focused on GQL composition and path control. It adds multi-step

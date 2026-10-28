@@ -5,16 +5,17 @@
 
 import dataclasses
 import typing
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 
 import pytest
 
-from pygrafito import Graph
+from pygrafito import Graph, QueryBudget
 from pygrafito.engine.query.results import QueryResult, Row
 from pygrafito.engine.query.values import QueryValue
 from pygrafito.model import (
     Node,
     Path,
+    QueryBudgetExceededError,
     QueryExecutionError,
     QuerySemanticError,
     Relationship,
@@ -1038,3 +1039,220 @@ class TestMergeExecution(_QueryGraph):
             )
         after = graph.query("MATCH (n:Program) RETURN count(*) AS total").rows[0]["total"]
         assert after == before
+
+
+class TestQuerySurfaceExecution(_QueryGraph):
+    """Verify execution of the 1.0 expression, subquery, and set surface."""
+
+    def test_case_expression(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Quorra'}) "
+            "RETURN CASE n.cycles WHEN 37 THEN 'active' ELSE 'unknown' END AS state"
+        )
+        assert self.values(result) == [("active",)]
+
+    def test_case_lazy_branch_and_group(self, graph: Graph) -> None:
+        lazy = graph.query("UNWIND [1] AS row RETURN CASE WHEN true THEN 1 ELSE 1 / 0 END AS value")
+        grouped = graph.query(
+            "MATCH (n:Program) "
+            "RETURN CASE WHEN n.cycles >= 37 THEN 'high' ELSE 'low' END AS band, "
+            "count(*) AS total ORDER BY band"
+        )
+        assert self.values(lazy) == [(1,)]
+        assert self.values(grouped) == [("high", 2), ("low", 4)]
+
+    def test_map_is_not_orderable_and_groups(self, graph: Graph) -> None:
+        with pytest.raises(QueryExecutionError, match="cannot be ordered"):
+            graph.query("UNWIND [{designation: 'Tron'}] AS row RETURN row ORDER BY row")
+        grouped = graph.query(
+            "MATCH (n:Program {designation: 'Quorra'}) "
+            "RETURN {designation: n.designation} AS program, count(*) AS total "
+            "GROUP BY {designation: n.designation}"
+        )
+        value = self.values(grouped)[0][0]
+        assert isinstance(value, Mapping)
+        assert dict(value) == {"designation": "Quorra"}
+        assert self.values(grouped)[0][1] == 1
+
+    def test_list_null_and_out_of_range(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1] AS row RETURN [1, 2][5] AS missing, null[0] AS none, "
+            "[1, 2][-5:5] AS clamped"
+        )
+        assert self.values(result) == [(None, None, [1, 2])]
+
+    def test_map_literal_and_equality(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Quorra'}) "
+            "RETURN {designation: n.designation, cycles: n.cycles} = "
+            "{designation: 'Quorra', cycles: 37} AS same"
+        )
+        assert self.values(result) == [(True,)]
+
+    def test_list_index_slice_and_comprehension(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Quorra'}) "
+            "RETURN n.tags[0] AS first, n.tags[0:1] AS head, "
+            "[x IN n.tags WHERE x STARTS WITH 'I' | x] AS iso"
+        )
+        assert self.values(result) == [("ISO", ["ISO"], ["ISO"])]
+
+    def test_string_concatenation(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1] AS row RETURN 'Kevin' || ' ' || 'Flynn' AS name, "
+            "'Quorra' + ' ' + 'ISO' AS alias"
+        )
+        assert self.values(result) == [("Kevin Flynn", "Quorra ISO")]
+
+    def test_path_functions(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH p = (a:Program {designation: 'Kevin Flynn'})-[:TRUSTS]->(b:Program) "
+            "RETURN length(p) AS hops, [n IN nodes(p) | n.designation] AS names, "
+            "[r IN relationships(p) | type(r)] AS types"
+        )
+        missing = graph.query(
+            "OPTIONAL MATCH p = (a:Program {designation: 'Nobody'})-[:TRUSTS]->(b) "
+            "RETURN length(p) AS hops"
+        )
+        assert self.values(result) == [(1, ["Kevin Flynn", "Tron"], ["TRUSTS"])]
+        assert self.values(missing) == [(None,)]
+
+    def test_extended_scalar_functions(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1] AS row RETURN range(36, 40, 2) AS cycles, "
+            "head([36, 37]) AS first, last([36, 37]) AS final, tail([36, 37]) AS rest, "
+            "reverse([36, 37]) AS backwards, split('Tron|Quorra', '|') AS names, "
+            "substring('Quorra', 1, 3) AS part, replace('Tron', 'T', 'R') AS replaced, "
+            "toBoolean('TRUE') AS active, round(36.5) AS rounded, ceil(36.1) AS up, "
+            "floor(36.9) AS down"
+        )
+        assert self.values(result) == [
+            (
+                [36, 38, 40],
+                36,
+                37,
+                [37],
+                [37, 36],
+                ["Tron", "Quorra"],
+                "uor",
+                "Rron",
+                True,
+                37,
+                37,
+                36,
+            )
+        ]
+
+    def test_with_star_preserves_scope(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (a:Program)-[r:TRUSTS]->(b:Program) WITH * "
+            "RETURN a.designation AS a, b.designation AS b, type(r) AS rel ORDER BY a"
+        )
+        distinct = graph.query("MATCH (n:Program) WITH DISTINCT * RETURN count(*) AS total")
+        assert self.values(result) == [
+            ("Clu", "Kevin Flynn", "TRUSTS"),
+            ("Kevin Flynn", "Tron", "TRUSTS"),
+        ]
+        assert self.values(distinct) == [(6,)]
+
+    def test_correlated_exists_and_count(self, graph: Graph) -> None:
+        exists = graph.query(
+            "MATCH (n:Program) WHERE EXISTS { MATCH (n)-[:TRUSTS]->(m:Program) } "
+            "RETURN n.designation AS name ORDER BY name"
+        )
+        counts = graph.query(
+            "MATCH (n:Program) RETURN n.designation AS name, "
+            "COUNT { MATCH (n)-[:ALLIES_WITH]->(m:Program) } AS allies ORDER BY name"
+        )
+        assert self.designations(exists) == ["Clu", "Kevin Flynn"]
+        assert self.values(counts)[:3] == [
+            ("Clu", 0),
+            ("Kevin Flynn", 2),
+            ("Quorra", 1),
+        ]
+
+    def test_uncorrelated_count(self, graph: Graph) -> None:
+        result = graph.query(
+            "MATCH (n:Program {designation: 'Tron'}) RETURN COUNT { MATCH (m:Program) } AS programs"
+        )
+        assert self.values(result) == [(6,)]
+
+    def test_subquery_budget_is_shared(self, graph: Graph) -> None:
+        with pytest.raises(QueryBudgetExceededError):
+            graph.query(
+                "MATCH (n:Program) RETURN COUNT { MATCH (m:Program) } AS programs",
+                budget=QueryBudget(max_rows=3),
+            )
+
+    def test_subquery_uses_the_active_transaction(self, graph: Graph) -> None:
+        with graph.transaction() as transaction:
+            transaction.add_node("Program", designation="Yori")
+            result = transaction.query(
+                "MATCH (n:Program {designation: 'Yori'}) "
+                "RETURN COUNT { MATCH (m:Program) } AS programs"
+            )
+            assert self.values(result) == [(7,)]
+
+    def test_subquery_leaves_no_transaction_open(self, graph: Graph) -> None:
+        graph.query("MATCH (n:Program) RETURN COUNT { MATCH (m:Program) } AS programs")
+        assert not graph._database.connection.in_transaction
+
+    def test_set_operations(self, graph: Graph) -> None:
+        union_all = graph.query(
+            "MATCH (n:Program {designation: 'Tron'}) RETURN n.designation AS name "
+            "UNION ALL MATCH (m:Program {designation: 'Tron'}) RETURN m.designation AS name"
+        )
+        union = graph.query(
+            "MATCH (n:Program) RETURN n.designation AS name "
+            "UNION MATCH (n:Program) RETURN n.designation AS name ORDER BY name"
+        )
+        intersect = graph.query(
+            "MATCH (n) RETURN n.designation AS name "
+            "INTERSECT MATCH (n:Program) RETURN n.designation AS name ORDER BY name"
+        )
+        except_ = graph.query(
+            "MATCH (n) RETURN n.designation AS name "
+            "EXCEPT MATCH (n:Program) RETURN n.designation AS name ORDER BY name"
+        )
+        assert self.designations(union_all) == ["Tron", "Tron"]
+        assert self.designations(union) == [
+            "Clu",
+            "Kevin Flynn",
+            "Quorra",
+            "Rinzler",
+            "Sam Flynn",
+            "Tron",
+        ]
+        assert self.designations(intersect)[0] == "Clu"
+        assert self.designations(except_) == ["ENCOM", "Grid Node", "The Grid"]
+
+    def test_union_uses_dialect_numeric_equality(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [36] AS x RETURN x AS n UNION UNWIND [36.0] AS x RETURN x AS n"
+        )
+        assert self.values(result) == [(36,)]
+
+    def test_compound_uses_the_active_transaction(self, graph: Graph) -> None:
+        with graph.transaction() as transaction:
+            transaction.add_node("Program", designation="Yori")
+            result = transaction.query(
+                "MATCH (n:Program {designation: 'Yori'}) RETURN n.designation AS name "
+                "UNION MATCH (m:Program {designation: 'Tron'}) RETURN m.designation AS name "
+                "ORDER BY name"
+            )
+            assert self.designations(result) == ["Tron", "Yori"]
+
+    def test_set_operation_is_left_associative(self, graph: Graph) -> None:
+        result = graph.query(
+            "UNWIND [1, 2] AS x RETURN x AS n "
+            "UNION ALL UNWIND [2, 3] AS x RETURN x AS n "
+            "EXCEPT UNWIND [2] AS x RETURN x AS n ORDER BY n"
+        )
+        assert self.values(result) == [(1,), (3,)]
+
+    def test_set_operation_columns_must_match(self, graph: Graph) -> None:
+        with pytest.raises(QuerySemanticError, match="same names"):
+            graph.query(
+                "MATCH (n:Program) RETURN n.designation AS name "
+                "UNION MATCH (m:Program) RETURN m.designation AS label"
+            )

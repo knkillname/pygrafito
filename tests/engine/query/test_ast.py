@@ -9,6 +9,9 @@ import pytest
 
 from pygrafito.engine.query.ast import (
     Binary,
+    Case,
+    CaseBranch,
+    CompoundStatement,
     Create,
     Delete,
     EdgeDirection,
@@ -16,8 +19,13 @@ from pygrafito.engine.query.ast import (
     IsNull,
     LabelAssignment,
     LabelRemoval,
+    ListAccess,
+    ListComprehension,
     ListLiteral,
+    ListSlice,
     Literal,
+    MapEntry,
+    MapLiteral,
     Match,
     Merge,
     NodePattern,
@@ -33,9 +41,12 @@ from pygrafito.engine.query.ast import (
     Return,
     ReturnItem,
     Set,
+    SetOperation,
     SortItem,
     Star,
     Statement,
+    Subquery,
+    SubqueryKind,
     Unary,
     Unwind,
     Variable,
@@ -132,6 +143,40 @@ class TestAstNodes:
         assert isinstance(returned, Return)
         assert returned.distinct
         assert returned.order_by[0].descending
+
+    def test_expression_surface_nodes(self) -> None:
+        case = Case(
+            operand=Variable(name="n"),
+            branches=(CaseBranch(match=Literal(value=36), result=Literal(value="old")),),
+            default=Literal(value="new"),
+        )
+        map_literal = MapLiteral(
+            entries=(MapEntry(key="designation", value=Literal(value="Tron")),)
+        )
+        access = ListAccess(target=ListLiteral(items=()), index=Literal(value=0))
+        slice_ = ListSlice(target=ListLiteral(items=()), start=None, end=Literal(value=1))
+        comprehension = ListComprehension(
+            variable="x",
+            source=ListLiteral(items=(Literal(value=1),)),
+        )
+        subquery = Subquery(kind=SubqueryKind.EXISTS, clauses=())
+        assert case.default is not None
+        assert map_literal.entries[0].key == "designation"
+        assert isinstance(access.index, Literal)
+        assert slice_.end is not None
+        assert comprehension.projection is None
+        assert subquery.kind is SubqueryKind.EXISTS
+
+    def test_compound_statement_nodes(self) -> None:
+        term = Statement(clauses=(Return(items=(ReturnItem(expression=Literal(value=1)),)),))
+        compound = CompoundStatement(
+            clauses=(),
+            terms=(term, term),
+            operators=(SetOperation.UNION_ALL,),
+            order_by=(SortItem(expression=Variable(name="value")),),
+        )
+        assert len(compound.terms) == 2
+        assert compound.operators == (SetOperation.UNION_ALL,)
 
     def test_unwind_and_merge_fields(self) -> None:
         unwind = Unwind(expression=ListLiteral(items=()), variable="value")

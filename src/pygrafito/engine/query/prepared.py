@@ -6,7 +6,7 @@
 from collections.abc import Mapping
 
 from pygrafito.engine.query.executor import QueryExecutor
-from pygrafito.engine.query.plan import Plan
+from pygrafito.engine.query.plan import PlannedStatement
 from pygrafito.engine.query.results import QueryResult
 from pygrafito.engine.query.values import QueryValue
 from pygrafito.model import QueryBudget
@@ -21,11 +21,11 @@ class PreparedQuery:
         Executor bound to the graph that prepared the query.
     text : str
         Original query source text.
-    plan : Plan
+    plan : PlannedStatement
         Planned query reused by every execution.
     """
 
-    def __init__(self, executor: QueryExecutor, text: str, plan: Plan) -> None:
+    def __init__(self, executor: QueryExecutor, text: str, plan: PlannedStatement) -> None:
         self._executor = executor
         self._text = text
         self._plan = plan
