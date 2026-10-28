@@ -12,7 +12,7 @@ from pygrafito.engine.query.tokens import (
     Token,
     TokenKind,
 )
-from pygrafito.model import QuerySyntaxError
+from pygrafito.model import QuerySemanticError, QuerySyntaxError
 
 
 class Lexer:
@@ -24,6 +24,7 @@ class Lexer:
         Query source text.
     """
 
+    MAX_INTEGER_DIGITS: typing.ClassVar[int] = 4300
     OPERATORS: typing.ClassVar[tuple[str, ...]] = (
         "||",
         "=~",
@@ -452,7 +453,20 @@ class Lexer:
             self._fail("invalid numeric literal", start_line, start_column)
         text = self._text[start_offset : self._offset]
         kind = TokenKind.FLOAT if is_float else TokenKind.INTEGER
-        value: int | float = float(text) if is_float else int(text)
+        if not is_float and len(text) > self.MAX_INTEGER_DIGITS:
+            raise QuerySemanticError(
+                f"integer literal exceeds {self.MAX_INTEGER_DIGITS} digits",
+                line=start_line,
+                column=start_column,
+            )
+        try:
+            value: int | float = float(text) if is_float else int(text)
+        except ValueError:
+            raise QuerySemanticError(
+                f"integer literal exceeds {self.MAX_INTEGER_DIGITS} digits",
+                line=start_line,
+                column=start_column,
+            ) from None
         return self._token(kind, value, start_offset, start_line, start_column)
 
     def _parameter(

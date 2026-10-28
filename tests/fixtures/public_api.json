@@ -1,0 +1,488 @@
+{
+  "core": {
+    "Graph": {
+      "methods": {
+        "add_labels": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship | int, *labels: str) -> pygrafito.model.Node | pygrafito.model.Relationship",
+        "add_node": "(self, *labels: str, **properties: Value) -> pygrafito.model.Node",
+        "add_relationship": "(self, start: pygrafito.model.Node | int, labels: str | collections.abc.Iterable[str], end: pygrafito.model.Node | int, *, directed: bool = True, **properties: Value) -> pygrafito.model.Relationship",
+        "backup_to": "(self, path: str | pathlib.Path) -> pathlib.Path",
+        "check_integrity": "(self) -> tuple[str, ...]",
+        "close": "(self) -> None",
+        "constraints": "(self) -> tuple[pygrafito.model.Constraint, ...]",
+        "create_node_index": "(self, key: str) -> pygrafito.model.Index",
+        "create_node_uniqueness_constraint": "(self, label: str, key: str) -> pygrafito.model.Constraint",
+        "create_relationship_index": "(self, key: str) -> pygrafito.model.Index",
+        "create_relationship_uniqueness_constraint": "(self, label: str, key: str) -> pygrafito.model.Constraint",
+        "delete": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship, *, detach: bool = False) -> None",
+        "drop_constraint": "(self, constraint: pygrafito.model.Constraint) -> None",
+        "drop_index": "(self, index: pygrafito.model.Index) -> None",
+        "explain": "(self, text: str, parameters: collections.abc.Mapping[str, QueryValue] | None = None) -> tuple[str, ...]",
+        "export_jsonl": "(self, path: str | pathlib.Path, *, overwrite: bool = False) -> pygrafito.engine.interop.InteropSummary",
+        "find_nodes": "(self, *labels: str, **properties: Value) -> collections.abc.Iterator[pygrafito.model.Node]",
+        "find_relationships": "(self, *labels: str, directed: bool | None = None, **properties: Value) -> collections.abc.Iterator[pygrafito.model.Relationship]",
+        "import_file": "(self, path: str | pathlib.Path, statement: str, *, format: str | None = None, batch_size: int = 1000, atomic: bool = False) -> pygrafito.engine.query.results.ImportSummary",
+        "import_rows": "(self, statement: str, rows: collections.abc.Iterable[collections.abc.Mapping[str, object]], *, batch_size: int = 1000, atomic: bool = False) -> pygrafito.engine.query.results.ImportSummary",
+        "indexes": "(self) -> tuple[pygrafito.model.Index, ...]",
+        "node": "(self, node_id: int) -> pygrafito.model.Node",
+        "open": "(cls, path: str | pathlib.Path, *, create: bool = True, readonly: bool = False, busy_timeout: int | None = None, budget: pygrafito.model.QueryBudget | None = None) -> Self",
+        "paths": "(self, start: pygrafito.model.Node | int, end: pygrafito.model.Node | int, *, max_depth: int, min_depth: int = 1, direction: pygrafito.model.Direction = <Direction.OUTGOING: 'outgoing'>, labels: collections.abc.Iterable[str] | None = None, limit: int | None = None) -> collections.abc.Iterator[pygrafito.model.Path]",
+        "prepare": "(self, text: str) -> pygrafito.engine.query.prepared.PreparedQuery",
+        "query": "(self, text: str, parameters: collections.abc.Mapping[str, QueryValue] | None = None, *, budget: pygrafito.model.QueryBudget | None = None) -> pygrafito.engine.query.results.QueryResult",
+        "relationship": "(self, relationship_id: int) -> pygrafito.model.Relationship",
+        "remove_labels": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship | int, *labels: str) -> pygrafito.model.Node | pygrafito.model.Relationship",
+        "remove_properties": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship, *keys: str) -> pygrafito.model.Node | pygrafito.model.Relationship",
+        "restore_jsonl": "(self, path: str | pathlib.Path, *, replace: bool = False) -> pygrafito.engine.interop.InteropSummary",
+        "set_properties": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship, **properties: Value | None) -> pygrafito.model.Node | pygrafito.model.Relationship",
+        "shortest_path": "(self, start: pygrafito.model.Node | int, end: pygrafito.model.Node | int, *, direction: pygrafito.model.Direction = <Direction.OUTGOING: 'outgoing'>, labels: collections.abc.Iterable[str] | None = None, max_depth: int | None = None) -> pygrafito.model.Path | None",
+        "transaction": "(self) -> pygrafito.engine.transaction.Transaction",
+        "traverse": "(self, start: pygrafito.model.Node | int, *, max_depth: int, direction: pygrafito.model.Direction = <Direction.OUTGOING: 'outgoing'>, labels: collections.abc.Iterable[str] | None = None) -> collections.abc.Iterator[pygrafito.model.TraversalStep]"
+      },
+      "properties": {
+        "journal_mode": "(self) -> str",
+        "view_version": "(self) -> int"
+      }
+    },
+    "PreparedQuery": {
+      "methods": {
+        "execute": "(self, parameters: collections.abc.Mapping[str, QueryValue] | None = None, *, budget: pygrafito.model.QueryBudget | None = None) -> pygrafito.engine.query.results.QueryResult"
+      },
+      "properties": {
+        "columns": "(self) -> tuple[str, ...]",
+        "is_write": "(self) -> bool",
+        "parameters": "(self) -> frozenset[str]",
+        "text": "(self) -> str"
+      }
+    },
+    "Transaction": {
+      "methods": {
+        "add_labels": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship | int, *labels: str) -> pygrafito.model.Node | pygrafito.model.Relationship",
+        "add_node": "(self, *labels: str, **properties: Value) -> pygrafito.model.Node",
+        "add_relationship": "(self, start: pygrafito.model.Node | int, labels: str | collections.abc.Iterable[str], end: pygrafito.model.Node | int, *, directed: bool = True, **properties: Value) -> pygrafito.model.Relationship",
+        "begin": "(self) -> Self",
+        "commit": "(self) -> None",
+        "delete": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship, *, detach: bool = False) -> None",
+        "find_nodes": "(self, *labels: str, **properties: Value) -> collections.abc.Iterator[pygrafito.model.Node]",
+        "find_relationships": "(self, *labels: str, directed: bool | None = None, **properties: Value) -> collections.abc.Iterator[pygrafito.model.Relationship]",
+        "node": "(self, node_id: int) -> pygrafito.model.Node",
+        "query": "(self, text: str, parameters: collections.abc.Mapping[str, QueryValue] | None = None, *, budget: pygrafito.model.QueryBudget | None = None) -> pygrafito.engine.query.results.QueryResult",
+        "relationship": "(self, relationship_id: int) -> pygrafito.model.Relationship",
+        "remove_labels": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship | int, *labels: str) -> pygrafito.model.Node | pygrafito.model.Relationship",
+        "remove_properties": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship, *keys: str) -> pygrafito.model.Node | pygrafito.model.Relationship",
+        "rollback": "(self) -> None",
+        "set_properties": "(self, element: pygrafito.model.Node | pygrafito.model.Relationship, **properties: Value | None) -> pygrafito.model.Node | pygrafito.model.Relationship"
+      },
+      "properties": {}
+    }
+  },
+  "dataclasses": {
+    "Constraint": [
+      {
+        "default": "<required>",
+        "name": "kind",
+        "type": "<enum 'ElementKind'>"
+      },
+      {
+        "default": "<required>",
+        "name": "scope",
+        "type": "<class 'str'>"
+      },
+      {
+        "default": "<required>",
+        "name": "key",
+        "type": "<class 'str'>"
+      }
+    ],
+    "ImportSummary": [
+      {
+        "default": "0",
+        "name": "rows",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "batches",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "<factory>",
+        "name": "mutations",
+        "type": "<class 'pygrafito.engine.query.results.MutationSummary'>"
+      }
+    ],
+    "Index": [
+      {
+        "default": "<required>",
+        "name": "kind",
+        "type": "<enum 'ElementKind'>"
+      },
+      {
+        "default": "<required>",
+        "name": "key",
+        "type": "<class 'str'>"
+      }
+    ],
+    "InteropSummary": [
+      {
+        "default": "<required>",
+        "name": "nodes",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "<required>",
+        "name": "relationships",
+        "type": "<class 'int'>"
+      }
+    ],
+    "MutationSummary": [
+      {
+        "default": "0",
+        "name": "created_nodes",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "created_relationships",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "deleted_nodes",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "deleted_relationships",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "properties_set",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "properties_removed",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "labels_added",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "0",
+        "name": "labels_removed",
+        "type": "<class 'int'>"
+      }
+    ],
+    "Node": [
+      {
+        "default": "<required>",
+        "name": "id",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "<factory>",
+        "name": "labels",
+        "type": "frozenset[str]"
+      },
+      {
+        "default": "<factory>",
+        "name": "properties",
+        "type": "collections.abc.Mapping[str, Value]"
+      }
+    ],
+    "Path": [
+      {
+        "default": "<required>",
+        "name": "nodes",
+        "type": "tuple[pygrafito.model.Node, ...]"
+      },
+      {
+        "default": "<required>",
+        "name": "relationships",
+        "type": "tuple[pygrafito.model.Relationship, ...]"
+      }
+    ],
+    "QueryBudget": [
+      {
+        "default": "1000000",
+        "name": "max_expansions",
+        "type": "int | None"
+      },
+      {
+        "default": "100000",
+        "name": "max_rows",
+        "type": "int | None"
+      },
+      {
+        "default": "None",
+        "name": "max_seconds",
+        "type": "float | None"
+      }
+    ],
+    "QueryResult": [
+      {
+        "default": "<required>",
+        "name": "columns",
+        "type": "tuple[str, ...]"
+      },
+      {
+        "default": "<required>",
+        "name": "rows",
+        "type": "tuple[pygrafito.engine.query.results.Row, ...]"
+      },
+      {
+        "default": "<factory>",
+        "name": "summary",
+        "type": "<class 'pygrafito.engine.query.results.MutationSummary'>"
+      }
+    ],
+    "Relationship": [
+      {
+        "default": "<required>",
+        "name": "id",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "<required>",
+        "name": "start_id",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "<required>",
+        "name": "end_id",
+        "type": "<class 'int'>"
+      },
+      {
+        "default": "()",
+        "name": "labels",
+        "type": "tuple[str, ...]"
+      },
+      {
+        "default": "True",
+        "name": "directed",
+        "type": "<class 'bool'>"
+      },
+      {
+        "default": "<factory>",
+        "name": "properties",
+        "type": "collections.abc.Mapping[str, Value]"
+      }
+    ],
+    "Row": [
+      {
+        "default": "<required>",
+        "name": "columns",
+        "type": "tuple[str, ...]"
+      },
+      {
+        "default": "<required>",
+        "name": "row_values",
+        "type": "tuple[QueryValue, ...]"
+      }
+    ],
+    "TraversalStep": [
+      {
+        "default": "<required>",
+        "name": "node",
+        "type": "<class 'pygrafito.model.Node'>"
+      },
+      {
+        "default": "<required>",
+        "name": "depth",
+        "type": "<class 'int'>"
+      }
+    ]
+  },
+  "enums": {
+    "Direction": [
+      [
+        "OUTGOING",
+        "outgoing"
+      ],
+      [
+        "INCOMING",
+        "incoming"
+      ],
+      [
+        "BOTH",
+        "both"
+      ]
+    ],
+    "ElementKind": [
+      [
+        "NODE",
+        "node"
+      ],
+      [
+        "RELATIONSHIP",
+        "relationship"
+      ]
+    ],
+    "IndexKind": [
+      [
+        "NODE",
+        "node"
+      ],
+      [
+        "RELATIONSHIP",
+        "relationship"
+      ]
+    ]
+  },
+  "exceptions": {
+    "ConnectedNodeError": [
+      "ConnectedNodeError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "ConstraintViolationError": [
+      "ConstraintViolationError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "GraphClosedError": [
+      "GraphClosedError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "HandleAffinityError": [
+      "HandleAffinityError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "LockTimeoutError": [
+      "LockTimeoutError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "NotFoundError": [
+      "NotFoundError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "PygrafitoError": [
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "QueryBudgetExceededError": [
+      "QueryBudgetExceededError",
+      "QueryExecutionError",
+      "QueryError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "QueryError": [
+      "QueryError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "QueryExecutionError": [
+      "QueryExecutionError",
+      "QueryError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "QuerySemanticError": [
+      "QuerySemanticError",
+      "QueryError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "QuerySyntaxError": [
+      "QuerySyntaxError",
+      "QueryError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "ReadOnlyError": [
+      "ReadOnlyError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "TransactionError": [
+      "TransactionError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "UnsupportedSqliteError": [
+      "UnsupportedSqliteError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ],
+    "ValidationError": [
+      "ValidationError",
+      "PygrafitoError",
+      "Exception",
+      "BaseException",
+      "object"
+    ]
+  },
+  "exports": [
+    "ConnectedNodeError",
+    "Constraint",
+    "ConstraintViolationError",
+    "Direction",
+    "ElementKind",
+    "Graph",
+    "GraphClosedError",
+    "HandleAffinityError",
+    "ImportSummary",
+    "Index",
+    "IndexKind",
+    "InteropSummary",
+    "LockTimeoutError",
+    "MutationSummary",
+    "Node",
+    "NotFoundError",
+    "Path",
+    "PreparedQuery",
+    "PygrafitoError",
+    "QueryBudget",
+    "QueryBudgetExceededError",
+    "QueryError",
+    "QueryExecutionError",
+    "QueryResult",
+    "QuerySemanticError",
+    "QuerySyntaxError",
+    "ReadOnlyError",
+    "Relationship",
+    "Row",
+    "Transaction",
+    "TransactionError",
+    "TraversalStep",
+    "UnsupportedSqliteError",
+    "ValidationError"
+  ]
+}

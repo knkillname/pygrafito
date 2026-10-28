@@ -57,7 +57,8 @@ Generated documentation for the public Python surface.
 :::
 ```
 
-`pygrafito` requires Python 3.14 or newer and SQLite 3.38 or newer.
+`pygrafito` requires Python 3.13 or newer and SQLite 3.38 or newer. Linux is the supported 1.0
+platform; macOS and Windows are tested nightly as a non-blocking portability signal.
 
 ```{toctree}
 :hidden:
@@ -80,6 +81,7 @@ guides/importing
 guides/interop
 guides/shell
 guides/embedding
+guides/production-checklist
 ```
 
 ```{toctree}
@@ -94,6 +96,9 @@ reference/snapshot-format
 reference/index-behavior
 reference/embedding-contract
 reference/performance
+reference/platform-support
+reference/api-stability
+reference/known-limitations
 ```
 
 ```{toctree}

@@ -59,7 +59,7 @@ class ListLiteral:
         Element expressions.
     """
 
-    items: tuple[Expression, ...]
+    items: tuple["Expression", ...]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -74,8 +74,8 @@ class CaseBranch:
         Result produced when the branch matches.
     """
 
-    match: Expression
-    result: Expression
+    match: "Expression"
+    result: "Expression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -92,9 +92,9 @@ class Case:
         Optional ``ELSE`` result.
     """
 
-    operand: Expression | None
+    operand: "Expression | None"
     branches: tuple[CaseBranch, ...]
-    default: Expression | None = None
+    default: "Expression | None" = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -110,7 +110,7 @@ class MapEntry:
     """
 
     key: str
-    value: Expression
+    value: "Expression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -138,8 +138,8 @@ class ListAccess:
         Zero-based index expression.
     """
 
-    target: Expression
-    index: Expression
+    target: "Expression"
+    index: "Expression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -156,9 +156,9 @@ class ListSlice:
         Exclusive end bound, or ``None`` for the end.
     """
 
-    target: Expression
-    start: Expression | None
-    end: Expression | None
+    target: "Expression"
+    start: "Expression | None"
+    end: "Expression | None"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -178,9 +178,9 @@ class ListComprehension:
     """
 
     variable: str
-    source: Expression
-    where: Expression | None = None
-    projection: Expression | None = None
+    source: "Expression"
+    where: "Expression | None" = None
+    projection: "Expression | None" = None
 
 
 class SubqueryKind(Enum):
@@ -203,7 +203,7 @@ class Subquery:
     """
 
     kind: SubqueryKind
-    clauses: tuple[Clause, ...]
+    clauses: tuple["Clause", ...]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -252,7 +252,7 @@ class Property:
         Source position of the access, by default ``None``.
     """
 
-    target: Expression
+    target: "Expression"
     key: str
     span: Span | None = None
 
@@ -274,7 +274,7 @@ class FunctionCall:
     """
 
     name: str
-    arguments: tuple[Expression, ...]
+    arguments: tuple["Expression", ...]
     distinct: bool = False
     span: Span | None = None
 
@@ -292,7 +292,7 @@ class Unary:
     """
 
     operator: str
-    operand: Expression
+    operand: "Expression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -309,9 +309,9 @@ class Binary:
         Right operand.
     """
 
-    left: Expression
+    left: "Expression"
     operator: str
-    right: Expression
+    right: "Expression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -326,7 +326,7 @@ class IsNull:
         Whether the test is ``IS NOT NULL``, by default ``False``.
     """
 
-    operand: Expression
+    operand: "Expression"
     negated: bool = False
 
 
@@ -388,16 +388,16 @@ class LabelName:
 class LabelAnd:
     """A conjunction of two label expressions."""
 
-    left: LabelExpression
-    right: LabelExpression
+    left: "LabelExpression"
+    right: "LabelExpression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class LabelOr:
     """A disjunction of two label expressions."""
 
-    left: LabelExpression
-    right: LabelExpression
+    left: "LabelExpression"
+    right: "LabelExpression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -410,7 +410,7 @@ class LabelNot:
         Expression to negate.
     """
 
-    operand: LabelExpression
+    operand: "LabelExpression"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -636,7 +636,7 @@ class GroupedPathTerm:
         Inner path mode, by default ``None``.
     """
 
-    pattern: PathPattern
+    pattern: "PathPattern"
     quantifier: HopRange
     variable: str | None = None
     mode: PathMode | None = None
@@ -673,7 +673,7 @@ class PathPattern:
         variable: str | None = None,
         mode: PathMode | None = None,
         search: PathSearch | None = None,
-    ) -> PathPattern:
+    ) -> "PathPattern":
         """Build a pattern containing one simple term.
 
         Parameters

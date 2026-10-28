@@ -19,6 +19,13 @@ version used to build this site.
   those scalars. Query values also include `None`, mappings, and graph objects. Neither `Value` nor
   `QueryValue` is exported; they describe accepted shapes in method signatures.
 
+## Stability
+
+The exported surface is frozen for the 1.x series. Additions arrive in minor releases; removals,
+renames, and incompatible signature changes wait for 2.0 and follow the documented deprecation
+window. See [API stability](../reference/api-stability.md) for the full contract and the snapshot
+test that enforces it.
+
 ## Core
 
 | Name | Page | Purpose |
@@ -70,9 +77,11 @@ version used to build this site.
 | `QuerySyntaxError` | [Errors](errors.md#querysyntaxerror) | The statement cannot be lexed or parsed. |
 | `QuerySemanticError` | [Errors](errors.md#querysemanticerror) | The statement violates a static dialect rule. |
 | `QueryExecutionError` | [Errors](errors.md#queryexecutionerror) | The statement fails while evaluating. |
+| `QueryBudgetExceededError` | [Errors](errors.md#querybudgetexceedederror) | A query exceeded its expansion, row, or time budget. |
 
 ## Go deeper
 
 - [Five-minute quickstart](../getting-started/quickstart.md) for the first graph.
 - [Query your graph](../guides/querying.md) for the statement workflow.
+- [API stability](../reference/api-stability.md) for the 1.x compatibility and deprecation policy.
 - [Embedding contract](../reference/embedding-contract.md) for lifecycle and concurrency guarantees.

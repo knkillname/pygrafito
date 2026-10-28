@@ -25,7 +25,7 @@ class OutputMode(enum.Enum):
     LINE = "line"
 
     @classmethod
-    def from_name(cls, name: str) -> OutputMode:
+    def from_name(cls, name: str) -> "OutputMode":
         """Resolve a rendering mode by its command-line name.
 
         Parameters

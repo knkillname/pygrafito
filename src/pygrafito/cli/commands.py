@@ -84,7 +84,7 @@ class Commands:
     EXPORT_USAGE: typing.ClassVar[str] = ".export PATH [--format jsonl] [--overwrite]"
     RESTORE_USAGE: typing.ClassVar[str] = ".restore PATH [--replace]"
 
-    def __init__(self, session: Session, shell: Shell) -> None:
+    def __init__(self, session: Session, shell: "Shell") -> None:
         self._session = session
         self._shell = shell
         self._formatter = ValueFormatter(OutputMode.LINE)

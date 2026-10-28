@@ -160,6 +160,14 @@ with tempfile.TemporaryDirectory() as directory:
 The batch size must be a positive integer. Empty input executes no statement and returns a summary
 with zero rows and zero batches.
 
+The default is non-atomic for throughput: every batch commits on its own. If the process is
+terminated during an import, the batches that already committed remain and the interrupted batch
+does not. The graph is never corrupt, but a bulk load can be partially present. Pass
+`atomic=True` when a bulk load must be all-or-nothing: the whole import is one transaction, so a
+failure or a termination leaves no imported row behind. An atomic import holds the write lock for
+the whole file and uses more memory for the transaction, so prefer the default for large,
+restartable loads.
+
 ## Read the summary and failures
 
 `ImportSummary` reports `rows`, `batches`, and aggregate `mutations`:

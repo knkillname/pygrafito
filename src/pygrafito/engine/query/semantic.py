@@ -373,7 +373,7 @@ class Analysis:
     operations: tuple[Operation, ...] = ()
     finish: bool = False
     grouping_explicit: bool = False
-    subquery_analyses: Mapping[int, Analysis] = dataclasses.field(default_factory=dict)
+    subquery_analyses: Mapping[int, "Analysis"] = dataclasses.field(default_factory=dict)
 
     def require_parameters(self, parameters: Mapping[str, object]) -> None:
         """Reject a parameter mapping that omits a referenced parameter.

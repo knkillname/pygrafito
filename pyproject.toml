@@ -7,7 +7,7 @@ name = "pygrafito"
 dynamic = ["version"]
 description = "An embedded property graph backed by the Python standard library"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 license = "MIT"
 keywords = ["graph", "property-graph", "sqlite", "embedded"]
 authors = [
@@ -16,6 +16,7 @@ authors = [
 classifiers = [
   "Development Status :: 4 - Beta",
   "Programming Language :: Python",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
   "Programming Language :: Python :: Implementation :: CPython",
   "Typing :: Typed",
@@ -43,13 +44,19 @@ Source = "https://github.com/knkillname/pygrafito"
 [tool.hatch.version]
 path = "src/pygrafito/__about__.py"
 
+[tool.hatch.envs.hatch-check-types]
+extra-dependencies = [
+  "hypothesis>=6.0",
+]
+
 [tool.hatch.envs.hatch-test]
 extra-dependencies = [
+  "hypothesis>=6.0",
   "pytest-cov>=6.0",
 ]
 
 [[tool.hatch.envs.hatch-test.matrix]]
-python = ["3.14"]
+python = ["3.13", "3.14"]
 
 [tool.hatch.envs.docs]
 features = ["docs"]
@@ -59,7 +66,7 @@ build = "sphinx-build -W --keep-going -b html docs docs/_build/html"
 serve = "sphinx-autobuild docs docs/_build/html"
 
 [tool.ruff]
-target-version = "py314"
+target-version = "py313"
 line-length = 100
 src = ["src", "tests", "examples"]
 
@@ -113,7 +120,7 @@ convention = "numpy"
 preset = "strict"
 project-includes = ["src/pygrafito", "tests", "examples"]
 search-path = ["src", "."]
-python-version = "3.14"
+python-version = "3.13"
 disable-search-path-heuristics = true
 
 [tool.pytest.ini_options]

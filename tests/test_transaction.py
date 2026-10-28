@@ -276,7 +276,7 @@ class _FailingConnection:
         self,
         statement: str,
         parameters: Sequence[object] = (),
-    ) -> _FailingConnection:
+    ) -> "_FailingConnection":
         message = "disk I/O error"
         raise OperationalError(message)
 
@@ -290,7 +290,7 @@ class _LockedConnection:
         self,
         statement: str,
         parameters: Sequence[object] = (),
-    ) -> _LockedConnection:
+    ) -> "_LockedConnection":
         message = "database is locked"
         raise OperationalError(message)
 
@@ -305,7 +305,7 @@ class _FailingCommitConnection:
         self,
         statement: str,
         parameters: Sequence[object] = (),
-    ) -> _FailingCommitConnection:
+    ) -> "_FailingCommitConnection":
         if statement.startswith("BEGIN"):
             self.in_transaction = True
             return self

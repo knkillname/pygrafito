@@ -181,7 +181,7 @@ class SubqueryExecutor:
 
     def __init__(
         self,
-        executor: QueryExecutor,
+        executor: "QueryExecutor",
         functions: ScalarFunctions,
         tracker: BudgetTracker,
         analyses: Mapping[int, Analysis],

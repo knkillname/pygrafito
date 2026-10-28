@@ -5,6 +5,7 @@
 
 import pytest
 
+from pygrafito.engine.query.lexer import Lexer
 from pygrafito.engine.query.parser import Parser
 from pygrafito.engine.query.semantic import SemanticAnalyzer
 from pygrafito.model import (
@@ -44,6 +45,63 @@ class TestQueryErrors:
     def test_execution_error_is_not_a_syntax_error(self) -> None:
         assert not issubclass(QueryExecutionError, QuerySyntaxError)
         assert not issubclass(QuerySemanticError, QuerySyntaxError)
+
+
+class TestParserLimits:
+    """Verify that adversarial input stays inside the query error hierarchy."""
+
+    def test_deep_parentheses_raise_a_positioned_syntax_error(self) -> None:
+        text = "RETURN " + "(" * 100 + "1" + ")" * 100
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement(text)
+        assert "nesting" in caught.value.message
+        assert caught.value.line == 1
+        assert caught.value.column is not None
+
+    def test_deep_lists_raise_a_positioned_syntax_error(self) -> None:
+        text = "RETURN " + "[" * 100 + "1" + "]" * 100
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement(text)
+        assert "nesting" in caught.value.message
+        assert caught.value.line == 1
+        assert caught.value.column is not None
+
+    def test_deep_maps_raise_a_positioned_syntax_error(self) -> None:
+        text = "RETURN " + "{a: " * 100 + "1" + "}" * 100
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement(text)
+        assert "nesting" in caught.value.message
+        assert caught.value.line == 1
+        assert caught.value.column is not None
+
+    def test_nesting_below_the_limit_is_accepted(self) -> None:
+        text = "MATCH (n) RETURN " + "(" * 50 + "1" + ")" * 50
+        assert Parser.parse_statement(text) is not None
+
+    def test_unary_recursion_is_caught_as_a_syntax_error(self) -> None:
+        text = "RETURN " + "NOT " * 2000 + "TRUE"
+        with pytest.raises(QuerySyntaxError) as caught:
+            Parser.parse_statement(text)
+        assert "nested too deeply" in caught.value.message
+        assert caught.value.line is not None
+        assert caught.value.column is not None
+
+    def test_integer_at_the_limit_is_accepted(self) -> None:
+        text = "MATCH (n) RETURN " + "9" * Lexer.MAX_INTEGER_DIGITS
+        assert Parser.parse_statement(text) is not None
+
+    def test_oversized_integer_raises_a_positioned_semantic_error(self) -> None:
+        text = "RETURN " + "9" * (Lexer.MAX_INTEGER_DIGITS + 1)
+        with pytest.raises(QuerySemanticError) as caught:
+            Parser.parse_statement(text)
+        assert "integer literal" in caught.value.message
+        assert caught.value.line == 1
+        assert caught.value.column is not None
+
+    def test_five_thousand_digit_integer_does_not_leak_value_error(self) -> None:
+        text = "RETURN " + "9" * 5000
+        with pytest.raises(QuerySemanticError):
+            Parser.parse_statement(text)
 
 
 class TestComposedQueryErrors:

@@ -224,3 +224,5 @@ tmp/
 *.log
 *.tmp
 *.bak
+tests/fixtures/*.db-wal
+tests/fixtures/*.db-shm

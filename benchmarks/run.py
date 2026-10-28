@@ -263,6 +263,7 @@ class Runner:
         self._report_writes()
         self._report_ingestion()
         self._report_open_walks()
+        self._report_file_backed()
 
     def _measure_queries(self, graph: Graph) -> dict[str, float]:
         """Time every query scenario in the current index state.
@@ -614,6 +615,109 @@ class Runner:
                 f"{name:<20}{count:>6}{elapsed:>12.2f}ms{stored:>12.2f}ms"
                 f"{memory_rate:>14.0f}{file_rate:>14.0f}"
             )
+
+    def _report_file_backed(self) -> None:
+        """Print file-backed query, traversal, and ingestion results."""
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "file-queries.db"
+            with Graph.open(path) as graph:
+                created = Synthetic(self._options.nodes, self._options.relationships).build(graph)
+                graph.create_node_index("cycles")
+                graph.create_relationship_index("since_cycle")
+                queries = self._measure_queries(graph)
+                traversal: dict[str, float] = {}
+                if len(created) > self.CHAIN_STEPS:
+                    traversal = {
+                        "traverse depth 1": self._measure_bounded_traverse(
+                            graph,
+                            created[0],
+                            1,
+                        ),
+                        "traverse depth 3": self._measure_bounded_traverse(
+                            graph,
+                            created[0],
+                            3,
+                        ),
+                        "paths limit 50": self._measure_bounded_paths(
+                            graph,
+                            created[0],
+                            created[self.CHAIN_STEPS],
+                        ),
+                        "shortest_path": self._measure_bounded_shortest(
+                            graph,
+                            created[0],
+                            created[self.CHAIN_STEPS],
+                        ),
+                    }
+        print()
+        print(f"{'query (file)':<16}{'indexed':>12}")
+        for name, elapsed in queries.items():
+            print(f"{name:<16}{elapsed:>10.2f}ms")
+        if traversal:
+            print()
+            print(f"{'traversal (file)':<20}{'bounded':>12}")
+            for name, elapsed in traversal.items():
+                print(f"{name:<20}{elapsed:>10.2f}ms")
+        print()
+        print(f"{'ingestion (file)':<20}{'rows/s':>14}")
+        print(f"{'merge':<20}{self._file_merge_rate():>12.0f}/s")
+        print(f"{'csv import':<20}{self._file_import_rate():>12.0f}/s")
+
+    def _file_merge_rate(self) -> float:
+        """Return rows merged per second into a file-backed graph.
+
+        Returns
+        -------
+        float
+            Rows merged per second.
+        """
+        count = self._ingest_count()
+        rows = [
+            {
+                "designation": f"file-merge-{position}",
+                "cycles": position % Synthetic.CYCLE_MODULUS,
+            }
+            for position in range(count)
+        ]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            Graph.open(pathlib.Path(directory) / "merge.db") as graph,
+        ):
+            started = time.perf_counter()
+            graph.query(
+                "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) "
+                "ON CREATE SET n.cycles = row.cycles",
+                {"rows": rows},
+            )
+            elapsed = time.perf_counter() - started
+            return count / elapsed if elapsed else float("inf")
+
+    def _file_import_rate(self) -> float:
+        """Return rows imported per second into a file-backed graph.
+
+        Returns
+        -------
+        float
+            Rows imported per second.
+        """
+        count = self._ingest_count()
+        with tempfile.TemporaryDirectory() as directory:
+            csv_path = pathlib.Path(directory) / "programs.csv"
+            with csv_path.open("w", encoding="utf-8", newline="") as handle:
+                writer = csv.writer(handle)
+                writer.writerow(["designation", "cycles"])
+                for position in range(count):
+                    writer.writerow([f"file-import-{position}", position % Synthetic.CYCLE_MODULUS])
+            with Graph.open(pathlib.Path(directory) / "import.db") as graph:
+                started = time.perf_counter()
+                graph.import_file(
+                    csv_path,
+                    "UNWIND $rows AS row MERGE (n:Program {designation: row.designation}) "
+                    "ON CREATE SET n.cycles = toInteger(row.cycles)",
+                    batch_size=1000,
+                )
+                elapsed = time.perf_counter() - started
+                return count / elapsed if elapsed else float("inf")
 
     def _report_ingestion(self) -> None:
         """Print merge and CSV import throughput."""

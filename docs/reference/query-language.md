@@ -39,6 +39,29 @@ with Graph.open(":memory:") as graph:
 write and runs in its own transaction. A compound query built with a set
 operator is read-only and runs in one transaction and one snapshot.
 
+### Result memory
+
+Every call materializes the projected rows before returning. `QueryResult.rows`
+is a tuple of immutable rows, so it remains usable after the graph handle closes.
+The intermediate row budget, `QueryBudget.max_rows`, bounds how many bindings the
+stages may produce; the default is 100,000. Lower it for a memory-sensitive
+embedding:
+
+```python
+from pygrafito import Graph, QueryBudget
+
+with Graph.open(":memory:") as graph:
+    result = graph.query(
+        "FOR value IN [1, 2, 3] RETURN value",
+        budget=QueryBudget(max_rows=3),
+    )
+    print(len(result.rows))  # 3
+```
+
+A query that exceeds the budget raises `QueryBudgetExceededError` and returns no
+rows. The 1.x API has no streaming result: one call returns one materialized
+`QueryResult`.
+
 ## Core dialect profile
 
 A statement is one or more linear segments separated by `NEXT`:
@@ -1236,6 +1259,14 @@ query error before the statement runs, so it never writes data. Text that does
 not fit the grammar stays a syntax error. The
 [GQL profile](gql-profile.md#out-of-profile) names the construct and the
 supported alternative for every boundary.
+
+The parser accepts at most 64 levels of nested expressions. Deeper parentheses,
+lists, or map literals raise a positioned `QuerySyntaxError` instead of a
+recursion failure. Integer literals may have up to 4,300 digits; a larger literal
+raises a positioned `QuerySemanticError` instead of a conversion failure. These
+limits keep every query call inside the `QueryError` hierarchy: a raw
+`RecursionError`, `ValueError`, `MemoryError`, `UnicodeDecodeError`, or SQLite
+exception does not escape.
 
 ## Consistent execution snapshot
 

@@ -9,9 +9,10 @@ in two ways: a portable JSONL snapshot and a set of read-only SQL views. This pa
 snapshot contract first; the export, restore, and view sections follow below.
 
 ```{note}
-This release is pre-1.0. A database or snapshot written with the earlier version 1 layout is
-refused rather than converted. Create a fresh database with this release; if you need data from a
-0.8 file, export it with 0.8 first.
+Snapshot version 2 is frozen for the 1.x series. A version 2 snapshot written by 0.9 or 1.0
+restores without conversion. A version 1 snapshot or a snapshot from a future version is refused
+with an error that names version 2; export the graph with the release that wrote it and load the
+data into a fresh version 2 graph. There is no automatic migration.
 ```
 
 ## Export
@@ -176,6 +177,11 @@ The id map is held in memory for the duration of the restore, so a restore uses 
 proportional to the number of nodes. A large restore also holds the write lock for the whole
 file; run it during a quiet period when other writers need the graph.
 
+Because the whole restore is one transaction, an abrupt process termination is rolled back on the
+next open. An empty target stays empty, and a replaced target keeps its original graph; neither
+case exposes a partial node or relationship. Reopen the file and use `Graph.check_integrity` to
+confirm the recovered store.
+
 ## SQL views
 
 A graph file exposes four read-only views for external SQL readers:
@@ -217,8 +223,9 @@ reads. A read-only open leaves them untouched, so a database that predates the v
 readable; open it with a write-capable handle once to publish them. `Graph.view_version` returns
 the published version, or `0` when the views are absent.
 
-Views are versioned through `graph_meta`. A write-capable open creates missing views, replaces
-views from an older version, and leaves views from a newer version alone. A reserved
+Views are versioned through `graph_meta`. The published view version is `2`, frozen for the 1.x
+series. A write-capable open creates missing views, replaces views from an older version, and
+leaves views from a newer version alone. A reserved
 `graph_*` name held by a table, or a reserved view that is not identified by `graph_meta`, makes
 the write-capable open fail rather than dropping the existing object. A read-only open does not
 resolve collisions.

@@ -92,6 +92,49 @@ Inside an explicit transaction, a convenience read reuses that transaction and t
 its uncommitted writes. A long `shortest_path` holds a read snapshot for the duration of the
 search, which can delay checkpointing but never blocks a writer.
 
+## Crash recovery
+
+A file-backed graph uses SQLite's write-ahead log. A committed transaction survives an abrupt
+process termination: reopen the file and the committed rows are present. A transaction that was
+still open is rolled back, so its writes are absent. SQLite replays or discards the log on the next
+open; do not delete `-wal` or `-shm` sidecars by hand. After reopening, `check_integrity` returns
+an empty tuple for a recovered store.
+
+`backup_to` writes to a temporary sibling and atomically moves the completed copy into place. A
+termination before the move leaves the source unchanged and the destination absent; a termination
+after the move leaves a complete destination. A read-only source has the same guarantee.
+
+`restore_jsonl` loads the snapshot in one transaction, including the delete phase of
+`replace=True`. A termination during a restore leaves the target at its previous committed state:
+the original graph survives, and an empty target stays empty. Reopening passes the integrity
+check and exposes no partial node or relationship.
+
+An import without `atomic=True` commits each batch independently. A termination can leave the
+batches that had already committed, but it never leaves a partially written batch or a corrupt
+graph. An atomic import commits all batches together, so a termination leaves none of them. Use
+`atomic=True` for a bulk load that must be all-or-nothing.
+
+## Result memory
+
+`Graph.query` and `PreparedQuery.execute` materialize the projected rows before returning. The
+result is a tuple of immutable rows and does not depend on the handle still being open. The
+intermediate row budget, `QueryBudget.max_rows`, bounds the bindings a statement may produce; its
+default is 100,000. Set a lower budget for a memory-sensitive embedding:
+
+```python
+from pygrafito import Graph, QueryBudget
+
+with Graph.open("grid.db") as graph:
+    result = graph.query(
+        "MATCH (n:Program) RETURN n",
+        budget=QueryBudget(max_rows=10_000),
+    )
+```
+
+If the statement exceeds the row budget, the call raises `QueryBudgetExceededError` and returns no
+rows. The 1.x API deliberately has no streaming result, so memory use is predictable from the
+budget rather than from how long the caller iterates.
+
 ## Refusing a foreign database
 
 Opening a file never adds the graph schema to an unrelated SQLite database. The library refuses
@@ -110,10 +153,11 @@ either.
 
 ## Layout compatibility
 
-This release writes schema version 2. A file that records version 1 is refused on both
-read-write and read-only opens with `UnsupportedSqliteError`, and the file is left unchanged.
-There is no in-place migration before 1.0. Create a fresh database with this release; if you need
-data from a 0.8 file, export it with 0.8 first.
+Schema version 2 is frozen for the 1.x series. A version 2 database written by 0.9 or 1.0 opens
+read-write without a migration step. A file from any other version is refused on both read-write
+and read-only opens with `UnsupportedSqliteError`; the message names version 2, confirms that the
+library does not migrate the file, and points to exporting the graph with the release that wrote
+it. The refused file is left unchanged. There is no automatic migration in 1.x.
 
 ## Closing and copying
 

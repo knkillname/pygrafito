@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The public Python API is now frozen for the 1.x series, with a documented deprecation policy.
+  Existing imports and calls keep working throughout 1.x; additive changes arrive in minor
+  releases, and removals wait for a major release.
+- `pygrafito` now installs and runs on Python 3.13 as well as 3.14, including Google Colab. Linux
+  with SQLite 3.38 or newer is the supported 1.0 platform; macOS and Windows are exercised nightly
+  as a non-blocking portability signal.
 - Queries can now repeat a whole path shape with grouped terms such as
   `((a)-[r:TRUSTS]->(b)){2}`. Variables introduced inside a group bind ordered lists, nested groups
   flatten in traversal order, zero iterations bind empty lists, and a group can carry its own path
@@ -61,6 +67,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   becomes `` `edges` ``.
 - **BREAKING:** `ANY` and `SHORTEST` are now reserved keywords. Wrap an existing variable or alias
   that uses one of these words in backticks; for example, `any` becomes `` `any` ``.
+- Query results are now documented as a materialized 1.0 contract. A call returns every row before
+  it returns, and the row budget (100,000 by default) bounds the result; lower it for
+  memory-sensitive embeddings. Streaming results are not part of the 1.x API.
+- Crash recovery is now documented and tested: committed writes survive an abrupt termination, open
+  transactions roll back, backups never leave a partial destination, restores keep the previous
+  graph, and imports leave either their committed batches or none. Use `atomic=True` for a bulk
+  import that must be all-or-nothing.
+- Database, snapshot, and view formats are now frozen at version 2 for the 1.x series. Version 2
+  files written by 0.9 or 1.0 open without conversion; files from other versions are refused with
+  an export path instead of being migrated automatically.
 
 ## [0.9.0] - 2026-10-27
 

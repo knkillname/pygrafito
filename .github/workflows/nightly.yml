@@ -1,0 +1,63 @@
+name: Nightly portability
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: Portability (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      HYPOTHESIS_PROFILE: nightly
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+        python: ["3.13", "3.14"]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+
+      - name: Install Hatch
+        run: uv tool install hatch
+
+      - name: Add Hatch to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Test without coverage
+        run: hatch test -py ${{ matrix.python }} -- --no-cov
+
+  notify:
+    name: Report portability failure
+    needs: test
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize the failure
+        run: |
+          {
+            echo "## Nightly portability check failed"
+            echo
+            echo "macOS or Windows failed the unsupported-platform signal."
+            echo "This job is informational and does not block a pygrafito release."
+          } >> "$GITHUB_STEP_SUMMARY"

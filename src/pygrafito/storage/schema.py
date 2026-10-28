@@ -159,7 +159,9 @@ class Schema:
         qualifier = "read-only " if readonly else ""
         message = (
             f"database schema version {current} is unsupported; this release "
-            f"requires version {self.VERSION} and does not migrate {qualifier}databases"
+            f"requires version {self.VERSION} and does not migrate {qualifier}databases; "
+            f"export the graph with the release that wrote it, then load the data into a "
+            f"fresh version {self.VERSION} database"
         )
         raise UnsupportedSqliteError(message)
 

@@ -307,7 +307,7 @@ class TestConcurrentFirstOpen:
     """Verify several processes can initialize one fresh file."""
 
     def test_first_open_race(self, tmp_path: Path) -> None:
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         path = tmp_path / "grid.db"
         start = context.Event()
         errors = context.Queue()
@@ -328,7 +328,7 @@ class TestConcurrentFirstOpen:
         assert failures == []
 
     def test_first_open_records_version(self, tmp_path: Path) -> None:
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         path = tmp_path / "grid.db"
         start = context.Event()
         errors = context.Queue()
@@ -351,7 +351,7 @@ class TestCrossProcessVisibility:
     """Verify committed writes travel between processes."""
 
     def test_reader_observes_each_commit(self, tmp_path: Path) -> None:
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         path = tmp_path / "grid.db"
         ready = context.Event()
         first_read = context.Event()
@@ -369,7 +369,7 @@ class TestCrossProcessVisibility:
         assert sorted(observed) == ["Rinzler", "Tron"]
 
     def test_writers_take_turns(self, tmp_path: Path) -> None:
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         path = tmp_path / "grid.db"
         locked = context.Event()
         attempting = context.Event()
@@ -399,7 +399,7 @@ class TestReadOnlyDuringCommit:
             mode = graph.journal_mode
         if mode != "wal":
             pytest.skip(f"write-ahead logging is unavailable; journal mode is {mode}")
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         ready = context.Event()
         uncommitted = context.Event()
         observed = context.Event()
@@ -432,7 +432,7 @@ class TestReadSnapshotConsistency:
     """Verify a reader never sees a mixed state across two writes in one commit."""
 
     def test_reader_never_sees_a_mixed_state(self, tmp_path: Path) -> None:
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         path = tmp_path / "grid.db"
         ready = context.Event()
         stop = context.Event()
@@ -454,7 +454,7 @@ class TestLockTimeout:
     """Verify a write-lock wait can be bounded by the caller."""
 
     def test_short_timeout_fails(self, tmp_path: Path) -> None:
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         path = tmp_path / "grid.db"
         locked = context.Event()
         release = context.Event()

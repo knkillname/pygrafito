@@ -9,8 +9,10 @@ row. It is a single-machine baseline, not a guarantee. For the task of making a 
 The harness is the `benchmarks` module. It builds a themed synthetic graph in an in-memory
 database, measures the same statements before and after declaring indexes, compares
 whole-graph traversal with bounded traversal, and reports the median of several
-repetitions. The query table also includes one bounded quantified path. Index declaration
-and seeding happen outside the measured window.
+repetitions. The query table also includes one bounded quantified path. It repeats the
+indexed query and bounded traversal scenarios on a temporary file-backed graph and
+measures merge and CSV ingestion against a file. Index declaration and seeding happen
+outside the measured window.
 
 ```console
 hatch run python -m benchmarks.run --nodes 20000 --relationships 60000
@@ -194,6 +196,48 @@ single-node match for each row. That is the price of sequential visibility: a
 later row must see an earlier row's creation. At roughly 480 rows/s, a
 single-node lookup fast path is needed before this becomes a bulk loader; the
 current numbers favor correctness and a small implementation over throughput.
+
+### File-backed queries, traversal, and ingestion
+
+This run uses a temporary file-backed graph instead of an in-memory database:
+
+```console
+hatch run python -m benchmarks.run --nodes 5000 --relationships 15000 --repeats 1
+```
+
+These are one-repetition figures on the same machine and SQLite 3.53.4, so compare
+them with the 5,000-node shape rather than treating them as medians. The file-backed
+working set fits in the page cache, which is why the indexed query and bounded traversal
+numbers stay close to the in-memory values.
+
+| Query (file-backed) | Indexed |
+| --- | ---: |
+| Property equality | 0.80 ms |
+| Property range | 1.23 ms |
+| Label filter | 0.69 ms |
+| Direction filter | 0.95 ms |
+| `find_nodes` lookup | 0.19 ms |
+| Quantified path | 2.90 ms |
+| Walk path | 1.14 ms |
+| Trail path | 1.11 ms |
+| Composition | 6.01 ms |
+
+| Traversal (file-backed) | Bounded |
+| --- | ---: |
+| `traverse`, depth 1 | 0.25 ms |
+| `traverse`, depth 3 | 0.79 ms |
+| `paths`, depth 3, limit 50 | 0.58 ms |
+| `shortest_path`, depth 3 | 0.37 ms |
+
+| Ingestion (file-backed) | Rows per second |
+| --- | ---: |
+| `UNWIND` + `MERGE`, one statement | 668/s |
+| CSV `import_file`, batch size 1000 | 689/s |
+
+The file-backed ingestion rate is in the same range as the in-memory figure because the
+database and its write-ahead log remain in the page cache during the short run. A cold
+file, a slower disk, or a larger batch of concurrent readers changes that; see
+[Known limitations](known-limitations.md).
 
 ## What the numbers do not promise
 

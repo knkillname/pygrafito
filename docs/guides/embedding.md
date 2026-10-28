@@ -128,7 +128,37 @@ with tempfile.TemporaryDirectory() as directory:
         print(copy.node(1)["designation"])  # Tron
 ```
 
-Do not copy a database file while a handle has it open; use `backup_to` instead.
+Do not copy a database file while a handle has it open; use `backup_to` instead. The copy is
+written to a temporary sibling and moved into place, so a process that dies during a backup leaves
+the source unchanged and the destination either absent or complete.
+
+## Survive process termination
+
+A committed write survives an abrupt process termination. A transaction that was still open is
+rolled back on the next open, and the write-ahead log is recovered automatically. Reopen the file
+and run `check_integrity` when you need to confirm the recovered store:
+
+```python
+import pathlib
+import tempfile
+
+from pygrafito import Graph
+
+with tempfile.TemporaryDirectory() as directory:
+    path = pathlib.Path(directory) / "grid.db"
+    with Graph.open(path) as graph:
+        graph.add_node("Program", designation="Tron")
+
+    # The committed node survives a process restart.
+    with Graph.open(path) as graph:
+        print(graph.check_integrity())  # ()
+        print(next(iter(graph.find_nodes("Program")))["designation"])  # Tron
+```
+
+Do not delete `-wal` or `-shm` files to "clean up" after a crash; SQLite needs them to recover.
+`restore_jsonl` and an atomic import are single transactions, so a termination rolls them back
+completely. A non-atomic import may leave the batches that had already committed, but never a
+partial batch.
 
 ## Know the snapshot rules
 
@@ -140,9 +170,10 @@ of the search.
 Opening a file never adopts an unrelated SQLite database. A file with no graph layout and at least
 one unrelated table is refused with `UnsupportedSqliteError` and left unchanged.
 
-This release writes schema version 2. A version 1 file is refused on read-write and read-only
-opens and is left unchanged. There is no in-place migration before 1.0; create a fresh database
-with this release, and export an existing 0.8 graph with 0.8 first if you need its data.
+Schema version 2 is frozen for 1.x. A version 2 database written by 0.9 or 1.0 opens without a
+migration step. Any other version is refused on read-write and read-only opens and is left
+unchanged. There is no automatic migration: export the graph with the release that wrote it, then
+load the data into a fresh version 2 database.
 
 ## Go deeper
 

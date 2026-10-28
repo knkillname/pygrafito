@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   quality:
+    name: Quality
     runs-on: ubuntu-latest
     steps:
       - name: Check out
@@ -22,7 +23,7 @@ jobs:
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
         with:
-          enable-cache: true
+          enable-cache: false
 
       - name: Install Hatch
         run: uv tool install hatch
@@ -36,17 +37,20 @@ jobs:
           path: |
             ~/.cache/uv
             ~/.local/share/hatch
-          key: hatch-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: hatch-${{ runner.os }}-py3.14-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-${{ runner.os }}-py3.14-
 
       - name: Check
         run: hatch check
 
-      - name: Test
-        run: hatch test
-
-  package:
-    needs: quality
+  test:
+    name: Test (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -54,12 +58,61 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.14"
+          python-version: ${{ matrix.python }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
         with:
-          enable-cache: true
+          enable-cache: false
+
+      - name: Install Hatch
+        run: uv tool install hatch
+
+      - name: Add Hatch to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.local/share/hatch
+          key: hatch-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            hatch-${{ runner.os }}-py${{ matrix.python }}-
+
+      - name: Test
+        run: hatch test -py ${{ matrix.python }}
+
+  package:
+    name: Package (Python ${{ matrix.python }})
+    needs: quality
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.13", "3.14"]
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-py${{ matrix.python }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            uv-${{ runner.os }}-py${{ matrix.python }}-
 
       - name: Build distributions
         run: uv build
@@ -96,3 +149,39 @@ jobs:
           assert any(name.endswith("py.typed") for name in names), names
           assert any(name.endswith("LICENSE.txt") for name in names), names
           PY
+
+  docs:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: false
+
+      - name: Install Hatch
+        run: uv tool install hatch
+
+      - name: Add Hatch to PATH
+        run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache Hatch environments
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/uv
+            ~/.local/share/hatch
+          key: docs-${{ runner.os }}-py3.14-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            docs-${{ runner.os }}-py3.14-
+
+      - name: Build documentation
+        run: hatch run docs:build

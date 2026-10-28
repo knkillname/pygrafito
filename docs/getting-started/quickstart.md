@@ -9,7 +9,29 @@ reopen. Every Python block is a complete program, so you can copy one into a fil
 pip install pygrafito
 ```
 
-`pygrafito` requires Python 3.14 or newer and SQLite 3.38 or newer.
+`pygrafito` requires Python 3.13 or newer and SQLite 3.38 or newer.
+
+## Supported platforms
+
+Linux with glibc is the supported platform for the 1.0 release. macOS and Windows run the same
+test suite nightly as a portability signal, but they are not supported platforms until that signal
+is green. The package is pure Python and installs without a compiler. See
+[Platform support](../reference/platform-support.md) for the full contract.
+
+## Google Colab
+
+Colab currently runs Python 3.13. Install the package in a notebook cell:
+
+```{code-block} console
+!pip install pygrafito
+```
+
+The Colab runtime filesystem is ephemeral. Put a database under `/content` while the notebook is
+running, or mount Google Drive when the file must survive the runtime:
+
+```{code-block} text
+/content/grid.db
+```
 
 ## 2. Open a graph
 

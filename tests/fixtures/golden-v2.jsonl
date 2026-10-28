@@ -1,0 +1,8 @@
+{"kind":"header","format":"pygrafito-jsonl","version":2,"nodes":4,"relationships":3}
+{"kind":"node","id":1,"labels":["Program","User"],"properties":{"active":true,"cycles":36,"designation":"Kevin Flynn","rating":4.5,"tags":["architect","user"]}}
+{"kind":"node","id":2,"labels":["ISO","Program"],"properties":{"cycles":37,"designation":"Quorra"}}
+{"kind":"node","id":3,"labels":["Program"],"properties":{"cycles":40,"designation":"Tron"}}
+{"kind":"node","id":4,"labels":[],"properties":{"cycles":37}}
+{"kind":"relationship","id":1,"labels":["ALLIES_WITH"],"directed":true,"start_id":1,"end_id":2,"properties":{"since_cycle":2020}}
+{"kind":"relationship","id":2,"labels":["GUARDS"],"directed":true,"start_id":3,"end_id":3,"properties":{}}
+{"kind":"relationship","id":3,"labels":["TRUSTS"],"directed":false,"start_id":2,"end_id":1,"properties":{}}

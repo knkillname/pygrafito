@@ -92,6 +92,7 @@ class Parser:
         Original source text, used to recover projected expression text.
     """
 
+    MAX_DEPTH: typing.ClassVar[int] = 64
     COMPARISONS: typing.ClassVar[dict[str, str]] = {
         "=": Operators.EQUAL,
         "!=": Operators.NOT_EQUAL,
@@ -133,6 +134,7 @@ class Parser:
         self._tokens = tuple(tokens)
         self._source = source
         self._position = 0
+        self._depth = 0
         self._previous_segment_has_return = False
         self._segment_has_input = False
 
@@ -150,7 +152,16 @@ class Parser:
         Statement
             Parsed linear or compound statement.
         """
-        return cls(Lexer.tokenize(text), text).parse()
+        parser = cls(Lexer.tokenize(text), text)
+        try:
+            return parser.parse()
+        except RecursionError:
+            token = parser._current()
+            raise QuerySyntaxError(
+                "query is nested too deeply",
+                line=token.span.line,
+                column=token.span.column,
+            ) from None
 
     def parse(self) -> Statement:
         """Parse the token sequence into one statement.
@@ -1919,8 +1930,23 @@ bool, LabelExpression | None, Expression | None]
         -------
         Expression
             Parsed expression.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the expression nesting exceeds :attr:`MAX_DEPTH`.
         """
-        return self._or_expression()
+        self._depth += 1
+        if self._depth > self.MAX_DEPTH:
+            self._depth -= 1
+            self._fail_syntax(
+                f"query nesting exceeds {self.MAX_DEPTH} levels",
+                self._current(),
+            )
+        try:
+            return self._or_expression()
+        finally:
+            self._depth -= 1
 
     def _or_expression(self) -> Expression:
         """Parse boolean ``OR`` expressions.
