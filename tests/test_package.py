@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: MIT
 """Smoke tests for the package skeleton."""
 
+import pathlib
+import tomllib
+
 import pygrafito
 import pygrafito.__main__
 import pygrafito.cli
@@ -80,6 +83,20 @@ class TestPackage:
             pygrafito.storage.views,
         )
         assert all(module.__name__.startswith("pygrafito") for module in modules)
+
+    def test_examples_are_not_part_of_the_distribution(self) -> None:
+        """Keep the example tree and source files out of the package."""
+        root = pathlib.Path(__file__).resolve().parents[1]
+        assert (root / "examples").is_dir()
+        assert not (root / "src" / "pygrafito" / "examples").exists()
+        configuration = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+        build = configuration.get("tool", {}).get("hatch", {}).get("build", {})
+        assert "examples" not in repr(build)
+        sources = {
+            path for path in (root / "examples").rglob("*") if path.suffix in {".pdf", ".txt"}
+        }
+        assert not sources
+        assert "tmp/" in (root / ".gitignore").read_text(encoding="utf-8")
 
     def test_public_exports(self) -> None:
         expected = {

@@ -1,0 +1,1479 @@
+{
+  "name": "cast",
+  "revision": 1,
+  "nodes": [
+    {
+      "key": "kevin-flynn",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Kevin Flynn",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "alan-bradley",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Alan Bradley",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "lora-baines",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Lora Baines",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "ed-dillinger",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Ed Dillinger",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "dr-gibbs",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Dr. Gibbs",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "sam-flynn",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Sam Flynn",
+        "sources": [
+          "legacy-2010",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "richard-mackey",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Richard Mackey",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "julian-dillinger",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Julian Dillinger",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "elisabeth-dillinger",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Elisabeth Dillinger",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "eve-kim",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Eve Kim",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "tess-kim",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Tess Kim",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "seth",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Seth",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "anjay",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Anjay",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "jolene",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Jolene",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "erin",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Erin",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "marcia",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Marcia",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "stuart",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Stuart",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "general-mcgrath",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "General McGrath",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "tron",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Tron",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "clu",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Clu",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "sark",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Sark",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "ram",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Ram",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "crom",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Crom",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "yori",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Yori",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "dumont",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Dumont",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "bit",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Bit",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "mcp",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Master Control Program",
+        "sources": [
+          "tron-1981",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "rinzler",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Rinzler",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "quorra",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Quorra",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "castor-zuse",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Castor",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "gem",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Gem",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "jarvis",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Jarvis",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "bartik",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Bartik",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "ares",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Ares",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "athena",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Athena",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "tron",
+      "to": "yori",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 11,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "yori",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 11,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "tron",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 9,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "ram",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 8,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "alan-bradley",
+      "to": "lora-baines",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 6,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "bit",
+      "to": "kevin-flynn",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 6,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "ram",
+      "to": "tron",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 5,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "lora-baines",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 4,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "alan-bradley",
+      "to": "kevin-flynn",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 4,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "mcp",
+      "to": "sark",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 3,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "dumont",
+      "to": "tron",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 3,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "dumont",
+      "to": "yori",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 3,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "dumont",
+      "to": "sark",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 3,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "bit",
+      "to": "yori",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 3,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "bit",
+      "to": "clu",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "ed-dillinger",
+      "to": "mcp",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "dr-gibbs",
+      "to": "lora-baines",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "mcp",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "sark",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "bit",
+      "to": "tron",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "crom",
+      "to": "ram",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "clu",
+      "to": "mcp",
+      "labels": [
+        "SHARES_SCENE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "shared_scene"
+      }
+    },
+    {
+      "from": "tron",
+      "to": "kevin-flynn",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 25,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "tron",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 20,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "ram",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 18,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "alan-bradley",
+      "to": "kevin-flynn",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 15,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "ed-dillinger",
+      "to": "mcp",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 14,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "alan-bradley",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 14,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "sark",
+      "to": "mcp",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 13,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "mcp",
+      "to": "ed-dillinger",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 13,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "lora-baines",
+      "to": "alan-bradley",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 13,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "sark",
+      "to": "kevin-flynn",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 13,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "yori",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 13,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "mcp",
+      "to": "sark",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 12,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "alan-bradley",
+      "to": "lora-baines",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 11,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "ram",
+      "to": "kevin-flynn",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 11,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "bit",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 11,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "sam-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 7,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "quorra",
+      "to": "sam-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 7,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "clu",
+      "to": "sam-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 4,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "quorra",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 3,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "clu",
+      "to": "kevin-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "clu",
+      "to": "tron",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "sam-flynn",
+      "to": "tron",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "castor-zuse",
+      "to": "kevin-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "castor-zuse",
+      "to": "sam-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 2,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "alan-bradley",
+      "to": "richard-mackey",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "richard-mackey",
+      "to": "sam-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "clu",
+      "to": "jarvis",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "tron",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "castor-zuse",
+      "to": "quorra",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "castor-zuse",
+      "to": "clu",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "jarvis",
+      "to": "kevin-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "clu",
+      "to": "quorra",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "quorra",
+      "to": "tron",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "alan-bradley",
+      "to": "quorra",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "alan-bradley",
+      "to": "sam-flynn",
+      "labels": [
+        "SAME_PAGE"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 1,
+        "basis": "same_page"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "eve-kim",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 293,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "eve-kim",
+      "to": "seth",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 171,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "julian-dillinger",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 144,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "athena",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 143,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "seth",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 142,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "athena",
+      "to": "eve-kim",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 115,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "eve-kim",
+      "to": "julian-dillinger",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 100,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "anjay",
+      "to": "ares",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 85,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "elisabeth-dillinger",
+      "to": "julian-dillinger",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 77,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "elisabeth-dillinger",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 64,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "anjay",
+      "to": "seth",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 60,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "anjay",
+      "to": "eve-kim",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 59,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "athena",
+      "to": "julian-dillinger",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 56,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "kevin-flynn",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 51,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "julian-dillinger",
+      "to": "seth",
+      "labels": [
+        "SAME_BLOCK"
+      ],
+      "directed": false,
+      "properties": {
+        "weight": 46,
+        "basis": "dialogue_window"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "eve-kim",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 55,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "eve-kim",
+      "to": "ares",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 49,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "seth",
+      "to": "eve-kim",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 36,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "eve-kim",
+      "to": "seth",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 30,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "julian-dillinger",
+      "to": "ares",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 18,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "athena",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 18,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "athena",
+      "to": "ares",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 18,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "julian-dillinger",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 15,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "elisabeth-dillinger",
+      "to": "julian-dillinger",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 15,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "julian-dillinger",
+      "to": "elisabeth-dillinger",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 14,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "kevin-flynn",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 14,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "ares",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 11,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "ares",
+      "to": "seth",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 8,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "eve-kim",
+      "to": "julian-dillinger",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 7,
+        "basis": "dialogue_turn"
+      }
+    },
+    {
+      "from": "eve-kim",
+      "to": "athena",
+      "labels": [
+        "SPEAKS_AFTER"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 7,
+        "basis": "dialogue_turn"
+      }
+    }
+  ]
+}

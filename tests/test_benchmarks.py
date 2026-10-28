@@ -12,13 +12,14 @@ from pathlib import Path
 class TestBenchmarkHarness:
     """Verify the harness runs end to end on a tiny dataset."""
 
-    SCRIPT: typing.ClassVar[Path] = Path(__file__).resolve().parents[1] / "benchmarks" / "run.py"
+    ROOT: typing.ClassVar[Path] = Path(__file__).resolve().parents[1]
 
     def test_tiny_run(self) -> None:
         completed = subprocess.run(
             [
                 sys.executable,
-                str(self.SCRIPT),
+                "-m",
+                "benchmarks.run",
                 "--nodes",
                 "40",
                 "--relationships",
@@ -26,6 +27,7 @@ class TestBenchmarkHarness:
                 "--repeats",
                 "1",
             ],
+            cwd=self.ROOT,
             capture_output=True,
             text=True,
             check=False,

@@ -20,9 +20,9 @@ from pygrafito import Graph
 with tempfile.TemporaryDirectory() as directory:
     destination = pathlib.Path(directory) / "grid.jsonl"
     with Graph.open(":memory:") as graph:
-        tron = graph.add_node("Program", designation="Tron", cycles=40)
-        quorra = graph.add_node("Program", designation="Quorra", cycles=37)
-        graph.add_relationship(tron, "ALLIES_WITH", quorra, since_cycle=2020)
+        ares = graph.add_node("Program", designation="Ares", cycles=60)
+        athena = graph.add_node("Program", designation="Athena", cycles=59)
+        graph.add_relationship(ares, "ALLIES_WITH", athena, since_cycle=2025)
         summary = graph.export_jsonl(destination)
         print(summary.nodes, summary.relationships)  # 2 1
 ```
@@ -45,15 +45,15 @@ from pygrafito import Graph
 with tempfile.TemporaryDirectory() as directory:
     destination = pathlib.Path(directory) / "grid.jsonl"
     with Graph.open(":memory:") as source:
-        source.add_node("Program", designation="Tron", cycles=40)
-        source.add_node("Program", designation="Quorra", cycles=37)
+        source.add_node("Program", designation="Ares", cycles=60)
+        source.add_node("Program", designation="Athena", cycles=59)
         source.export_jsonl(destination)
 
     with Graph.open(":memory:") as restored:
         summary = restored.restore_jsonl(destination)
         print(summary.nodes, summary.relationships)  # 2 0
         print(sorted(node["designation"] for node in restored.find_nodes("Program")))
-        # ['Quorra', 'Tron']
+        # ['Ares', 'Athena']
 ```
 
 Restore remaps node and relationship ids, verifies the header counts, and runs in one transaction.
@@ -76,7 +76,7 @@ from pygrafito import Graph
 with tempfile.TemporaryDirectory() as directory:
     path = pathlib.Path(directory) / "grid.db"
     with Graph.open(path) as graph:
-        graph.add_node("Program", designation="Tron", cycles=40)
+        graph.add_node("Program", designation="Athena", cycles=59)
         print(graph.view_version)  # 2
 
     with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as reader:

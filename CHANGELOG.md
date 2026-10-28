@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A runnable example layer under `examples/` with a `python -m examples` front door, three
+  audience lanes, terminal tours, and a deterministic builder. It ships a curated franchise graph
+  spanning three sources, derived cast and place aggregates, and a version 2 JSONL snapshot.
+- The example cast and place datasets use weighted edges with explicit `basis` metadata, and the
+  synthetic scale generator is shared with the benchmark harness.
+- A GQL tour catalog classifies each `examples/tours/*.gql` file by profile tier and names the
+  follow-up change that will migrate it.
+- A local-only screenplay and transcript extractor that emits aggregate JSON without dialogue or
+  action text, tested with an invented fixture.
 - A published GQL language profile at `docs/reference/gql-profile.md`, covering the five-tier
   construct classification, canonical surface, compatibility aliases and constructs, pygrafito
   extensions, path-mode and query-budget decisions, conformance matrix, corpus contract, and

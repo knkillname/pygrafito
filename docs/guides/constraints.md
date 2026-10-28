@@ -92,14 +92,14 @@ from pygrafito import ConstraintViolationError, Graph
 with Graph.open(":memory:") as graph:
     graph.create_node_uniqueness_constraint("Program", "designation")
     with graph.transaction() as transaction:
-        tron = transaction.add_node("Program", designation="Tron")
+        yori = transaction.add_node("Program", designation="Yori")
         try:
-            transaction.add_node("Program", designation="Tron")
+            transaction.add_node("Program", designation="Yori")
         except ConstraintViolationError:
             pass
-        quorra = transaction.add_node("Program", designation="Quorra")
+        dumont = transaction.add_node("Program", designation="Dumont")
 
-    print(graph.node(quorra.id)["designation"])  # Quorra
+    print(graph.node(dumont.id)["designation"])  # Dumont
 ```
 
 Assigning two elements each other's values in one statement fails because the statement passes

@@ -1,0 +1,2694 @@
+{
+  "name": "grid",
+  "revision": 1,
+  "nodes": [
+    {
+      "key": "tron-1981",
+      "labels": [
+        "Film"
+      ],
+      "properties": {
+        "designation": "TRON",
+        "released": 1982,
+        "source_kind": "draft"
+      }
+    },
+    {
+      "key": "legacy-2010",
+      "labels": [
+        "Film"
+      ],
+      "properties": {
+        "designation": "TRON: Legacy",
+        "released": 2010,
+        "source_kind": "final"
+      }
+    },
+    {
+      "key": "ares-2025",
+      "labels": [
+        "Film"
+      ],
+      "properties": {
+        "designation": "TRON: Ares",
+        "released": 2025,
+        "source_kind": "transcript"
+      }
+    },
+    {
+      "key": "kevin-flynn",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Kevin Flynn",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ],
+        "aliases": [
+          "Flynn"
+        ],
+        "role": "game designer"
+      }
+    },
+    {
+      "key": "alan-bradley",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Alan Bradley",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ],
+        "role": "security engineer"
+      }
+    },
+    {
+      "key": "lora-baines",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Lora Baines",
+        "sources": [
+          "tron-1981"
+        ],
+        "role": "laser engineer"
+      }
+    },
+    {
+      "key": "ed-dillinger",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Ed Dillinger",
+        "sources": [
+          "tron-1981"
+        ],
+        "role": "ENCOM executive"
+      }
+    },
+    {
+      "key": "dr-gibbs",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Dr. Gibbs",
+        "sources": [
+          "tron-1981"
+        ],
+        "role": "physicist"
+      }
+    },
+    {
+      "key": "sam-flynn",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Sam Flynn",
+        "sources": [
+          "legacy-2010",
+          "ares-2025"
+        ],
+        "role": "ENCOM chairman"
+      }
+    },
+    {
+      "key": "richard-mackey",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Richard Mackey",
+        "sources": [
+          "legacy-2010"
+        ],
+        "role": "ENCOM CEO"
+      }
+    },
+    {
+      "key": "julian-dillinger",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Julian Dillinger",
+        "sources": [
+          "ares-2025"
+        ],
+        "role": "Dillinger Systems CEO"
+      }
+    },
+    {
+      "key": "elisabeth-dillinger",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Elisabeth Dillinger",
+        "sources": [
+          "ares-2025"
+        ],
+        "role": "Dillinger family matriarch"
+      }
+    },
+    {
+      "key": "eve-kim",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Eve Kim",
+        "sources": [
+          "ares-2025"
+        ],
+        "role": "ENCOM CEO"
+      }
+    },
+    {
+      "key": "tess-kim",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Tess Kim",
+        "sources": [
+          "ares-2025"
+        ],
+        "role": "ENCOM engineer"
+      }
+    },
+    {
+      "key": "seth",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Seth",
+        "sources": [
+          "ares-2025"
+        ],
+        "role": "ENCOM engineer"
+      }
+    },
+    {
+      "key": "anjay",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Anjay",
+        "sources": [
+          "ares-2025"
+        ],
+        "aliases": [
+          "Ajay"
+        ],
+        "role": "ENCOM technician"
+      }
+    },
+    {
+      "key": "jolene",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Jolene",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "erin",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Erin",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "marcia",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Marcia",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "stuart",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "Stuart",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "general-mcgrath",
+      "labels": [
+        "User"
+      ],
+      "properties": {
+        "designation": "General McGrath",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "tron",
+      "labels": [
+        "Program",
+        "Security"
+      ],
+      "properties": {
+        "designation": "Tron",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ],
+        "cycles": 40,
+        "active": true
+      }
+    },
+    {
+      "key": "clu",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Clu",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ],
+        "aliases": [
+          "Codified Likeness Utility"
+        ],
+        "cycles": 41,
+        "active": true
+      }
+    },
+    {
+      "key": "sark",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Sark",
+        "sources": [
+          "tron-1981"
+        ],
+        "cycles": 42,
+        "active": true
+      }
+    },
+    {
+      "key": "ram",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Ram",
+        "sources": [
+          "tron-1981"
+        ],
+        "cycles": 38,
+        "active": false
+      }
+    },
+    {
+      "key": "crom",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Crom",
+        "sources": [
+          "tron-1981"
+        ],
+        "cycles": 36,
+        "active": false
+      }
+    },
+    {
+      "key": "yori",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Yori",
+        "sources": [
+          "tron-1981"
+        ],
+        "cycles": 37,
+        "active": true
+      }
+    },
+    {
+      "key": "dumont",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Dumont",
+        "sources": [
+          "tron-1981"
+        ],
+        "cycles": 39,
+        "active": true
+      }
+    },
+    {
+      "key": "bit",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Bit",
+        "sources": [
+          "tron-1981"
+        ],
+        "cycles": 1,
+        "active": true
+      }
+    },
+    {
+      "key": "mcp",
+      "labels": [
+        "Program",
+        "System"
+      ],
+      "properties": {
+        "designation": "Master Control Program",
+        "sources": [
+          "tron-1981",
+          "ares-2025"
+        ],
+        "aliases": [
+          "MCP",
+          "Master Control"
+        ],
+        "version": 2.5,
+        "active": true
+      }
+    },
+    {
+      "key": "rinzler",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Rinzler",
+        "sources": [
+          "legacy-2010"
+        ],
+        "aliases": [
+          "Tron"
+        ],
+        "cycles": 40,
+        "active": true
+      }
+    },
+    {
+      "key": "quorra",
+      "labels": [
+        "Program",
+        "ISO"
+      ],
+      "properties": {
+        "designation": "Quorra",
+        "sources": [
+          "legacy-2010"
+        ],
+        "cycles": 37,
+        "active": true
+      }
+    },
+    {
+      "key": "castor-zuse",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Castor",
+        "sources": [
+          "legacy-2010"
+        ],
+        "aliases": [
+          "Zuse"
+        ],
+        "cycles": 44,
+        "active": true
+      }
+    },
+    {
+      "key": "gem",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Gem",
+        "sources": [
+          "legacy-2010"
+        ],
+        "cycles": 33,
+        "active": true
+      }
+    },
+    {
+      "key": "jarvis",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Jarvis",
+        "sources": [
+          "legacy-2010"
+        ],
+        "cycles": 45,
+        "active": true
+      }
+    },
+    {
+      "key": "bartik",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Bartik",
+        "sources": [
+          "legacy-2010"
+        ],
+        "cycles": 31,
+        "active": true
+      }
+    },
+    {
+      "key": "ares",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Ares",
+        "sources": [
+          "ares-2025"
+        ],
+        "aliases": [
+          "Master Control"
+        ],
+        "version": 1.0,
+        "active": true
+      }
+    },
+    {
+      "key": "athena",
+      "labels": [
+        "Program"
+      ],
+      "properties": {
+        "designation": "Athena",
+        "sources": [
+          "ares-2025"
+        ],
+        "version": 0.9,
+        "active": true
+      }
+    },
+    {
+      "key": "encom",
+      "labels": [
+        "Organization"
+      ],
+      "properties": {
+        "designation": "ENCOM",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ],
+        "aliases": [
+          "ICOM"
+        ]
+      }
+    },
+    {
+      "key": "icom",
+      "labels": [
+        "Organization"
+      ],
+      "properties": {
+        "designation": "ICOM",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "dillinger-systems",
+      "labels": [
+        "Organization"
+      ],
+      "properties": {
+        "designation": "Dillinger Systems",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "black-guard",
+      "labels": [
+        "Organization"
+      ],
+      "properties": {
+        "designation": "Black Guard",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "isos",
+      "labels": [
+        "Organization"
+      ],
+      "properties": {
+        "designation": "ISOs",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "sirens",
+      "labels": [
+        "Organization"
+      ],
+      "properties": {
+        "designation": "Sirens",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "the-grid",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "The Grid",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ],
+        "aliases": [
+          "Electronic World",
+          "Cyberspace"
+        ]
+      }
+    },
+    {
+      "key": "real-world",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Real World",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "video-arcade",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Flynn's Arcade",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ],
+        "aliases": [
+          "Video Arcade"
+        ]
+      }
+    },
+    {
+      "key": "flynns-back-room",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Flynn's Back Room",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "dillingers-office",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Dillinger's Office",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "alans-office",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Alan's Office",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "laser-lab",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Laser Lab",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "laser-corridor",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Laser Corridor",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "encom-building",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "ENCOM Building",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ],
+        "aliases": [
+          "ICOM Building"
+        ]
+      }
+    },
+    {
+      "key": "io-tower",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "I/O Tower",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "io-tower-central-chamber",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "I/O Tower Central Chamber",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "game-grid",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Game Grid",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "light-cycle-arena",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Light Cycle Arena",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "training-arena",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Training Arena",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "maze",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Maze",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "city",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "The City",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "city-plaza",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "City Plaza",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "heliport",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Heliport",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "holding-cell",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Holding Cell",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "tank",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Tank",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "solar-sailer-deck",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Solar Sailer Deck",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "end-of-line-club",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "End of Line Club",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "outlands",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Outlands",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "sea-of-simulation",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Sea of Simulation",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "portal",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Portal",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "disc-wars-arena",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Disc Wars Arena",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "solar-sailer",
+      "labels": [
+        "Vehicle",
+        "Place"
+      ],
+      "properties": {
+        "designation": "Solar Sailer",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "recognizer",
+      "labels": [
+        "Vehicle"
+      ],
+      "properties": {
+        "designation": "Recognizer",
+        "sources": [
+          "tron-1981",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "carrier",
+      "labels": [
+        "Vehicle"
+      ],
+      "properties": {
+        "designation": "Carrier",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "light-cycle",
+      "labels": [
+        "Vehicle"
+      ],
+      "properties": {
+        "designation": "Light Cycle",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "dart",
+      "labels": [
+        "Vehicle"
+      ],
+      "properties": {
+        "designation": "DART",
+        "sources": [
+          "ares-2025"
+        ],
+        "aliases": [
+          "Amphibious Rapid Response Tank"
+        ]
+      }
+    },
+    {
+      "key": "light-disc",
+      "labels": [
+        "Object"
+      ],
+      "properties": {
+        "designation": "Identity Disc",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ],
+        "aliases": [
+          "Light Disc"
+        ]
+      }
+    },
+    {
+      "key": "permanence-code",
+      "labels": [
+        "Object"
+      ],
+      "properties": {
+        "designation": "Permanence Code",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "panic-city",
+      "labels": [
+        "Object"
+      ],
+      "properties": {
+        "designation": "Panic City",
+        "sources": [
+          "ares-2025"
+        ]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "kevin-flynn",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "alan-bradley",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "alan-bradley",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "lora-baines",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ed-dillinger",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "dr-gibbs",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sam-flynn",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sam-flynn",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "richard-mackey",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "julian-dillinger",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "elisabeth-dillinger",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "eve-kim",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tess-kim",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "seth",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "anjay",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "jolene",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "erin",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "marcia",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "stuart",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "general-mcgrath",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "clu",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "clu",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sark",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ram",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "crom",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "yori",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "dumont",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "bit",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "mcp",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "mcp",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "rinzler",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "quorra",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "castor-zuse",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "gem",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "jarvis",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "bartik",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ares",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "athena",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "icom",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "dillinger-systems",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "black-guard",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "isos",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sirens",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "video-arcade",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "video-arcade",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "video-arcade",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "flynns-back-room",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "dillingers-office",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "alans-office",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "laser-lab",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "laser-corridor",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "io-tower",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "io-tower-central-chamber",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "game-grid",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "game-grid",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "light-cycle-arena",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "light-cycle-arena",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "training-arena",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "maze",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city-plaza",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "heliport",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "holding-cell",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tank",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "solar-sailer-deck",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "end-of-line-club",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "outlands",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sea-of-simulation",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "portal",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "disc-wars-arena",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "solar-sailer",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "recognizer",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "recognizer",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "carrier",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "light-cycle",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "light-cycle",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "dart",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "light-disc",
+      "to": "tron-1981",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "light-disc",
+      "to": "legacy-2010",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "permanence-code",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "panic-city",
+      "to": "ares-2025",
+      "labels": [
+        "APPEARS_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "alan-bradley",
+      "to": "tron",
+      "labels": [
+        "CREATED"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "clu",
+      "labels": [
+        "CREATED"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "lora-baines",
+      "to": "yori",
+      "labels": [
+        "CREATED"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "julian-dillinger",
+      "to": "ares",
+      "labels": [
+        "CREATED"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "sam-flynn",
+      "labels": [
+        "PARENT_OF"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ed-dillinger",
+      "to": "elisabeth-dillinger",
+      "labels": [
+        "PARENT_OF"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "elisabeth-dillinger",
+      "to": "julian-dillinger",
+      "labels": [
+        "PARENT_OF"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ed-dillinger",
+      "to": "kevin-flynn",
+      "labels": [
+        "SUCCEEDED_BY"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "sam-flynn",
+      "labels": [
+        "SUCCEEDED_BY"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sam-flynn",
+      "to": "eve-kim",
+      "labels": [
+        "SUCCEEDED_BY"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sam-flynn",
+      "to": "tess-kim",
+      "labels": [
+        "SUCCEEDED_BY"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "julian-dillinger",
+      "to": "dillinger-systems",
+      "labels": [
+        "CONTROLS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "eve-kim",
+      "to": "encom",
+      "labels": [
+        "CONTROLS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom",
+      "to": "encom-building",
+      "labels": [
+        "OWNS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom",
+      "to": "video-arcade",
+      "labels": [
+        "OWNS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "dillinger-systems",
+      "to": "dart",
+      "labels": [
+        "OWNS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "dillinger-systems",
+      "to": "ares",
+      "labels": [
+        "OWNS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "video-arcade",
+      "labels": [
+        "OWNS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom",
+      "to": "icom",
+      "labels": [
+        "ALIAS_OF"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ares",
+      "to": "mcp",
+      "labels": [
+        "REINCARNATION_OF"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "rinzler",
+      "labels": [
+        "REPROGRAMMED_AS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "sark",
+      "labels": [
+        "OPPOSES"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "mcp",
+      "labels": [
+        "OPPOSES"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "clu",
+      "labels": [
+        "OPPOSES"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "ed-dillinger",
+      "labels": [
+        "OPPOSES"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "clu",
+      "to": "kevin-flynn",
+      "labels": [
+        "OPPOSES"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "clu",
+      "to": "quorra",
+      "labels": [
+        "OPPOSES"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "mcp",
+      "to": "ed-dillinger",
+      "labels": [
+        "ENFORCES_FOR"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sark",
+      "to": "mcp",
+      "labels": [
+        "ENFORCES_FOR"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "rinzler",
+      "to": "clu",
+      "labels": [
+        "ENFORCES_FOR"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "black-guard",
+      "to": "clu",
+      "labels": [
+        "ENFORCES_FOR"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sirens",
+      "to": "castor-zuse",
+      "labels": [
+        "ENFORCES_FOR"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ares",
+      "to": "julian-dillinger",
+      "labels": [
+        "ENFORCES_FOR"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "athena",
+      "to": "ares",
+      "labels": [
+        "ENFORCES_FOR"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "clu",
+      "to": "the-grid",
+      "labels": [
+        "CONTROLS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "mcp",
+      "to": "encom",
+      "labels": [
+        "CONTROLS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom",
+      "to": "dillinger-systems",
+      "labels": [
+        "OPPOSES"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "isos",
+      "to": "quorra",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "ram",
+      "labels": [
+        "ALLIES_WITH",
+        "TRUSTS"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "yori",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "alan-bradley",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "lora-baines",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "quorra",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "sam-flynn",
+      "to": "quorra",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "sam-flynn",
+      "to": "kevin-flynn",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "tron",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "ares",
+      "to": "athena",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "eve-kim",
+      "to": "seth",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "eve-kim",
+      "to": "tess-kim",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "julian-dillinger",
+      "to": "elisabeth-dillinger",
+      "labels": [
+        "ALLIES_WITH"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "dumont",
+      "to": "io-tower",
+      "labels": [
+        "GUARDS"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "yori",
+      "to": "solar-sailer",
+      "labels": [
+        "TRAVELED_ON"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "tron",
+      "to": "solar-sailer",
+      "labels": [
+        "TRAVELED_ON"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "kevin-flynn",
+      "to": "solar-sailer",
+      "labels": [
+        "TRAVELED_ON"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "rinzler",
+      "to": "light-cycle",
+      "labels": [
+        "TRAVELED_ON"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "sam-flynn",
+      "to": "light-cycle",
+      "labels": [
+        "TRAVELED_ON"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "ares",
+      "to": "dart",
+      "labels": [
+        "TRAVELED_ON"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "the-grid",
+      "labels": [
+        "CONNECTED_BY",
+        "LASER_BEAM"
+      ],
+      "directed": false,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "video-arcade",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "encom-building",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "heliport",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "video-arcade",
+      "to": "flynns-back-room",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "dillingers-office",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "alans-office",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "laser-lab",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "laser-lab",
+      "to": "laser-corridor",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "io-tower",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "game-grid",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "training-arena",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "maze",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "city",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "outlands",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "sea-of-simulation",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "portal",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "holding-cell",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "tank",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "solar-sailer",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "io-tower",
+      "to": "io-tower-central-chamber",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "game-grid",
+      "to": "light-cycle-arena",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "game-grid",
+      "to": "disc-wars-arena",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city",
+      "to": "city-plaza",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city",
+      "to": "end-of-line-club",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "solar-sailer",
+      "to": "solar-sailer-deck",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    }
+  ],
+  "indexes": [
+    {
+      "kind": "node",
+      "key": "designation"
+    },
+    {
+      "kind": "node",
+      "key": "cycles"
+    }
+  ],
+  "constraints": [
+    {
+      "kind": "node",
+      "scope": "User",
+      "key": "designation"
+    }
+  ]
+}

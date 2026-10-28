@@ -1,0 +1,259 @@
+{"kind":"header","format":"pygrafito-jsonl","version":2,"nodes":78,"relationships":180}
+{"kind":"node","id":1,"labels":["User"],"properties":{"designation":"Alan Bradley","role":"security engineer","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":2,"labels":["Place"],"properties":{"designation":"Alan's Office","sources":["tron-1981"]}}
+{"kind":"node","id":3,"labels":["User"],"properties":{"aliases":["Ajay"],"designation":"Anjay","role":"ENCOM technician","sources":["ares-2025"]}}
+{"kind":"node","id":4,"labels":["Program"],"properties":{"active":true,"aliases":["Master Control"],"designation":"Ares","sources":["ares-2025"],"version":1.0}}
+{"kind":"node","id":5,"labels":["Film"],"properties":{"designation":"TRON: Ares","released":2025,"source_kind":"transcript"}}
+{"kind":"node","id":6,"labels":["Program"],"properties":{"active":true,"designation":"Athena","sources":["ares-2025"],"version":0.9}}
+{"kind":"node","id":7,"labels":["Program"],"properties":{"active":true,"cycles":31,"designation":"Bartik","sources":["legacy-2010"]}}
+{"kind":"node","id":8,"labels":["Program"],"properties":{"active":true,"cycles":1,"designation":"Bit","sources":["tron-1981"]}}
+{"kind":"node","id":9,"labels":["Organization"],"properties":{"designation":"Black Guard","sources":["legacy-2010"]}}
+{"kind":"node","id":10,"labels":["Vehicle"],"properties":{"designation":"Carrier","sources":["tron-1981"]}}
+{"kind":"node","id":11,"labels":["Program"],"properties":{"active":true,"aliases":["Zuse"],"cycles":44,"designation":"Castor","sources":["legacy-2010"]}}
+{"kind":"node","id":12,"labels":["Place"],"properties":{"designation":"The City","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":13,"labels":["Place"],"properties":{"designation":"City Plaza","sources":["tron-1981"]}}
+{"kind":"node","id":14,"labels":["Program"],"properties":{"active":true,"aliases":["Codified Likeness Utility"],"cycles":41,"designation":"Clu","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":15,"labels":["Program"],"properties":{"active":false,"cycles":36,"designation":"Crom","sources":["tron-1981"]}}
+{"kind":"node","id":16,"labels":["Vehicle"],"properties":{"aliases":["Amphibious Rapid Response Tank"],"designation":"DART","sources":["ares-2025"]}}
+{"kind":"node","id":17,"labels":["Organization"],"properties":{"designation":"Dillinger Systems","sources":["ares-2025"]}}
+{"kind":"node","id":18,"labels":["Place"],"properties":{"designation":"Dillinger's Office","sources":["tron-1981"]}}
+{"kind":"node","id":19,"labels":["Place"],"properties":{"designation":"Disc Wars Arena","sources":["legacy-2010"]}}
+{"kind":"node","id":20,"labels":["User"],"properties":{"designation":"Dr. Gibbs","role":"physicist","sources":["tron-1981"]}}
+{"kind":"node","id":21,"labels":["Program"],"properties":{"active":true,"cycles":39,"designation":"Dumont","sources":["tron-1981"]}}
+{"kind":"node","id":22,"labels":["User"],"properties":{"designation":"Ed Dillinger","role":"ENCOM executive","sources":["tron-1981"]}}
+{"kind":"node","id":23,"labels":["User"],"properties":{"designation":"Elisabeth Dillinger","role":"Dillinger family matriarch","sources":["ares-2025"]}}
+{"kind":"node","id":24,"labels":["Organization"],"properties":{"aliases":["ICOM"],"designation":"ENCOM","sources":["tron-1981","legacy-2010","ares-2025"]}}
+{"kind":"node","id":25,"labels":["Place"],"properties":{"aliases":["ICOM Building"],"designation":"ENCOM Building","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":26,"labels":["Place"],"properties":{"designation":"End of Line Club","sources":["legacy-2010"]}}
+{"kind":"node","id":27,"labels":["User"],"properties":{"designation":"Erin","sources":["ares-2025"]}}
+{"kind":"node","id":28,"labels":["User"],"properties":{"designation":"Eve Kim","role":"ENCOM CEO","sources":["ares-2025"]}}
+{"kind":"node","id":29,"labels":["Place"],"properties":{"designation":"Flynn's Back Room","sources":["tron-1981"]}}
+{"kind":"node","id":30,"labels":["Place"],"properties":{"designation":"Game Grid","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":31,"labels":["Program"],"properties":{"active":true,"cycles":33,"designation":"Gem","sources":["legacy-2010"]}}
+{"kind":"node","id":32,"labels":["User"],"properties":{"designation":"General McGrath","sources":["ares-2025"]}}
+{"kind":"node","id":33,"labels":["Place"],"properties":{"designation":"Heliport","sources":["tron-1981"]}}
+{"kind":"node","id":34,"labels":["Place"],"properties":{"designation":"Holding Cell","sources":["tron-1981"]}}
+{"kind":"node","id":35,"labels":["Organization"],"properties":{"designation":"ICOM","sources":["tron-1981"]}}
+{"kind":"node","id":36,"labels":["Place"],"properties":{"designation":"I/O Tower","sources":["tron-1981"]}}
+{"kind":"node","id":37,"labels":["Place"],"properties":{"designation":"I/O Tower Central Chamber","sources":["tron-1981"]}}
+{"kind":"node","id":38,"labels":["Organization"],"properties":{"designation":"ISOs","sources":["legacy-2010"]}}
+{"kind":"node","id":39,"labels":["Program"],"properties":{"active":true,"cycles":45,"designation":"Jarvis","sources":["legacy-2010"]}}
+{"kind":"node","id":40,"labels":["User"],"properties":{"designation":"Jolene","sources":["ares-2025"]}}
+{"kind":"node","id":41,"labels":["User"],"properties":{"designation":"Julian Dillinger","role":"Dillinger Systems CEO","sources":["ares-2025"]}}
+{"kind":"node","id":42,"labels":["User"],"properties":{"aliases":["Flynn"],"designation":"Kevin Flynn","role":"game designer","sources":["tron-1981","legacy-2010","ares-2025"]}}
+{"kind":"node","id":43,"labels":["Place"],"properties":{"designation":"Laser Corridor","sources":["tron-1981"]}}
+{"kind":"node","id":44,"labels":["Place"],"properties":{"designation":"Laser Lab","sources":["tron-1981"]}}
+{"kind":"node","id":45,"labels":["Film"],"properties":{"designation":"TRON: Legacy","released":2010,"source_kind":"final"}}
+{"kind":"node","id":46,"labels":["Vehicle"],"properties":{"designation":"Light Cycle","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":47,"labels":["Place"],"properties":{"designation":"Light Cycle Arena","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":48,"labels":["Object"],"properties":{"aliases":["Light Disc"],"designation":"Identity Disc","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":49,"labels":["User"],"properties":{"designation":"Lora Baines","role":"laser engineer","sources":["tron-1981"]}}
+{"kind":"node","id":50,"labels":["User"],"properties":{"designation":"Marcia","sources":["ares-2025"]}}
+{"kind":"node","id":51,"labels":["Place"],"properties":{"designation":"Maze","sources":["tron-1981"]}}
+{"kind":"node","id":52,"labels":["Program","System"],"properties":{"active":true,"aliases":["MCP","Master Control"],"designation":"Master Control Program","sources":["tron-1981","ares-2025"],"version":2.5}}
+{"kind":"node","id":53,"labels":["Place"],"properties":{"designation":"Outlands","sources":["legacy-2010"]}}
+{"kind":"node","id":54,"labels":["Object"],"properties":{"designation":"Panic City","sources":["ares-2025"]}}
+{"kind":"node","id":55,"labels":["Object"],"properties":{"designation":"Permanence Code","sources":["ares-2025"]}}
+{"kind":"node","id":56,"labels":["Place"],"properties":{"designation":"Portal","sources":["legacy-2010"]}}
+{"kind":"node","id":57,"labels":["ISO","Program"],"properties":{"active":true,"cycles":37,"designation":"Quorra","sources":["legacy-2010"]}}
+{"kind":"node","id":58,"labels":["Program"],"properties":{"active":false,"cycles":38,"designation":"Ram","sources":["tron-1981"]}}
+{"kind":"node","id":59,"labels":["Place"],"properties":{"designation":"Real World","sources":["tron-1981","legacy-2010","ares-2025"]}}
+{"kind":"node","id":60,"labels":["Vehicle"],"properties":{"designation":"Recognizer","sources":["tron-1981","ares-2025"]}}
+{"kind":"node","id":61,"labels":["User"],"properties":{"designation":"Richard Mackey","role":"ENCOM CEO","sources":["legacy-2010"]}}
+{"kind":"node","id":62,"labels":["Program"],"properties":{"active":true,"aliases":["Tron"],"cycles":40,"designation":"Rinzler","sources":["legacy-2010"]}}
+{"kind":"node","id":63,"labels":["User"],"properties":{"designation":"Sam Flynn","role":"ENCOM chairman","sources":["legacy-2010","ares-2025"]}}
+{"kind":"node","id":64,"labels":["Program"],"properties":{"active":true,"cycles":42,"designation":"Sark","sources":["tron-1981"]}}
+{"kind":"node","id":65,"labels":["Place"],"properties":{"designation":"Sea of Simulation","sources":["legacy-2010"]}}
+{"kind":"node","id":66,"labels":["User"],"properties":{"designation":"Seth","role":"ENCOM engineer","sources":["ares-2025"]}}
+{"kind":"node","id":67,"labels":["Organization"],"properties":{"designation":"Sirens","sources":["legacy-2010"]}}
+{"kind":"node","id":68,"labels":["Place","Vehicle"],"properties":{"designation":"Solar Sailer","sources":["tron-1981"]}}
+{"kind":"node","id":69,"labels":["Place"],"properties":{"designation":"Solar Sailer Deck","sources":["tron-1981"]}}
+{"kind":"node","id":70,"labels":["User"],"properties":{"designation":"Stuart","sources":["ares-2025"]}}
+{"kind":"node","id":71,"labels":["Place"],"properties":{"designation":"Tank","sources":["tron-1981"]}}
+{"kind":"node","id":72,"labels":["User"],"properties":{"designation":"Tess Kim","role":"ENCOM engineer","sources":["ares-2025"]}}
+{"kind":"node","id":73,"labels":["Place"],"properties":{"aliases":["Electronic World","Cyberspace"],"designation":"The Grid","sources":["tron-1981","legacy-2010","ares-2025"]}}
+{"kind":"node","id":74,"labels":["Place"],"properties":{"designation":"Training Arena","sources":["tron-1981"]}}
+{"kind":"node","id":75,"labels":["Program","Security"],"properties":{"active":true,"cycles":40,"designation":"Tron","sources":["tron-1981","legacy-2010"]}}
+{"kind":"node","id":76,"labels":["Film"],"properties":{"designation":"TRON","released":1982,"source_kind":"draft"}}
+{"kind":"node","id":77,"labels":["Place"],"properties":{"aliases":["Video Arcade"],"designation":"Flynn's Arcade","sources":["tron-1981","legacy-2010","ares-2025"]}}
+{"kind":"node","id":78,"labels":["Program"],"properties":{"active":true,"cycles":37,"designation":"Yori","sources":["tron-1981"]}}
+{"kind":"relationship","id":1,"labels":["APPEARS_IN"],"directed":true,"start_id":1,"end_id":45,"properties":{}}
+{"kind":"relationship","id":2,"labels":["CREATED"],"directed":true,"start_id":1,"end_id":75,"properties":{}}
+{"kind":"relationship","id":3,"labels":["APPEARS_IN"],"directed":true,"start_id":1,"end_id":76,"properties":{}}
+{"kind":"relationship","id":4,"labels":["APPEARS_IN"],"directed":true,"start_id":2,"end_id":76,"properties":{}}
+{"kind":"relationship","id":5,"labels":["APPEARS_IN"],"directed":true,"start_id":3,"end_id":5,"properties":{}}
+{"kind":"relationship","id":6,"labels":["APPEARS_IN"],"directed":true,"start_id":4,"end_id":5,"properties":{}}
+{"kind":"relationship","id":7,"labels":["ALLIES_WITH"],"directed":false,"start_id":4,"end_id":6,"properties":{}}
+{"kind":"relationship","id":8,"labels":["TRAVELED_ON"],"directed":true,"start_id":4,"end_id":16,"properties":{}}
+{"kind":"relationship","id":9,"labels":["ENFORCES_FOR"],"directed":true,"start_id":4,"end_id":41,"properties":{}}
+{"kind":"relationship","id":10,"labels":["REINCARNATION_OF"],"directed":true,"start_id":4,"end_id":52,"properties":{}}
+{"kind":"relationship","id":11,"labels":["ENFORCES_FOR"],"directed":true,"start_id":6,"end_id":4,"properties":{}}
+{"kind":"relationship","id":12,"labels":["APPEARS_IN"],"directed":true,"start_id":6,"end_id":5,"properties":{}}
+{"kind":"relationship","id":13,"labels":["APPEARS_IN"],"directed":true,"start_id":7,"end_id":45,"properties":{}}
+{"kind":"relationship","id":14,"labels":["APPEARS_IN"],"directed":true,"start_id":8,"end_id":76,"properties":{}}
+{"kind":"relationship","id":15,"labels":["ENFORCES_FOR"],"directed":true,"start_id":9,"end_id":14,"properties":{}}
+{"kind":"relationship","id":16,"labels":["APPEARS_IN"],"directed":true,"start_id":9,"end_id":45,"properties":{}}
+{"kind":"relationship","id":17,"labels":["APPEARS_IN"],"directed":true,"start_id":10,"end_id":76,"properties":{}}
+{"kind":"relationship","id":18,"labels":["APPEARS_IN"],"directed":true,"start_id":11,"end_id":45,"properties":{}}
+{"kind":"relationship","id":19,"labels":["HAS_PART"],"directed":true,"start_id":12,"end_id":13,"properties":{}}
+{"kind":"relationship","id":20,"labels":["HAS_PART"],"directed":true,"start_id":12,"end_id":26,"properties":{}}
+{"kind":"relationship","id":21,"labels":["APPEARS_IN"],"directed":true,"start_id":12,"end_id":45,"properties":{}}
+{"kind":"relationship","id":22,"labels":["APPEARS_IN"],"directed":true,"start_id":12,"end_id":76,"properties":{}}
+{"kind":"relationship","id":23,"labels":["APPEARS_IN"],"directed":true,"start_id":13,"end_id":76,"properties":{}}
+{"kind":"relationship","id":24,"labels":["OPPOSES"],"directed":true,"start_id":14,"end_id":42,"properties":{}}
+{"kind":"relationship","id":25,"labels":["APPEARS_IN"],"directed":true,"start_id":14,"end_id":45,"properties":{}}
+{"kind":"relationship","id":26,"labels":["OPPOSES"],"directed":true,"start_id":14,"end_id":57,"properties":{}}
+{"kind":"relationship","id":27,"labels":["CONTROLS"],"directed":true,"start_id":14,"end_id":73,"properties":{}}
+{"kind":"relationship","id":28,"labels":["APPEARS_IN"],"directed":true,"start_id":14,"end_id":76,"properties":{}}
+{"kind":"relationship","id":29,"labels":["APPEARS_IN"],"directed":true,"start_id":15,"end_id":76,"properties":{}}
+{"kind":"relationship","id":30,"labels":["APPEARS_IN"],"directed":true,"start_id":16,"end_id":5,"properties":{}}
+{"kind":"relationship","id":31,"labels":["OWNS"],"directed":true,"start_id":17,"end_id":4,"properties":{}}
+{"kind":"relationship","id":32,"labels":["APPEARS_IN"],"directed":true,"start_id":17,"end_id":5,"properties":{}}
+{"kind":"relationship","id":33,"labels":["OWNS"],"directed":true,"start_id":17,"end_id":16,"properties":{}}
+{"kind":"relationship","id":34,"labels":["APPEARS_IN"],"directed":true,"start_id":18,"end_id":76,"properties":{}}
+{"kind":"relationship","id":35,"labels":["APPEARS_IN"],"directed":true,"start_id":19,"end_id":45,"properties":{}}
+{"kind":"relationship","id":36,"labels":["APPEARS_IN"],"directed":true,"start_id":20,"end_id":76,"properties":{}}
+{"kind":"relationship","id":37,"labels":["GUARDS"],"directed":true,"start_id":21,"end_id":36,"properties":{}}
+{"kind":"relationship","id":38,"labels":["APPEARS_IN"],"directed":true,"start_id":21,"end_id":76,"properties":{}}
+{"kind":"relationship","id":39,"labels":["PARENT_OF"],"directed":true,"start_id":22,"end_id":23,"properties":{}}
+{"kind":"relationship","id":40,"labels":["SUCCEEDED_BY"],"directed":true,"start_id":22,"end_id":42,"properties":{}}
+{"kind":"relationship","id":41,"labels":["APPEARS_IN"],"directed":true,"start_id":22,"end_id":76,"properties":{}}
+{"kind":"relationship","id":42,"labels":["APPEARS_IN"],"directed":true,"start_id":23,"end_id":5,"properties":{}}
+{"kind":"relationship","id":43,"labels":["PARENT_OF"],"directed":true,"start_id":23,"end_id":41,"properties":{}}
+{"kind":"relationship","id":44,"labels":["APPEARS_IN"],"directed":true,"start_id":24,"end_id":5,"properties":{}}
+{"kind":"relationship","id":45,"labels":["OPPOSES"],"directed":true,"start_id":24,"end_id":17,"properties":{}}
+{"kind":"relationship","id":46,"labels":["OWNS"],"directed":true,"start_id":24,"end_id":25,"properties":{}}
+{"kind":"relationship","id":47,"labels":["ALIAS_OF"],"directed":true,"start_id":24,"end_id":35,"properties":{}}
+{"kind":"relationship","id":48,"labels":["APPEARS_IN"],"directed":true,"start_id":24,"end_id":45,"properties":{}}
+{"kind":"relationship","id":49,"labels":["APPEARS_IN"],"directed":true,"start_id":24,"end_id":76,"properties":{}}
+{"kind":"relationship","id":50,"labels":["OWNS"],"directed":true,"start_id":24,"end_id":77,"properties":{}}
+{"kind":"relationship","id":51,"labels":["HAS_PART"],"directed":true,"start_id":25,"end_id":2,"properties":{}}
+{"kind":"relationship","id":52,"labels":["HAS_PART"],"directed":true,"start_id":25,"end_id":18,"properties":{}}
+{"kind":"relationship","id":53,"labels":["HAS_PART"],"directed":true,"start_id":25,"end_id":44,"properties":{}}
+{"kind":"relationship","id":54,"labels":["APPEARS_IN"],"directed":true,"start_id":25,"end_id":45,"properties":{}}
+{"kind":"relationship","id":55,"labels":["APPEARS_IN"],"directed":true,"start_id":25,"end_id":76,"properties":{}}
+{"kind":"relationship","id":56,"labels":["APPEARS_IN"],"directed":true,"start_id":26,"end_id":45,"properties":{}}
+{"kind":"relationship","id":57,"labels":["APPEARS_IN"],"directed":true,"start_id":27,"end_id":5,"properties":{}}
+{"kind":"relationship","id":58,"labels":["APPEARS_IN"],"directed":true,"start_id":28,"end_id":5,"properties":{}}
+{"kind":"relationship","id":59,"labels":["CONTROLS"],"directed":true,"start_id":28,"end_id":24,"properties":{}}
+{"kind":"relationship","id":60,"labels":["ALLIES_WITH"],"directed":false,"start_id":28,"end_id":66,"properties":{}}
+{"kind":"relationship","id":61,"labels":["ALLIES_WITH"],"directed":false,"start_id":28,"end_id":72,"properties":{}}
+{"kind":"relationship","id":62,"labels":["APPEARS_IN"],"directed":true,"start_id":29,"end_id":76,"properties":{}}
+{"kind":"relationship","id":63,"labels":["HAS_PART"],"directed":true,"start_id":30,"end_id":19,"properties":{}}
+{"kind":"relationship","id":64,"labels":["APPEARS_IN"],"directed":true,"start_id":30,"end_id":45,"properties":{}}
+{"kind":"relationship","id":65,"labels":["HAS_PART"],"directed":true,"start_id":30,"end_id":47,"properties":{}}
+{"kind":"relationship","id":66,"labels":["APPEARS_IN"],"directed":true,"start_id":30,"end_id":76,"properties":{}}
+{"kind":"relationship","id":67,"labels":["APPEARS_IN"],"directed":true,"start_id":31,"end_id":45,"properties":{}}
+{"kind":"relationship","id":68,"labels":["APPEARS_IN"],"directed":true,"start_id":32,"end_id":5,"properties":{}}
+{"kind":"relationship","id":69,"labels":["APPEARS_IN"],"directed":true,"start_id":33,"end_id":76,"properties":{}}
+{"kind":"relationship","id":70,"labels":["APPEARS_IN"],"directed":true,"start_id":34,"end_id":76,"properties":{}}
+{"kind":"relationship","id":71,"labels":["APPEARS_IN"],"directed":true,"start_id":35,"end_id":76,"properties":{}}
+{"kind":"relationship","id":72,"labels":["HAS_PART"],"directed":true,"start_id":36,"end_id":37,"properties":{}}
+{"kind":"relationship","id":73,"labels":["APPEARS_IN"],"directed":true,"start_id":36,"end_id":76,"properties":{}}
+{"kind":"relationship","id":74,"labels":["APPEARS_IN"],"directed":true,"start_id":37,"end_id":76,"properties":{}}
+{"kind":"relationship","id":75,"labels":["APPEARS_IN"],"directed":true,"start_id":38,"end_id":45,"properties":{}}
+{"kind":"relationship","id":76,"labels":["ALLIES_WITH"],"directed":false,"start_id":38,"end_id":57,"properties":{}}
+{"kind":"relationship","id":77,"labels":["APPEARS_IN"],"directed":true,"start_id":39,"end_id":45,"properties":{}}
+{"kind":"relationship","id":78,"labels":["APPEARS_IN"],"directed":true,"start_id":40,"end_id":5,"properties":{}}
+{"kind":"relationship","id":79,"labels":["CREATED"],"directed":true,"start_id":41,"end_id":4,"properties":{}}
+{"kind":"relationship","id":80,"labels":["APPEARS_IN"],"directed":true,"start_id":41,"end_id":5,"properties":{}}
+{"kind":"relationship","id":81,"labels":["CONTROLS"],"directed":true,"start_id":41,"end_id":17,"properties":{}}
+{"kind":"relationship","id":82,"labels":["ALLIES_WITH"],"directed":false,"start_id":41,"end_id":23,"properties":{}}
+{"kind":"relationship","id":83,"labels":["ALLIES_WITH"],"directed":false,"start_id":42,"end_id":1,"properties":{}}
+{"kind":"relationship","id":84,"labels":["APPEARS_IN"],"directed":true,"start_id":42,"end_id":5,"properties":{}}
+{"kind":"relationship","id":85,"labels":["CREATED"],"directed":true,"start_id":42,"end_id":14,"properties":{}}
+{"kind":"relationship","id":86,"labels":["OPPOSES"],"directed":true,"start_id":42,"end_id":22,"properties":{}}
+{"kind":"relationship","id":87,"labels":["APPEARS_IN"],"directed":true,"start_id":42,"end_id":45,"properties":{}}
+{"kind":"relationship","id":88,"labels":["ALLIES_WITH"],"directed":false,"start_id":42,"end_id":49,"properties":{}}
+{"kind":"relationship","id":89,"labels":["ALLIES_WITH"],"directed":false,"start_id":42,"end_id":57,"properties":{}}
+{"kind":"relationship","id":90,"labels":["PARENT_OF"],"directed":true,"start_id":42,"end_id":63,"properties":{}}
+{"kind":"relationship","id":91,"labels":["SUCCEEDED_BY"],"directed":true,"start_id":42,"end_id":63,"properties":{}}
+{"kind":"relationship","id":92,"labels":["TRAVELED_ON"],"directed":true,"start_id":42,"end_id":68,"properties":{}}
+{"kind":"relationship","id":93,"labels":["ALLIES_WITH"],"directed":false,"start_id":42,"end_id":75,"properties":{}}
+{"kind":"relationship","id":94,"labels":["APPEARS_IN"],"directed":true,"start_id":42,"end_id":76,"properties":{}}
+{"kind":"relationship","id":95,"labels":["OWNS"],"directed":true,"start_id":42,"end_id":77,"properties":{}}
+{"kind":"relationship","id":96,"labels":["APPEARS_IN"],"directed":true,"start_id":43,"end_id":76,"properties":{}}
+{"kind":"relationship","id":97,"labels":["HAS_PART"],"directed":true,"start_id":44,"end_id":43,"properties":{}}
+{"kind":"relationship","id":98,"labels":["APPEARS_IN"],"directed":true,"start_id":44,"end_id":76,"properties":{}}
+{"kind":"relationship","id":99,"labels":["APPEARS_IN"],"directed":true,"start_id":46,"end_id":45,"properties":{}}
+{"kind":"relationship","id":100,"labels":["APPEARS_IN"],"directed":true,"start_id":46,"end_id":76,"properties":{}}
+{"kind":"relationship","id":101,"labels":["APPEARS_IN"],"directed":true,"start_id":47,"end_id":45,"properties":{}}
+{"kind":"relationship","id":102,"labels":["APPEARS_IN"],"directed":true,"start_id":47,"end_id":76,"properties":{}}
+{"kind":"relationship","id":103,"labels":["APPEARS_IN"],"directed":true,"start_id":48,"end_id":45,"properties":{}}
+{"kind":"relationship","id":104,"labels":["APPEARS_IN"],"directed":true,"start_id":48,"end_id":76,"properties":{}}
+{"kind":"relationship","id":105,"labels":["APPEARS_IN"],"directed":true,"start_id":49,"end_id":76,"properties":{}}
+{"kind":"relationship","id":106,"labels":["CREATED"],"directed":true,"start_id":49,"end_id":78,"properties":{}}
+{"kind":"relationship","id":107,"labels":["APPEARS_IN"],"directed":true,"start_id":50,"end_id":5,"properties":{}}
+{"kind":"relationship","id":108,"labels":["APPEARS_IN"],"directed":true,"start_id":51,"end_id":76,"properties":{}}
+{"kind":"relationship","id":109,"labels":["APPEARS_IN"],"directed":true,"start_id":52,"end_id":5,"properties":{}}
+{"kind":"relationship","id":110,"labels":["ENFORCES_FOR"],"directed":true,"start_id":52,"end_id":22,"properties":{}}
+{"kind":"relationship","id":111,"labels":["CONTROLS"],"directed":true,"start_id":52,"end_id":24,"properties":{}}
+{"kind":"relationship","id":112,"labels":["APPEARS_IN"],"directed":true,"start_id":52,"end_id":76,"properties":{}}
+{"kind":"relationship","id":113,"labels":["APPEARS_IN"],"directed":true,"start_id":53,"end_id":45,"properties":{}}
+{"kind":"relationship","id":114,"labels":["APPEARS_IN"],"directed":true,"start_id":54,"end_id":5,"properties":{}}
+{"kind":"relationship","id":115,"labels":["APPEARS_IN"],"directed":true,"start_id":55,"end_id":5,"properties":{}}
+{"kind":"relationship","id":116,"labels":["APPEARS_IN"],"directed":true,"start_id":56,"end_id":45,"properties":{}}
+{"kind":"relationship","id":117,"labels":["APPEARS_IN"],"directed":true,"start_id":57,"end_id":45,"properties":{}}
+{"kind":"relationship","id":118,"labels":["APPEARS_IN"],"directed":true,"start_id":58,"end_id":76,"properties":{}}
+{"kind":"relationship","id":119,"labels":["APPEARS_IN"],"directed":true,"start_id":59,"end_id":5,"properties":{}}
+{"kind":"relationship","id":120,"labels":["HAS_PART"],"directed":true,"start_id":59,"end_id":25,"properties":{}}
+{"kind":"relationship","id":121,"labels":["HAS_PART"],"directed":true,"start_id":59,"end_id":33,"properties":{}}
+{"kind":"relationship","id":122,"labels":["APPEARS_IN"],"directed":true,"start_id":59,"end_id":45,"properties":{}}
+{"kind":"relationship","id":123,"labels":["CONNECTED_BY","LASER_BEAM"],"directed":false,"start_id":59,"end_id":73,"properties":{}}
+{"kind":"relationship","id":124,"labels":["APPEARS_IN"],"directed":true,"start_id":59,"end_id":76,"properties":{}}
+{"kind":"relationship","id":125,"labels":["HAS_PART"],"directed":true,"start_id":59,"end_id":77,"properties":{}}
+{"kind":"relationship","id":126,"labels":["APPEARS_IN"],"directed":true,"start_id":60,"end_id":5,"properties":{}}
+{"kind":"relationship","id":127,"labels":["APPEARS_IN"],"directed":true,"start_id":60,"end_id":76,"properties":{}}
+{"kind":"relationship","id":128,"labels":["APPEARS_IN"],"directed":true,"start_id":61,"end_id":45,"properties":{}}
+{"kind":"relationship","id":129,"labels":["ENFORCES_FOR"],"directed":true,"start_id":62,"end_id":14,"properties":{}}
+{"kind":"relationship","id":130,"labels":["APPEARS_IN"],"directed":true,"start_id":62,"end_id":45,"properties":{}}
+{"kind":"relationship","id":131,"labels":["TRAVELED_ON"],"directed":true,"start_id":62,"end_id":46,"properties":{}}
+{"kind":"relationship","id":132,"labels":["APPEARS_IN"],"directed":true,"start_id":63,"end_id":5,"properties":{}}
+{"kind":"relationship","id":133,"labels":["SUCCEEDED_BY"],"directed":true,"start_id":63,"end_id":28,"properties":{}}
+{"kind":"relationship","id":134,"labels":["ALLIES_WITH"],"directed":false,"start_id":63,"end_id":42,"properties":{}}
+{"kind":"relationship","id":135,"labels":["APPEARS_IN"],"directed":true,"start_id":63,"end_id":45,"properties":{}}
+{"kind":"relationship","id":136,"labels":["TRAVELED_ON"],"directed":true,"start_id":63,"end_id":46,"properties":{}}
+{"kind":"relationship","id":137,"labels":["ALLIES_WITH"],"directed":false,"start_id":63,"end_id":57,"properties":{}}
+{"kind":"relationship","id":138,"labels":["SUCCEEDED_BY"],"directed":true,"start_id":63,"end_id":72,"properties":{}}
+{"kind":"relationship","id":139,"labels":["ENFORCES_FOR"],"directed":true,"start_id":64,"end_id":52,"properties":{}}
+{"kind":"relationship","id":140,"labels":["APPEARS_IN"],"directed":true,"start_id":64,"end_id":76,"properties":{}}
+{"kind":"relationship","id":141,"labels":["APPEARS_IN"],"directed":true,"start_id":65,"end_id":45,"properties":{}}
+{"kind":"relationship","id":142,"labels":["APPEARS_IN"],"directed":true,"start_id":66,"end_id":5,"properties":{}}
+{"kind":"relationship","id":143,"labels":["ENFORCES_FOR"],"directed":true,"start_id":67,"end_id":11,"properties":{}}
+{"kind":"relationship","id":144,"labels":["APPEARS_IN"],"directed":true,"start_id":67,"end_id":45,"properties":{}}
+{"kind":"relationship","id":145,"labels":["HAS_PART"],"directed":true,"start_id":68,"end_id":69,"properties":{}}
+{"kind":"relationship","id":146,"labels":["APPEARS_IN"],"directed":true,"start_id":68,"end_id":76,"properties":{}}
+{"kind":"relationship","id":147,"labels":["APPEARS_IN"],"directed":true,"start_id":69,"end_id":76,"properties":{}}
+{"kind":"relationship","id":148,"labels":["APPEARS_IN"],"directed":true,"start_id":70,"end_id":5,"properties":{}}
+{"kind":"relationship","id":149,"labels":["APPEARS_IN"],"directed":true,"start_id":71,"end_id":76,"properties":{}}
+{"kind":"relationship","id":150,"labels":["APPEARS_IN"],"directed":true,"start_id":72,"end_id":5,"properties":{}}
+{"kind":"relationship","id":151,"labels":["APPEARS_IN"],"directed":true,"start_id":73,"end_id":5,"properties":{}}
+{"kind":"relationship","id":152,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":12,"properties":{}}
+{"kind":"relationship","id":153,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":30,"properties":{}}
+{"kind":"relationship","id":154,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":34,"properties":{}}
+{"kind":"relationship","id":155,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":36,"properties":{}}
+{"kind":"relationship","id":156,"labels":["APPEARS_IN"],"directed":true,"start_id":73,"end_id":45,"properties":{}}
+{"kind":"relationship","id":157,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":51,"properties":{}}
+{"kind":"relationship","id":158,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":53,"properties":{}}
+{"kind":"relationship","id":159,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":56,"properties":{}}
+{"kind":"relationship","id":160,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":65,"properties":{}}
+{"kind":"relationship","id":161,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":68,"properties":{}}
+{"kind":"relationship","id":162,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":71,"properties":{}}
+{"kind":"relationship","id":163,"labels":["HAS_PART"],"directed":true,"start_id":73,"end_id":74,"properties":{}}
+{"kind":"relationship","id":164,"labels":["APPEARS_IN"],"directed":true,"start_id":73,"end_id":76,"properties":{}}
+{"kind":"relationship","id":165,"labels":["APPEARS_IN"],"directed":true,"start_id":74,"end_id":76,"properties":{}}
+{"kind":"relationship","id":166,"labels":["OPPOSES"],"directed":true,"start_id":75,"end_id":14,"properties":{}}
+{"kind":"relationship","id":167,"labels":["APPEARS_IN"],"directed":true,"start_id":75,"end_id":45,"properties":{}}
+{"kind":"relationship","id":168,"labels":["OPPOSES"],"directed":true,"start_id":75,"end_id":52,"properties":{}}
+{"kind":"relationship","id":169,"labels":["ALLIES_WITH","TRUSTS"],"directed":false,"start_id":75,"end_id":58,"properties":{}}
+{"kind":"relationship","id":170,"labels":["REPROGRAMMED_AS"],"directed":true,"start_id":75,"end_id":62,"properties":{}}
+{"kind":"relationship","id":171,"labels":["OPPOSES"],"directed":true,"start_id":75,"end_id":64,"properties":{}}
+{"kind":"relationship","id":172,"labels":["TRAVELED_ON"],"directed":true,"start_id":75,"end_id":68,"properties":{}}
+{"kind":"relationship","id":173,"labels":["APPEARS_IN"],"directed":true,"start_id":75,"end_id":76,"properties":{}}
+{"kind":"relationship","id":174,"labels":["ALLIES_WITH"],"directed":false,"start_id":75,"end_id":78,"properties":{}}
+{"kind":"relationship","id":175,"labels":["APPEARS_IN"],"directed":true,"start_id":77,"end_id":5,"properties":{}}
+{"kind":"relationship","id":176,"labels":["HAS_PART"],"directed":true,"start_id":77,"end_id":29,"properties":{}}
+{"kind":"relationship","id":177,"labels":["APPEARS_IN"],"directed":true,"start_id":77,"end_id":45,"properties":{}}
+{"kind":"relationship","id":178,"labels":["APPEARS_IN"],"directed":true,"start_id":77,"end_id":76,"properties":{}}
+{"kind":"relationship","id":179,"labels":["TRAVELED_ON"],"directed":true,"start_id":78,"end_id":68,"properties":{}}
+{"kind":"relationship","id":180,"labels":["APPEARS_IN"],"directed":true,"start_id":78,"end_id":76,"properties":{}}

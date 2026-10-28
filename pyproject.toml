@@ -61,7 +61,7 @@ serve = "sphinx-autobuild docs docs/_build/html"
 [tool.ruff]
 target-version = "py314"
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests", "examples"]
 
 [tool.ruff.lint]
 select = [
@@ -101,13 +101,16 @@ ignore = [
   "D",
   "PLR2004",
 ]
+"examples/extract/*.py" = [
+  "PLR0912",
+]
 
 [tool.ruff.lint.pydocstyle]
 convention = "numpy"
 
 [tool.pyrefly]
 preset = "strict"
-project-includes = ["src/pygrafito", "tests"]
+project-includes = ["src/pygrafito", "tests", "examples"]
 search-path = ["src", "."]
 python-version = "3.14"
 disable-search-path-heuristics = true

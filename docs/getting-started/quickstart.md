@@ -148,6 +148,8 @@ with tempfile.TemporaryDirectory() as directory:
 
 ## Where next
 
+- [Sample graphs and examples](../guides/examples.md) build a richer franchise graph and show the
+  shell tours, analysis recipes, and algorithm demonstrations.
 - [Guides](../guides/querying.md) cover the tasks you will do repeatedly.
 - [Reference](../reference/query-language.md) holds grammar, formats, and detailed behavior.
 - [API reference](../api/index.md) documents the public Python surface.

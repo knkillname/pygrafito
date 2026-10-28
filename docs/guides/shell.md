@@ -11,7 +11,7 @@ reference](../reference/cli.md) owns every option, dot command, output rule, and
 
 ```console
 $ pygrafito grid.db
-pygrafito 0.6.0 | grid.db | type ".help" for commands
+pygrafito 0.8.0 | grid.db | type ".help" for commands
 grid.db> CREATE (n:Program {designation: 'Tron', cycles: 40});
 1 node created
 grid.db> MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles;
@@ -157,6 +157,26 @@ ok
 grid.db> .backup backup.db
 backup written to backup.db
 ```
+
+## Explore the sample graph
+
+From a repository checkout, build the curated Grid and run a tour against it:
+
+```console
+$ python -m examples build grid --output grid.db
+built grid: 78 nodes, 180 relationships -> grid.db
+$ pygrafito grid.db -f examples/tours/01-match.gql
++--------------+----------+
+| film         | released |
++--------------+----------+
+| TRON         | 1982     |
+| TRON: Legacy | 2010     |
+| TRON: Ares   | 2025     |
++--------------+----------+
+```
+
+The tours are catalogued with their GQL profile tiers in `examples/tours/README.md`; see
+[Explore the sample graphs](examples.md) for the datasets and the other lanes.
 
 ## Go deeper
 

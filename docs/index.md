@@ -39,7 +39,8 @@ Open a graph, add nodes and relationships, query, traverse, and reopen a file.
 :::{grid-item-card} Guides
 :link: guides/querying
 :link-type: doc
-Task-oriented pages for querying, indexes, constraints, import, interop, the shell, and embedding.
+Task-oriented pages for sample graphs, querying, indexes, constraints, import, interop, the shell,
+and embedding.
 :::
 
 :::{grid-item-card} Reference
@@ -71,6 +72,7 @@ getting-started/quickstart
 :maxdepth: 2
 :caption: Guides
 
+guides/examples
 guides/querying
 guides/indexes
 guides/constraints

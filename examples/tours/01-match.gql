@@ -1,0 +1,18 @@
+// 01-match.gql - MATCH, WHERE, OPTIONAL MATCH, ordering, and relationship metadata.
+// Current transitional dialect. See examples/tours/README.md for the GQL profile tier.
+
+MATCH (f:Film) RETURN f.designation AS film, f.released AS released ORDER BY released;
+
+MATCH (u:User {designation: 'Kevin Flynn'})-[:APPEARS_IN]->(f:Film)
+RETURN f.designation AS film ORDER BY film;
+
+MATCH (a:Place {designation: 'The Grid'})-[:HAS_PART]->(b:Place)
+RETURN b.designation AS place ORDER BY place LIMIT 8;
+
+MATCH (n:Program {designation: 'Bit'})
+OPTIONAL MATCH (n)-[:ALLIES_WITH]-(ally:Program)
+RETURN n.designation AS name, ally.designation AS ally;
+
+MATCH (a:Program)-[r:ALLIES_WITH]-(b:Program)
+RETURN a.designation AS source, b.designation AS target, type(r) AS kind
+ORDER BY source, target LIMIT 10;

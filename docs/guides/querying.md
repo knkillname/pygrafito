@@ -14,11 +14,11 @@ error behavior.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
-    quorra = graph.add_node("Program", designation="Quorra", cycles=37)
-    tron = graph.add_node("Program", designation="Tron", cycles=40)
-    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
-    graph.add_relationship(quorra, "ALLIES_WITH", tron)
+    yori = graph.add_node("Program", designation="Yori", cycles=37)
+    dumont = graph.add_node("Program", designation="Dumont", cycles=39)
+    ram = graph.add_node("Program", designation="Ram", cycles=36)
+    graph.add_relationship(yori, "ALLIES_WITH", dumont)
+    graph.add_relationship(dumont, "ALLIES_WITH", ram)
 
     result = graph.query(
         "MATCH (a:Program)-[:ALLIES_WITH]->(b:Program) "
@@ -44,25 +44,25 @@ including an undirected one. A relationship may carry several labels at once.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    kevin = graph.add_node("Program", designation="Kevin Flynn")
-    quorra = graph.add_node("Program", designation="Quorra")
-    sam = graph.add_node("Program", designation="Sam Flynn")
-    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
-    graph.add_relationship(kevin, "TRUSTS", sam)
+    alan = graph.add_node("Program", designation="Alan Bradley")
+    tron = graph.add_node("Program", designation="Tron")
+    dumont = graph.add_node("Program", designation="Dumont")
+    graph.add_relationship(alan, "ALLIES_WITH", tron)
+    graph.add_relationship(alan, "TRUSTS", dumont)
 
     incoming = graph.query(
         "MATCH (a:Program)-[:ALLIES_WITH]->(b:Program {designation: $name}) "
         "RETURN a.designation AS name",
-        {"name": "Quorra"},
+        {"name": "Tron"},
     )
-    print([row["name"] for row in incoming])  # ['Kevin Flynn']
+    print([row["name"] for row in incoming])  # ['Alan Bradley']
 
     optional = graph.query(
-        "MATCH (a:Program {designation: 'Sam Flynn'}) "
+        "MATCH (a:Program {designation: 'Dumont'}) "
         "OPTIONAL MATCH (a)-[:ALLIES_WITH]->(b:Program) "
         "RETURN a.designation AS name, b.designation AS ally"
     )
-    print(tuple(optional.rows[0].values()))  # ('Sam Flynn', None)
+    print(tuple(optional.rows[0].values()))  # ('Dumont', None)
 ```
 
 `OPTIONAL MATCH` is a left join: unmatched rows survive with `None`. For variable-length
@@ -79,13 +79,13 @@ looks like query syntax stays a value.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    graph.add_node("Program", designation="Quorra", cycles=37)
+    graph.add_node("Program", designation="Yori", cycles=37)
     result = graph.query(
         "MATCH (n:Program) WHERE n.cycles > $minimum "
         "RETURN n.designation AS name ORDER BY name",
         {"minimum": 36},
     )
-    print([row["name"] for row in result])  # ['Quorra']
+    print([row["name"] for row in result])  # ['Yori']
 ```
 
 `WHERE` also supports boolean operators, null checks, string predicates, arithmetic, and scalar
@@ -101,26 +101,26 @@ result's `summary` reports what changed.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    kevin = graph.add_node("Program", designation="Kevin Flynn", cycles=36)
-    quorra = graph.add_node("Program", designation="Quorra", cycles=37)
-    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
+    yori = graph.add_node("Program", designation="Yori", cycles=37)
+    dumont = graph.add_node("Program", designation="Dumont", cycles=39)
+    graph.add_relationship(yori, "ALLIES_WITH", dumont)
 
     created = graph.query(
-        "MATCH (a:Program {designation: 'Kevin Flynn'}) "
-        "CREATE (b:Program {designation: 'Tron', cycles: 40}) "
+        "MATCH (a:Program {designation: 'Yori'}) "
+        "CREATE (b:Program {designation: 'Sark', cycles: 42}) "
         "CREATE (a)-[r:TRUSTS]->(b) "
         "RETURN b.designation AS name"
     )
-    print(created.rows[0]["name"])  # Tron
+    print(created.rows[0]["name"])  # Sark
     print(created.summary.created_nodes, created.summary.created_relationships)  # 1 1
 
     updated = graph.query(
-        "MATCH (n:Program {designation: 'Quorra'}) "
+        "MATCH (n:Program {designation: 'Dumont'}) "
         "SET n:ISO, n.cycles = n.cycles + 1"
     )
     print(updated.summary.labels_added, updated.summary.properties_set)  # 1 1
 
-    deleted = graph.query("MATCH (n:Program {designation: 'Tron'}) DETACH DELETE n")
+    deleted = graph.query("MATCH (n:Program {designation: 'Sark'}) DETACH DELETE n")
     print(deleted.summary.deleted_nodes)  # 1
 ```
 
@@ -138,18 +138,18 @@ final projection. `UNWIND` expands a list into rows and can feed a write clause.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    kevin = graph.add_node("Program", designation="Kevin Flynn")
-    quorra = graph.add_node("Program", designation="Quorra")
-    tron = graph.add_node("Program", designation="Tron")
-    graph.add_relationship(kevin, "ALLIES_WITH", quorra)
-    graph.add_relationship(kevin, "ALLIES_WITH", tron)
+    yori = graph.add_node("Program", designation="Yori")
+    dumont = graph.add_node("Program", designation="Dumont")
+    ram = graph.add_node("Program", designation="Ram")
+    graph.add_relationship(yori, "ALLIES_WITH", dumont)
+    graph.add_relationship(yori, "ALLIES_WITH", ram)
 
     grouped = graph.query(
         "MATCH (a:Program)-[:ALLIES_WITH]->(b:Program) "
         "WITH a.designation AS name, count(*) AS allies "
         "WHERE allies > 1 RETURN name, allies"
     )
-    print([tuple(row.values()) for row in grouped])  # [('Kevin Flynn', 2)]
+    print([tuple(row.values()) for row in grouped])  # [('Yori', 2)]
 ```
 
 ```python
@@ -157,9 +157,9 @@ from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
     rows = [
-        {"designation": "Tron", "cycles": 40},
-        {"designation": "Quorra", "cycles": 37},
-        {"designation": "Tron", "cycles": 41},
+        {"designation": "Sark", "cycles": 42},
+        {"designation": "Dumont", "cycles": 39},
+        {"designation": "Sark", "cycles": 43},
     ]
     result = graph.query(
         "UNWIND $rows AS row "
@@ -187,9 +187,9 @@ are available before the first execution, and parameters can change on every cal
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    graph.add_node("Program", designation="Kevin Flynn", cycles=36)
-    graph.add_node("Program", designation="Quorra", cycles=37)
-    graph.add_node("Program", designation="Tron", cycles=40)
+    graph.add_node("Program", designation="Yori", cycles=37)
+    graph.add_node("Program", designation="Dumont", cycles=39)
+    graph.add_node("Program", designation="Ram", cycles=36)
 
     prepared = graph.prepare(
         "MATCH (n:Program) WHERE n.cycles > $minimum RETURN count(*) AS total"

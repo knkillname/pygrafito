@@ -20,6 +20,8 @@ import time
 import typing
 from collections.abc import Callable
 
+from examples.support.dataset import Synthetic
+
 from pygrafito import Graph, Node
 from pygrafito.engine.traversal import (
     AdjacencySnapshot,
@@ -73,74 +75,6 @@ class Timer:
             operation()
             samples.append(time.perf_counter() - started)
         return statistics.median(samples) * 1000
-
-
-class Dataset:
-    """Seed a deterministic themed graph.
-
-    Parameters
-    ----------
-    nodes : int
-        Number of nodes to create.
-    relationships : int
-        Number of relationships to create.
-    """
-
-    CYCLE_MODULUS: typing.ClassVar[int] = 97
-
-    def __init__(self, nodes: int, relationships: int) -> None:
-        self._nodes = nodes
-        self._relationships = relationships
-
-    def seed(self, graph: Graph) -> list[Node]:
-        """Create the dataset in one transaction.
-
-        Parameters
-        ----------
-        graph : Graph
-            Graph to populate.
-
-        Returns
-        -------
-        list[Node]
-            Created nodes in insertion order.
-        """
-        created = []
-        with graph.transaction() as transaction:
-            for position in range(self._nodes):
-                label = "Program" if position % 10 == 0 else "Agent"
-                created.append(
-                    transaction.add_node(
-                        label,
-                        designation=f"{label.lower()}-{position}",
-                        cycles=position % self.CYCLE_MODULUS,
-                        region=f"region-{position % 7}",
-                    )
-                )
-        if not created:
-            return created
-        with graph.transaction() as transaction:
-            for position in range(self._relationships):
-                start = created[position % len(created)]
-                end = created[(position * 7 + 13) % len(created)]
-                if start.id == end.id:
-                    continue
-                label = "TRANSMISSION" if position % 100 == 0 else "ALLIES_WITH"
-                transaction.add_relationship(
-                    start,
-                    (label,),
-                    end,
-                    directed=position % 10 != 0,
-                    since_cycle=2000 + position % 20,
-                )
-        with graph.transaction() as transaction:
-            for position in range(min(5, len(created) - 1)):
-                transaction.add_relationship(
-                    created[position],
-                    "TRANSITION",
-                    created[position + 1],
-                )
-        return created
 
 
 class Scenarios:
@@ -210,7 +144,7 @@ class Runner:
         )
         graph = Graph.open(":memory:")
         try:
-            created = Dataset(self._options.nodes, self._options.relationships).seed(graph)
+            created = Synthetic(self._options.nodes, self._options.relationships).build(graph)
             baseline = self._measure_queries(graph)
             graph.create_node_index("cycles")
             graph.create_relationship_index("since_cycle")
@@ -562,7 +496,7 @@ class Runner:
         rows = [
             {
                 "designation": f"merge-{position}",
-                "cycles": position % Dataset.CYCLE_MODULUS,
+                "cycles": position % Synthetic.CYCLE_MODULUS,
             }
             for position in range(count)
         ]
@@ -594,7 +528,7 @@ class Runner:
                 writer = csv.writer(handle)
                 writer.writerow(["designation", "cycles"])
                 for position in range(count):
-                    writer.writerow([f"import-{position}", position % Dataset.CYCLE_MODULUS])
+                    writer.writerow([f"import-{position}", position % Synthetic.CYCLE_MODULUS])
             graph = Graph.open(":memory:")
             try:
                 started = time.perf_counter()
@@ -632,7 +566,7 @@ class Runner:
                     transaction.add_node(
                         "Program",
                         designation=f"program-{position}",
-                        cycles=position % Dataset.CYCLE_MODULUS,
+                        cycles=position % Synthetic.CYCLE_MODULUS,
                     )
             elapsed = time.perf_counter() - started
             return self._options.nodes / elapsed if elapsed else float("inf")

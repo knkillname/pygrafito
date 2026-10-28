@@ -1,0 +1,832 @@
+{
+  "name": "places",
+  "revision": 1,
+  "nodes": [
+    {
+      "key": "the-grid",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "The Grid",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "real-world",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Real World",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "video-arcade",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Flynn's Arcade",
+        "sources": [
+          "tron-1981",
+          "legacy-2010",
+          "ares-2025"
+        ]
+      }
+    },
+    {
+      "key": "flynns-back-room",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Flynn's Back Room",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "dillingers-office",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Dillinger's Office",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "alans-office",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Alan's Office",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "laser-lab",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Laser Lab",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "laser-corridor",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Laser Corridor",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "encom-building",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "ENCOM Building",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "io-tower",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "I/O Tower",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "io-tower-central-chamber",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "I/O Tower Central Chamber",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "game-grid",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Game Grid",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "light-cycle-arena",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Light Cycle Arena",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "training-arena",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Training Arena",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "maze",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Maze",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "city",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "The City",
+        "sources": [
+          "tron-1981",
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "city-plaza",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "City Plaza",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "heliport",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Heliport",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "holding-cell",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Holding Cell",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "tank",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Tank",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "solar-sailer",
+      "labels": [
+        "Vehicle",
+        "Place"
+      ],
+      "properties": {
+        "designation": "Solar Sailer",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "solar-sailer-deck",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Solar Sailer Deck",
+        "sources": [
+          "tron-1981"
+        ]
+      }
+    },
+    {
+      "key": "end-of-line-club",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "End of Line Club",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "outlands",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Outlands",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "sea-of-simulation",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Sea of Simulation",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "portal",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Portal",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    },
+    {
+      "key": "disc-wars-arena",
+      "labels": [
+        "Place"
+      ],
+      "properties": {
+        "designation": "Disc Wars Arena",
+        "sources": [
+          "legacy-2010"
+        ]
+      }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "real-world",
+      "to": "video-arcade",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "encom-building",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "heliport",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "video-arcade",
+      "to": "flynns-back-room",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "dillingers-office",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "alans-office",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "encom-building",
+      "to": "laser-lab",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "laser-lab",
+      "to": "laser-corridor",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "io-tower",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "game-grid",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "training-arena",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "maze",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "city",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "outlands",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "sea-of-simulation",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "portal",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "holding-cell",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "tank",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "the-grid",
+      "to": "solar-sailer",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "io-tower",
+      "to": "io-tower-central-chamber",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "game-grid",
+      "to": "light-cycle-arena",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "game-grid",
+      "to": "disc-wars-arena",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city",
+      "to": "city-plaza",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city",
+      "to": "end-of-line-club",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "solar-sailer",
+      "to": "solar-sailer-deck",
+      "labels": [
+        "HAS_PART"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "video-arcade",
+      "to": "real-world",
+      "labels": [
+        "LOCATED_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "io-tower",
+      "to": "the-grid",
+      "labels": [
+        "LOCATED_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "game-grid",
+      "to": "the-grid",
+      "labels": [
+        "LOCATED_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "city",
+      "to": "the-grid",
+      "labels": [
+        "LOCATED_IN"
+      ],
+      "directed": true,
+      "properties": {}
+    },
+    {
+      "from": "real-world",
+      "to": "the-grid",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 2,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "the-grid",
+      "to": "real-world",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 2,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "game-grid",
+      "to": "holding-cell",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 2,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "laser-lab",
+      "to": "alans-office",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 2,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "video-arcade",
+      "to": "the-grid",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "the-grid",
+      "to": "tank",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "tank",
+      "to": "real-world",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "tank",
+      "to": "flynns-back-room",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "flynns-back-room",
+      "to": "tank",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "the-grid",
+      "to": "game-grid",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "heliport",
+      "to": "dillingers-office",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "dillingers-office",
+      "to": "alans-office",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "dillingers-office",
+      "to": "laser-lab",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "flynns-back-room",
+      "to": "dillingers-office",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "dillingers-office",
+      "to": "encom-building",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "encom-building",
+      "to": "alans-office",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "alans-office",
+      "to": "encom-building",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "alans-office",
+      "to": "laser-lab",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    },
+    {
+      "from": "city",
+      "to": "io-tower",
+      "labels": [
+        "NEXT_LOCATION"
+      ],
+      "directed": true,
+      "properties": {
+        "weight": 1,
+        "basis": "scene_transition"
+      }
+    }
+  ]
+}

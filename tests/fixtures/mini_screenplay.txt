@@ -1,0 +1,25 @@
+MINI SCRIPT
+
+1    REAL WORLD - THE ARCADE    1
+
+          ALPHA
+     We should go.
+
+          BETA
+     Not yet.
+
+2    THE GRID - GAME GRID    2
+
+          ALPHA
+     Ready?
+
+          GAMMA
+     Always.
+
+          ALPHA
+     Then move.
+
+3    THE GRID - I/O TOWER    3
+
+          BETA
+     We made it.

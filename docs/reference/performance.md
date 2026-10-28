@@ -6,21 +6,22 @@ row. It is a single-machine baseline, not a guarantee. For the task of making a 
 
 ## Method
 
-The harness is `benchmarks/run.py`. It builds a themed synthetic graph in an in-memory
+The harness is the `benchmarks` module. It builds a themed synthetic graph in an in-memory
 database, measures the same statements before and after declaring indexes, compares
 whole-graph traversal with bounded traversal, and reports the median of several
 repetitions. The query table also includes one bounded quantified path. Index declaration
 and seeding happen outside the measured window.
 
 ```console
-hatch run python benchmarks/run.py --nodes 20000 --relationships 60000
-hatch run python benchmarks/run.py --nodes 200000 --relationships 400000
+hatch run python -m benchmarks.run --nodes 20000 --relationships 60000
+hatch run python -m benchmarks.run --nodes 200000 --relationships 400000
 ```
 
 Dataset shape: one node in ten carries the `Program` label, every node carries a
-`cycles` integer in a 97-value cycle and a `region` string, and one relationship in a
-hundred carries the `TRANSMISSION` label. One relationship in ten is undirected. Every
-relationship carries a `since_cycle` integer.
+`cycles` integer in a 97-value cycle and a `region` drawn from the sample place vocabulary, and
+one relationship in a hundred carries the `TRANSMISSION` label. One relationship in ten is
+undirected. Every relationship carries a `since_cycle` integer. The generator lives in
+`examples/support/dataset.py` and is shared with the example algorithms lane.
 
 Declared indexes for the measured runs: `cycles` on nodes and `since_cycle` on
 relationships. Relationship labels have their own structural index.
@@ -81,7 +82,7 @@ and then expands the declared number of hops in the pattern engine. On the same
 | --- | ---: | ---: | ---: |
 | `MATCH (a:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b)` | 16.33 ms | 6.88 ms | 2.4x |
 
-The command is the same `benchmarks/run.py --nodes 20000 --relationships 60000` run
+The command is the same `python -m benchmarks.run --nodes 20000 --relationships 60000` run
 shown above; the `quantified` row is reported in its query table. The indexed gain comes
 from finding the start nodes by `cycles` instead of scanning the node table. Expansion
 work itself is bounded by the region the start node can reach within two hops, not by
@@ -91,7 +92,7 @@ the size of the database.
 
 The harness also measures a 10,000-row `UNWIND` + `MERGE` statement and the
 equivalent 10,000-row CSV import on fresh in-memory graphs. The command is the
-same `benchmarks/run.py --nodes 20000 --relationships 60000` run shown above.
+same `python -m benchmarks.run --nodes 20000 --relationships 60000` run shown above.
 
 | Scenario | Rows per second |
 | --- | ---: |

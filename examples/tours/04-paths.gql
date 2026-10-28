@@ -1,0 +1,18 @@
+// 04-paths.gql - quantified compatibility syntax, directions, and path variables.
+// Current transitional dialect. The *n..m quantifier is a compatibility construct whose default
+// path mode is TRAIL. Canonical {n,m} and WALK are target behavior in the GQL profile.
+
+MATCH (a:Place {designation: 'The Grid'})-[:HAS_PART*1..2]->(b:Place)
+RETURN count(DISTINCT b) AS places;
+
+MATCH (a:Place {designation: 'Real World'})-[:CONNECTED_BY]-(b:Place)
+RETURN b.designation AS world;
+
+MATCH (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY*1..4]-(b:Place {designation: 'I/O Tower'})
+RETURN count(*) AS routes;
+
+MATCH p = (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY*1..4]-(b:Place {designation: 'I/O Tower'})
+RETURN p LIMIT 1;
+
+MATCH (a:Program {designation: 'Tron'})-[r]-(b)
+RETURN type(r) AS kind, b.designation AS peer ORDER BY peer LIMIT 10;

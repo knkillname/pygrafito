@@ -16,9 +16,9 @@ the same index twice is a no-op.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    graph.add_node("Program", designation="Kevin Flynn", cycles=36)
-    graph.add_node("Program", designation="Quorra", cycles=37)
-    graph.add_node("Program", designation="Tron", cycles=40)
+    graph.add_node("Program", designation="Yori", cycles=37)
+    graph.add_node("Program", designation="Dumont", cycles=39)
+    graph.add_node("Program", designation="Ram", cycles=36)
 
     index = graph.create_node_index("cycles")
     print(index.kind.value, index.key)  # node cycles
@@ -27,7 +27,7 @@ with Graph.open(":memory:") as graph:
     result = graph.query(
         "MATCH (n:Program) WHERE n.cycles = 37 RETURN n.designation AS name"
     )
-    print([row["name"] for row in result])  # ['Quorra']
+    print([row["name"] for row in result])  # ['Yori']
 ```
 
 A relationship index works the same way:
@@ -36,9 +36,9 @@ A relationship index works the same way:
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    kevin = graph.add_node("Program", designation="Kevin Flynn")
-    quorra = graph.add_node("Program", designation="Quorra")
-    graph.add_relationship(kevin, "ALLIES_WITH", quorra, since_cycle=2020)
+    alan = graph.add_node("Program", designation="Alan Bradley")
+    tron = graph.add_node("Program", designation="Tron")
+    graph.add_relationship(alan, "ALLIES_WITH", tron, since_cycle=2020)
 
     index = graph.create_relationship_index("since_cycle")
     print(index.kind.value, index.key)  # relationship since_cycle
@@ -59,8 +59,8 @@ equality, range, and `IN` filters on that key should show a `SEARCH ... USING IN
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    graph.add_node("Program", designation="Kevin Flynn", cycles=36)
-    graph.add_node("Program", designation="Quorra", cycles=37)
+    graph.add_node("Program", designation="Yori", cycles=37)
+    graph.add_node("Program", designation="Dumont", cycles=39)
 
     statement = "MATCH (n:Program) WHERE n.cycles = 37 RETURN n"
     print(graph.explain(statement))
@@ -103,7 +103,7 @@ schema version.
 from pygrafito import Graph
 
 with Graph.open(":memory:") as graph:
-    graph.add_node("Program", designation="Tron", cycles=40)
+    graph.add_node("Program", designation="Dumont", cycles=39)
     index = graph.create_node_index("cycles")
     graph.drop_index(index)
     print(graph.indexes())  # ()

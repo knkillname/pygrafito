@@ -53,6 +53,8 @@ compatibility aliases, and pygrafito extensions, is documented in the
 ## Documentation
 
 - [Five-minute quickstart](https://knkillname.github.io/pygrafito/getting-started/quickstart.html)
+- [Sample graphs and examples](https://knkillname.github.io/pygrafito/guides/examples.html) for the
+  franchise datasets, shell tours, analysis recipes, and algorithm demonstrations.
 - [Guides](https://knkillname.github.io/pygrafito/guides/querying.html) for querying, indexes,
   constraints, import, interop, the shell, and embedding.
 - [Reference](https://knkillname.github.io/pygrafito/reference/query-language.html) for the query
