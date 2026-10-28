@@ -14,6 +14,10 @@
 
 - `hatch check --fix` — Ruff lint/format plus Pyrefly, Hatch 1.18's built-in type checker. Do not use `hatch run check` or configure a separate type-checking environment.
 - `hatch test` — pytest in the Hatch test environment. Pytest arguments are forwarded: `hatch test tests/test_codec.py::test_name`.
+- `scripts/verify` — run `hatch check`, both supported Python test environments, and the pinned
+  SQLite container; add `--skip-sqlite` to omit Docker or `--docs` to build the documentation.
+- `git config core.hooksPath .githooks` — enable the versioned pre-push hook once per clone. The
+  hook runs `scripts/verify`; use `git push --no-verify` only when you deliberately skip it.
 - `hatch run docs:build` — build the Sphinx site with warnings treated as errors. Requires
   Node.js and the pinned Mermaid CLI; the first run downloads Chromium.
 - `hatch run docs:serve` — serve a live preview of the documentation site.

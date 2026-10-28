@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Contributors can now run the test suite against the same SQLite release as CI with
   `docker compose run --rm test-sqlite`. The container pins and verifies the runtime version, and
   CI reports its SQLite version in the job summary so the pin stays current.
+- Contributors can now enable a versioned pre-push hook that runs the same checks as CI, including
+  the pinned SQLite container, before a push. Run the same checks manually with `scripts/verify`.
 - The public Python API is now frozen for the 1.x series, with a documented deprecation policy.
   Existing imports and calls keep working throughout 1.x; additive changes arrive in minor
   releases, and removals wait for a major release.

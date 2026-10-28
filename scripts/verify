@@ -1,0 +1,119 @@
+#!/bin/sh
+
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
+#
+# SPDX-License-Identifier: MIT
+#
+# Run the local checks that mirror the CI quality, test, SQLite, and docs jobs.
+#
+# Usage: scripts/verify [--skip-sqlite] [--docs]
+
+set -eu
+
+usage() {
+    cat <<'USAGE'
+Usage: scripts/verify [--skip-sqlite] [--docs]
+
+Run the pre-push verification sequence:
+  1. hatch check
+  2. hatch test -i py=3.13,3.14
+  3. docker compose run --rm test-sqlite
+  4. hatch run docs:build (only with --docs)
+
+Options:
+  --skip-sqlite  Skip the pinned-SQLite container.
+  --docs         Build the Sphinx documentation.
+  -h, --help     Show this help.
+
+Set PREGRAFITO_SKIP_SQLITE=1 to skip the container without the flag.
+USAGE
+}
+
+skip_sqlite=0
+build_docs=0
+
+case "${PREGRAFITO_SKIP_SQLITE:-0}" in
+    1) skip_sqlite=1 ;;
+esac
+
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --skip-sqlite)
+            skip_sqlite=1
+            ;;
+        --docs)
+            build_docs=1
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            printf 'verify: unknown argument: %s\n' "$1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+cd "$repo_root"
+
+run_stage() {
+    label=$1
+    shift
+    printf '\n==> %s\n' "$label"
+    started=$(date +%s)
+    if "$@"; then
+        finished=$(date +%s)
+        printf '==> %s: ok (%ss)\n' "$label" "$((finished - started))"
+    else
+        status=$?
+        printf '==> %s: failed\n' "$label" >&2
+        exit "$status"
+    fi
+}
+
+require_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+        printf 'verify: Docker is required for the SQLite parity check.\n' >&2
+        printf 'Install Docker, or run with --skip-sqlite / PREGRAFITO_SKIP_SQLITE=1.\n' >&2
+        exit 1
+    fi
+    if ! docker compose version >/dev/null 2>&1; then
+        printf 'verify: Docker Compose is required for the SQLite parity check.\n' >&2
+        printf 'Install Docker Compose, or run with --skip-sqlite / PREGRAFITO_SKIP_SQLITE=1.\n' >&2
+        exit 1
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        printf 'verify: the Docker daemon is not available.\n' >&2
+        printf 'Start Docker, or run with --skip-sqlite / PREGRAFITO_SKIP_SQLITE=1.\n' >&2
+        exit 1
+    fi
+}
+
+if ! command -v hatch >/dev/null 2>&1; then
+    printf 'verify: hatch is required. Install it with: uv tool install hatch\n' >&2
+    exit 1
+fi
+
+if [ "$skip_sqlite" -eq 0 ]; then
+    require_docker
+fi
+
+run_stage "hatch check" hatch check
+run_stage "hatch test (Python 3.13 and 3.14)" hatch test -i py=3.13,3.14
+
+if [ "$skip_sqlite" -eq 1 ]; then
+    printf '\n==> SQLite parity check: skipped\n'
+else
+    run_stage "SQLite parity check" docker compose run --rm test-sqlite
+fi
+
+if [ "$build_docs" -eq 1 ]; then
+    run_stage "Sphinx documentation" hatch run docs:build
+fi
+
+printf '\nverify: all requested checks passed\n'

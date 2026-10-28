@@ -14,7 +14,7 @@ ENV LD_LIBRARY_PATH=/opt/sqlite/lib \
     PYTHONDONTWRITEBYTECODE=1
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends build-essential curl unzip \
+    && apt-get install --yes --no-install-recommends build-essential curl git unzip \
     && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir --parents /opt/sqlite/lib /tmp/sqlite \

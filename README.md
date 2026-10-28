@@ -176,10 +176,14 @@ query budget, and pygrafito extensions are documented in the
 hatch check --fix
 hatch test
 hatch run docs:build
+scripts/verify
 ```
 
-The project supports Python 3.13 and 3.14 and keeps its runtime standard library only.
-Documentation dependencies are optional and installed by the `docs` Hatch environment.
+Enable the versioned pre-push hook once per clone with `git config core.hooksPath .githooks`.
+The hook runs `scripts/verify` before each push; use `scripts/verify --skip-sqlite` to omit the
+pinned SQLite container. The project supports Python 3.13 and 3.14 and keeps its runtime standard
+library only. Documentation dependencies are optional and installed by the `docs` Hatch
+environment.
 
 ## License
 

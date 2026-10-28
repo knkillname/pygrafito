@@ -1,0 +1,92 @@
+#!/bin/sh
+
+# SPDX-FileCopyrightText: 2026-present Mario Abarca <knkillname@gmail.com>
+#
+# SPDX-License-Identifier: MIT
+#
+# Run the local CI-parity checks before a push. Git invokes this script with
+# the remote and URL, and writes the refs being pushed to stdin.
+#
+# Enable it once per clone with:
+#   git config core.hooksPath .githooks
+
+set -eu
+
+all_zero() {
+    case "$1" in
+        *[!0]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+if ! repo_root=$(git rev-parse --show-toplevel 2>/dev/null); then
+    printf 'pre-push: not inside a Git work tree.\n' >&2
+    exit 1
+fi
+cd "$repo_root"
+
+if ! head_oid=$(git rev-parse HEAD 2>/dev/null); then
+    printf 'pre-push: HEAD does not point to a commit.\n' >&2
+    exit 1
+fi
+
+has_update=0
+docs_needed=0
+
+while IFS=' ' read -r local_ref local_oid remote_ref remote_oid; do
+    if [ -z "${local_ref:-}" ] || [ -z "${local_oid:-}" ]; then
+        continue
+    fi
+    if all_zero "$local_oid"; then
+        continue
+    fi
+
+    has_update=1
+
+    if [ "$local_oid" != "$head_oid" ]; then
+        printf 'pre-push: refusing to check %s because it is not HEAD.\n' "$local_ref" >&2
+        printf 'Check out the branch being pushed, or use git push --no-verify.\n' >&2
+        exit 1
+    fi
+
+    if all_zero "${remote_oid:-}"; then
+        docs_needed=1
+    elif changed=$(git diff --name-only "$remote_oid" "$local_oid" 2>/dev/null); then
+        if printf '%s\n' "$changed" | grep -q -E '^(docs/|README\.md$)'; then
+            docs_needed=1
+        fi
+    else
+        docs_needed=1
+    fi
+done
+
+if [ "$has_update" -eq 0 ]; then
+    printf 'pre-push: no updated refs to check.\n'
+    exit 0
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    printf 'pre-push: tracked files differ from HEAD.\n' >&2
+    printf 'Commit or stash them, then push again.\n' >&2
+    printf 'Use git push --no-verify only when you deliberately want to skip the checks.\n' >&2
+    exit 1
+fi
+
+if [ ! -x "$repo_root/scripts/verify" ]; then
+    printf 'pre-push: scripts/verify is missing or not executable.\n' >&2
+    exit 1
+fi
+
+set --
+if [ "$docs_needed" -eq 1 ]; then
+    set -- "$@" --docs
+fi
+if [ "${PREGRAFITO_SKIP_SQLITE:-0}" = "1" ]; then
+    set -- "$@" --skip-sqlite
+fi
+
+printf '\npre-push: running local CI-parity checks...\n'
+if ! "$repo_root/scripts/verify" "$@"; then
+    printf '\npre-push: verification failed; push aborted.\n' >&2
+    exit 1
+fi

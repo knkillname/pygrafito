@@ -3,9 +3,9 @@
 :::{admonition} tl;dr
 :class: tldr
 
-Run `hatch test` for the normal suite. Run `docker compose run --rm test-sqlite` to repeat it on
-the same SQLite release as CI. The container builds that release from source and fails if the
-runtime reports a different version.
+Run `hatch test` for the normal suite. Enable the versioned pre-push hook with `git config
+core.hooksPath .githooks` to repeat the CI checks, including the pinned SQLite runtime, before
+every push. Run the same checks manually with `scripts/verify`.
 :::
 
 ## Run the suite
@@ -27,6 +27,38 @@ hatch test tests/test_codec.py::TestJsonPaths
 
 Use `:memory:` databases for unit tests and `tmp_path` for tests that reopen a file. Graph-building
 tests use TRON names, as described in `AGENTS.md`.
+
+## Run the pre-push check
+
+Enable the versioned hook once per clone:
+
+```console
+git config core.hooksPath .githooks
+```
+
+The hook calls `scripts/verify`, which runs:
+
+1. `hatch check`
+2. `hatch test -i py=3.13,3.14`
+3. `docker compose run --rm test-sqlite`
+
+The hook also runs `hatch run docs:build` when the pushed range changes `docs/**` or `README.md`.
+A new branch or tag builds the documentation conservatively.
+
+The hook refuses to run when tracked files differ from `HEAD` or when the pushed ref is not
+`HEAD`. Commit or stash local changes, and check out the branch you are pushing. When Docker or
+Compose is unavailable, the push stops; use `PREGRAFITO_SKIP_SQLITE=1 git push` to skip the
+container deliberately. `git push --no-verify` remains the full bypass.
+
+Run the same checks manually:
+
+```console
+scripts/verify
+scripts/verify --skip-sqlite
+scripts/verify --docs
+```
+
+To stop using the hook, run `git config --unset core.hooksPath`.
 
 ## Reproduce the CI SQLite runtime
 
