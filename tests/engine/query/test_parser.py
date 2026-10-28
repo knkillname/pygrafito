@@ -11,6 +11,7 @@ from pygrafito.engine.query.ast import (
     Delete,
     FunctionCall,
     IsNull,
+    LabelOr,
     ListLiteral,
     Literal,
     Match,
@@ -191,19 +192,24 @@ class TestAcceptedSyntax:
     def test_relationship_directions(self) -> None:
         outgoing = Parser.parse_statement("MATCH (a)-->(b) RETURN b")
         incoming = Parser.parse_statement("MATCH (a)<--(b) RETURN b")
-        both = Parser.parse_statement("MATCH (a)--(b) RETURN b")
+        both = Parser.parse_statement("MATCH (a)-(b) RETURN b")
         bracketed = Parser.parse_statement("MATCH (a)-[r]-(b) RETURN b")
         assert self.match(outgoing).patterns[0].relationships[0].direction is Direction.OUTGOING
         assert self.match(incoming).patterns[0].relationships[0].direction is Direction.INCOMING
         assert self.match(both).patterns[0].relationships[0].direction is Direction.BOTH
         assert self.match(bracketed).patterns[0].relationships[0].direction is Direction.BOTH
 
+    def test_double_dash_is_not_an_undirected_arrow(self) -> None:
+        with pytest.raises(QuerySyntaxError, match="use '-' for an undirected relationship"):
+            Parser.parse_statement("MATCH (a)--(b) RETURN b")
+
     def test_relationship_types_and_properties(self) -> None:
         statement = Parser.parse_statement(
             "MATCH (a)-[r:ALLIES_WITH|TRUSTS {since_cycle: 2020}]->(b) RETURN r"
         )
         relationship = self.match(statement).patterns[0].relationships[0]
-        assert relationship.types == ("ALLIES_WITH", "TRUSTS")
+        assert relationship.types == ()
+        assert isinstance(relationship.label_expression, LabelOr)
         assert relationship.properties[0].key == "since_cycle"
         assert relationship.direction is Direction.OUTGOING
 
@@ -514,9 +520,9 @@ class TestParserErrors:
             Parser.parse_statement("MATCH (a) RETURN a; MATCH (b) RETURN b")
         assert "multiple statements" in caught.value.message
 
-    def test_star_outside_count_is_rejected_by_semantics(self) -> None:
+    def test_star_cannot_mix_with_other_items(self) -> None:
         with pytest.raises(QuerySyntaxError):
-            Parser.parse_statement("MATCH (n) RETURN *")
+            Parser.parse_statement("MATCH (n) RETURN *, n")
 
 
 class TestWriteClauses:

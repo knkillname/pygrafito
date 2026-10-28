@@ -107,8 +107,8 @@ with Graph.open(":memory:") as graph:
 
     created = graph.query(
         "MATCH (a:Program {designation: 'Yori'}) "
-        "CREATE (b:Program {designation: 'Sark', cycles: 42}) "
-        "CREATE (a)-[r:TRUSTS]->(b) "
+        "INSERT (b:Program {designation: 'Sark', cycles: 42}) "
+        "INSERT (a)-[r:TRUSTS]->(b) "
         "RETURN b.designation AS name"
     )
     print(created.rows[0]["name"])  # Sark
@@ -132,7 +132,7 @@ cardinality](../reference/query-language.md#mutation-cardinality).
 ## Compose stages
 
 `WITH` projects a new scope, so grouped results can be filtered, ordered, and paginated before the
-final projection. `UNWIND` expands a list into rows and can feed a write clause.
+final projection. `FOR` expands a list into rows and can feed a write clause.
 
 ```python
 from pygrafito import Graph
@@ -147,7 +147,7 @@ with Graph.open(":memory:") as graph:
     grouped = graph.query(
         "MATCH (a:Program)-[:ALLIES_WITH]->(b:Program) "
         "WITH a.designation AS name, count(*) AS allies "
-        "WHERE allies > 1 RETURN name, allies"
+        "FILTER allies > 1 RETURN name, allies"
     )
     print([tuple(row.values()) for row in grouped])  # [('Yori', 2)]
 ```
@@ -162,7 +162,7 @@ with Graph.open(":memory:") as graph:
         {"designation": "Sark", "cycles": 43},
     ]
     result = graph.query(
-        "UNWIND $rows AS row "
+        "FOR row IN $rows "
         "MERGE (n:Program {designation: row.designation}) "
         "ON CREATE SET n.cycles = row.cycles "
         "ON MATCH SET n.cycles = n.cycles + 1 "
@@ -175,7 +175,7 @@ with Graph.open(":memory:") as graph:
 
 `MERGE` matches its whole pattern or creates the unbound elements. It runs once per input row, so
 a creation made by one row is visible to later rows in the same statement. See
-[UNWIND](../reference/query-language.md#unwind), [WITH](../reference/query-language.md#with), and
+[FOR](../reference/query-language.md#for), [WITH](../reference/query-language.md#with), and
 [MERGE](../reference/query-language.md#merge).
 
 ## Prepare a statement

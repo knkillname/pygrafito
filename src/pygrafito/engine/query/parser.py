@@ -12,10 +12,17 @@ from pygrafito.engine.query.ast import (
     Create,
     Delete,
     Expression,
+    Filter,
     FunctionCall,
     IsNull,
+    LabelAnd,
     LabelAssignment,
+    LabelExpression,
+    LabelName,
+    LabelNot,
+    LabelOr,
     LabelRemoval,
+    LabelWildcard,
     ListLiteral,
     Literal,
     Match,
@@ -41,6 +48,8 @@ from pygrafito.engine.query.ast import (
     Variable,
     With,
 )
+from pygrafito.engine.query.gated import Gated
+from pygrafito.engine.query.labels import LabelExpressions
 from pygrafito.engine.query.lexer import Lexer
 from pygrafito.engine.query.tokens import Keyword, Span, Token, TokenKind
 from pygrafito.model import Direction, QuerySemanticError, QuerySyntaxError
@@ -170,9 +179,23 @@ class Parser:
             self._guard_unwind_position(parsed, current)
             self._advance()
             return self._unwind_clause()
+        if current.is_keyword(Keyword.FOR):
+            self._guard_unwind_position(parsed, current)
+            self._advance()
+            return self._for_clause()
+        if current.is_keyword(Keyword.FILTER):
+            self._guard_filter_position(parsed, current)
+            self._advance()
+            return self._filter_clause()
+        if current.is_keyword(Keyword.INSERT):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            self._reject_catalog_graph()
+            return Create(pattern=self._clause_pattern())
         if current.is_keyword(Keyword.CREATE):
             self._guard_write_position(parsed, current)
             self._advance()
+            self._reject_catalog_graph()
             return Create(pattern=self._clause_pattern())
         if current.is_keyword(Keyword.MERGE):
             self._guard_write_position(parsed, current)
@@ -190,6 +213,11 @@ class Parser:
             self._guard_write_position(parsed, current)
             self._advance()
             return self._delete_clause(detach=False)
+        if current.is_keyword(Keyword.NODETACH):
+            self._guard_write_position(parsed, current)
+            self._advance()
+            self._expect_keyword(Keyword.DELETE, "expected DELETE after NODETACH")
+            return self._delete_clause(detach=False)
         if current.is_keyword(Keyword.DETACH):
             self._guard_write_position(parsed, current)
             self._advance()
@@ -199,6 +227,12 @@ class Parser:
             self._guard_return_position(parsed, current)
             self._advance()
             return self._return_clause()
+        if current.is_keyword(Keyword.LET):
+            self._reject_gated(Gated.LET, current)
+        if current.is_keyword(Keyword.NEXT):
+            self._reject_gated(Gated.NEXT, current)
+        if current.is_keyword(Keyword.GROUP):
+            self._reject_gated(Gated.GROUP_BY, current)
         self._fail_syntax(f"unexpected token {current.text!r}", current)
 
     @staticmethod
@@ -276,6 +310,23 @@ class Parser:
             self._fail_syntax("RETURN must be the final clause", token)
         if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
             self._fail_syntax("an UNWIND clause must precede every write clause", token)
+
+    def _guard_filter_position(self, parsed: Sequence[Clause], token: Token) -> None:
+        """Reject a ``FILTER`` clause without a preceding read stage.
+
+        Parameters
+        ----------
+        parsed : Sequence[Clause]
+            Clauses already parsed.
+        token : Token
+            Offending keyword.
+        """
+        if self._has_clause(parsed, (Return,)):
+            self._fail_syntax("RETURN must be the final clause", token)
+        if self._has_clause(parsed, (Create, Merge, Set, Remove, Delete)):
+            self._fail_syntax("a FILTER clause must precede every write clause", token)
+        if not self._has_clause(parsed, (Match, Unwind, With, Filter)):
+            self._fail_syntax("a FILTER clause must follow a read stage", token)
 
     def _guard_return_position(self, parsed: Sequence[Clause], token: Token) -> None:
         """Reject a second ``RETURN`` clause.
@@ -369,6 +420,7 @@ class Parser:
         Match
             Parsed match clause.
         """
+        self._reject_path_mode(self._current())
         patterns = [self._path_pattern()]
         while self._match_punctuation(","):
             patterns.append(self._path_pattern())
@@ -393,6 +445,39 @@ class Parser:
             )
         return pattern
 
+    def _for_clause(self) -> Unwind:
+        """Parse a ``FOR <variable> IN <list>`` clause.
+
+        Returns
+        -------
+        Unwind
+            Parsed iteration clause.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the variable or ``IN`` is missing.
+        """
+        token = self._current()
+        if not self._is_identifier(token):
+            self._fail_syntax("expected a variable after FOR", token)
+        self._advance()
+        self._expect_keyword(Keyword.IN, "expected IN after the FOR variable")
+        expression = self._expression()
+        self._reject_ordinality()
+        return Unwind(expression=expression, variable=self._identifier_text(token))
+
+    def _filter_clause(self) -> Filter:
+        """Parse a ``FILTER`` or ``FILTER WHERE`` clause.
+
+        Returns
+        -------
+        Filter
+            Parsed filter stage.
+        """
+        self._match_keyword(Keyword.WHERE)
+        return Filter(where=self._expression())
+
     def _unwind_clause(self) -> Unwind:
         """Parse an ``UNWIND <expression> AS <variable>`` clause.
 
@@ -412,6 +497,7 @@ class Parser:
         if not self._is_identifier(token):
             self._fail_syntax("expected a variable after AS", token)
         self._advance()
+        self._reject_ordinality()
         return Unwind(expression=expression, variable=self._identifier_text(token))
 
     def _merge_clause(self) -> Merge:
@@ -568,7 +654,7 @@ class Parser:
         order_by = self._order_by()
         skip: Expression | None = None
         limit: Expression | None = None
-        if self._match_keyword(Keyword.SKIP):
+        if self._match_keyword(Keyword.OFFSET) or self._match_keyword(Keyword.SKIP):
             skip = self._expression()
         if self._match_keyword(Keyword.LIMIT):
             limit = self._expression()
@@ -589,23 +675,35 @@ class Parser:
         Return
             Parsed return clause.
         """
-        distinct = self._match_keyword(Keyword.DISTINCT)
-        items = [self._return_item()]
-        while self._match_punctuation(","):
-            items.append(self._return_item())
+        if self._check_no_bindings():
+            self._reject_gated(Gated.NO_BINDINGS, self._current())
+        star = False
+        distinct = False
+        items: tuple[ReturnItem, ...] = ()
+        if self._check_operator("*"):
+            self._advance()
+            star = True
+        else:
+            self._match_keyword(Keyword.ALL)
+            distinct = self._match_keyword(Keyword.DISTINCT)
+            parsed = [self._return_item()]
+            while self._match_punctuation(","):
+                parsed.append(self._return_item())
+            items = tuple(parsed)
         order_by = self._order_by()
         skip: Expression | None = None
         limit: Expression | None = None
-        if self._match_keyword(Keyword.SKIP):
+        if self._match_keyword(Keyword.OFFSET) or self._match_keyword(Keyword.SKIP):
             skip = self._expression()
         if self._match_keyword(Keyword.LIMIT):
             limit = self._expression()
         return Return(
-            items=tuple(items),
+            items=items,
             distinct=distinct,
             order_by=order_by,
             skip=skip,
             limit=limit,
+            star=star,
         )
 
     def _variable_reference(self, clause: str) -> tuple[str, Span | None]:
@@ -661,7 +759,7 @@ class Parser:
             self._advance()
         nodes = [self._node_pattern()]
         relationships: list[RelationshipPattern] = []
-        while self._current().text in {"-", "<"}:
+        while self._is_relationship_start():
             relationships.append(self._relationship_pattern())
             nodes.append(self._node_pattern())
         return PathPattern(
@@ -680,19 +778,23 @@ class Parser:
         """
         self._expect_punctuation("(", "expected '(' to start a node pattern")
         variable: str | None = None
-        labels: list[str] = []
         properties: tuple[PropertyEntry, ...] = ()
+        where: Expression | None = None
         if self._is_identifier(self._current()):
             variable = self._identifier_text(self._advance())
-        while self._match_punctuation(":"):
-            labels.append(self._label("a node label"))
+        label_expression = self._label_spec("a node label")
+        labels = LabelExpressions.conjunction(label_expression) or ()
         if self._check_punctuation("{"):
             properties = self._property_map()
+        if self._match_keyword(Keyword.WHERE):
+            where = self._expression()
         self._expect_punctuation(")", "expected ')' to close a node pattern")
         return NodePattern(
             variable=variable,
-            labels=tuple(labels),
+            labels=labels,
             properties=properties,
+            label_expression=label_expression,
+            where=where,
         )
 
     def _relationship_pattern(self) -> RelationshipPattern:
@@ -703,9 +805,46 @@ class Parser:
         RelationshipPattern
             Parsed relationship pattern.
         """
-        if self._match_operator("<"):
-            self._expect_operator("-", "expected '-' after '<' in a relationship pattern")
-            variable, types, properties, min_hops, max_hops = self._relationship_detail()
+        if self._current().kind is TokenKind.OPERATOR and self._current().value in {
+            "<->",
+            "~>",
+            "<~",
+        }:
+            self._reject_gated(Gated.DIRECTION, self._current())
+        opening = self._current()
+        if opening.kind is TokenKind.OPERATOR and opening.value in {"-->", "->"}:
+            self._advance()
+            return RelationshipPattern(direction=Direction.OUTGOING)
+        if opening.kind is TokenKind.OPERATOR and opening.value == "<--":
+            self._advance()
+            return RelationshipPattern(direction=Direction.INCOMING)
+        if opening.kind is TokenKind.OPERATOR and opening.value == "~":
+            self._advance()
+            if not self._check_punctuation("["):
+                return RelationshipPattern(direction=Direction.BOTH, undirected_only=True)
+            variable, types, properties, min_hops, max_hops, label_expression, where = (
+                self._relationship_detail()
+            )
+            self._reject_gated_quantifier()
+            self._expect_operator("~", "expected '~' to close an undirected relationship")
+            return RelationshipPattern(
+                variable=variable,
+                types=types,
+                direction=Direction.BOTH,
+                properties=properties,
+                min_hops=min_hops,
+                max_hops=max_hops,
+                undirected_only=True,
+                label_expression=label_expression,
+                where=where,
+            )
+        if self._match_operator("<-"):
+            if not self._check_punctuation("["):
+                return RelationshipPattern(direction=Direction.INCOMING)
+            variable, types, properties, min_hops, max_hops, label_expression, where = (
+                self._relationship_detail()
+            )
+            self._reject_gated_quantifier()
             self._expect_operator("-", "expected '-' to close an incoming relationship")
             return RelationshipPattern(
                 variable=variable,
@@ -714,11 +853,25 @@ class Parser:
                 properties=properties,
                 min_hops=min_hops,
                 max_hops=max_hops,
+                label_expression=label_expression,
+                where=where,
             )
         self._expect_operator("-", "expected '-' to start a relationship pattern")
-        variable, types, properties, min_hops, max_hops = self._relationship_detail()
-        self._expect_operator("-", "expected '-' to close a relationship pattern")
-        direction = Direction.OUTGOING if self._match_operator(">") else Direction.BOTH
+        if not self._check_punctuation("["):
+            return RelationshipPattern(direction=Direction.BOTH)
+        variable, types, properties, min_hops, max_hops, label_expression, where = (
+            self._relationship_detail()
+        )
+        self._reject_gated_quantifier()
+        if self._match_operator("->"):
+            direction = Direction.OUTGOING
+        elif self._match_operator("-"):
+            direction = Direction.BOTH
+        else:
+            self._fail_syntax(
+                "expected '->' or '-' to close a relationship pattern",
+                self._current(),
+            )
         return RelationshipPattern(
             variable=variable,
             types=types,
@@ -726,7 +879,41 @@ class Parser:
             properties=properties,
             min_hops=min_hops,
             max_hops=max_hops,
+            label_expression=label_expression,
+            where=where,
         )
+
+    def _is_relationship_start(self) -> bool:
+        """Report whether the current token can start a relationship pattern.
+
+        Returns
+        -------
+        bool
+            ``True`` for any relationship arrow form.
+        """
+        token = self._current()
+        return token.kind is TokenKind.OPERATOR and token.value in {
+            "-",
+            "->",
+            "<-",
+            "-->",
+            "<--",
+            "~",
+            "~>",
+            "<~",
+            "<->",
+        }
+
+    def _reject_gated_quantifier(self) -> None:
+        """Reject a ``{n,m}`` quantifier placed after the relationship detail.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the current token starts a canonical quantifier.
+        """
+        if self._check_punctuation("{") and self._starts_quantifier():
+            self._reject_gated(Gated.QUANTIFIER, self._current())
 
     def _relationship_detail(
         self,
@@ -736,30 +923,36 @@ class Parser:
         tuple[PropertyEntry, ...],
         int | None,
         int | None,
+        LabelExpression | None,
+        Expression | None,
     ]:
         """Parse the optional bracket contents of a relationship pattern.
 
         Returns
         -------
-        tuple[str | None, tuple[str, ...], tuple[PropertyEntry, ...], int | None, int | None]
-            Variable, accepted types, property map, and quantifier bounds.
+        tuple[str | None, tuple[str, ...], tuple[PropertyEntry, ...], int | None, int | None, \
+LabelExpression | None, Expression | None]
+            Variable, accepted types, property map, quantifier bounds, label
+            expression, and inline predicate.
         """
         if not self._match_punctuation("["):
-            return None, (), (), None, None
+            return None, (), (), None, None, None, None
         variable: str | None = None
-        types: list[str] = []
         properties: tuple[PropertyEntry, ...] = ()
+        where: Expression | None = None
         if self._is_identifier(self._current()):
             variable = self._identifier_text(self._advance())
-        if self._match_punctuation(":"):
-            types.append(self._label("a relationship type"))
-            while self._match_punctuation("|"):
-                types.append(self._label("a relationship type"))
+        label_expression = self._label_spec("a relationship type")
+        types = LabelExpressions.conjunction(label_expression) or ()
         min_hops, max_hops = self._quantifier()
+        if self._check_punctuation("{") and self._starts_quantifier():
+            self._reject_gated(Gated.QUANTIFIER, self._current())
         if self._check_punctuation("{"):
             properties = self._property_map()
+        if self._match_keyword(Keyword.WHERE):
+            where = self._expression()
         self._expect_punctuation("]", "expected ']' to close a relationship pattern")
-        return variable, tuple(types), properties, min_hops, max_hops
+        return variable, types, properties, min_hops, max_hops, label_expression, where
 
     def _quantifier(self) -> tuple[int | None, int | None]:
         """Parse an optional ``*`` relationship quantifier.
@@ -882,11 +1075,25 @@ class Parser:
         """
         expression = self._expression()
         descending = False
-        if self._match_keyword(Keyword.DESC):
+        if self._match_keyword(Keyword.DESC) or self._match_keyword(Keyword.DESCENDING):
             descending = True
+        elif self._match_keyword(Keyword.ASC):
+            descending = False
         else:
-            self._match_keyword(Keyword.ASC)
-        return SortItem(expression=expression, descending=descending)
+            self._match_keyword(Keyword.ASCENDING)
+        nulls_first: bool | None = None
+        if self._match_keyword(Keyword.NULLS):
+            if self._match_keyword(Keyword.FIRST):
+                nulls_first = True
+            elif self._match_keyword(Keyword.LAST):
+                nulls_first = False
+            else:
+                self._fail_syntax("expected FIRST or LAST after NULLS", self._current())
+        return SortItem(
+            expression=expression,
+            descending=descending,
+            nulls_first=nulls_first,
+        )
 
     def _expression(self) -> Expression:
         """Parse one full expression.
@@ -1106,6 +1313,8 @@ class Parser:
             self._reject_unsupported(token, "CASE expressions are not supported")
         if token.is_keyword(Keyword.CALL):
             self._reject_unsupported(token, "subqueries are not supported")
+        if token.kind is TokenKind.KEYWORD:
+            self._fail_syntax(f"unexpected token {token.text!r}", token)
         if token.kind is TokenKind.IDENTIFIER and self._peek_is_punctuation("("):
             return self._function_call()
         if self._is_identifier(token):
@@ -1169,6 +1378,101 @@ class Parser:
             items.append(self._expression())
         self._expect_punctuation("]", "expected ']' to close the list literal")
         return ListLiteral(items=tuple(items))
+
+    def _label_spec(self, description: str) -> LabelExpression | None:
+        """Parse an optional ``:`` or ``IS`` label expression.
+
+        Parameters
+        ----------
+        description : str
+            Human-readable label description for error messages.
+
+        Returns
+        -------
+        LabelExpression | None
+            Parsed expression, or ``None`` when the pattern names no label.
+        """
+        if self._match_punctuation(":"):
+            return self._label_or(description)
+        if self._match_keyword(Keyword.IS):
+            return self._label_or(description)
+        return None
+
+    def _label_or(self, description: str) -> LabelExpression:
+        """Parse a label disjunction.
+
+        Parameters
+        ----------
+        description : str
+            Human-readable label description for error messages.
+
+        Returns
+        -------
+        LabelExpression
+            Parsed expression.
+        """
+        expression = self._label_and(description)
+        while self._match_punctuation("|"):
+            expression = LabelOr(left=expression, right=self._label_and(description))
+        return expression
+
+    def _label_and(self, description: str) -> LabelExpression:
+        """Parse a label conjunction, accepting ``&`` and ``:``.
+
+        Parameters
+        ----------
+        description : str
+            Human-readable label description for error messages.
+
+        Returns
+        -------
+        LabelExpression
+            Parsed expression.
+        """
+        expression = self._label_not(description)
+        while True:
+            if self._match_operator("&") or self._match_punctuation(":"):
+                expression = LabelAnd(left=expression, right=self._label_not(description))
+            else:
+                return expression
+
+    def _label_not(self, description: str) -> LabelExpression:
+        """Parse a negated label expression.
+
+        Parameters
+        ----------
+        description : str
+            Human-readable label description for error messages.
+
+        Returns
+        -------
+        LabelExpression
+            Parsed expression.
+        """
+        if self._match_operator("!"):
+            return LabelNot(operand=self._label_not(description))
+        return self._label_primary(description)
+
+    def _label_primary(self, description: str) -> LabelExpression:
+        """Parse one label name or the wildcard.
+
+        Parameters
+        ----------
+        description : str
+            Human-readable label description for error messages.
+
+        Returns
+        -------
+        LabelExpression
+            Parsed expression.
+        """
+        if self._match_operator("%"):
+            return LabelWildcard()
+        token = self._current()
+        if not self._is_identifier(token):
+            self._fail_syntax(f"expected {description}", token)
+        self._advance()
+        return LabelName(name=self._identifier_text(token))
 
     def _label(self, description: str) -> str:
         """Parse an identifier used as a label or relationship type.
@@ -1415,6 +1719,118 @@ class Parser:
             self._fail_syntax(message, self._current())
         return self._advance()
 
+    def _check_no_bindings(self) -> bool:
+        """Report whether the current tokens spell ``NO BINDINGS``.
+
+        Returns
+        -------
+        bool
+            ``True`` when both words appear as identifiers.
+        """
+        first, second = self._current(), self._peek(1)
+        return (
+            first.kind is TokenKind.IDENTIFIER
+            and str(first.value).upper() == "NO"
+            and second.kind is TokenKind.IDENTIFIER
+            and str(second.value).upper() == "BINDINGS"
+        )
+
+    def _peek_is_keyword(self, keyword: Keyword, distance: int = 1) -> bool:
+        """Report whether an upcoming token is the given keyword.
+
+        Parameters
+        ----------
+        keyword : Keyword
+            Keyword to test.
+        distance : int, optional
+            Offset from the current position, by default one.
+
+        Returns
+        -------
+        bool
+            ``True`` when that token is the keyword.
+        """
+        token = self._peek(distance)
+        return token.kind is TokenKind.KEYWORD and token.value == keyword.value
+
+    def _starts_quantifier(self) -> bool:
+        """Report whether the current ``{`` starts a ``{n,m}`` quantifier.
+
+        Returns
+        -------
+        bool
+            ``True`` when the next token is an integer or a comma.
+        """
+        token = self._peek(1)
+        return token.kind is TokenKind.INTEGER or (
+            token.kind is TokenKind.PUNCTUATION and token.value == ","
+        )
+
+    def _reject_path_mode(self, token: Token) -> None:
+        """Reject an explicit path-mode keyword as gated.
+
+        Parameters
+        ----------
+        token : Token
+            Token that starts the path mode.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the token is a path-mode keyword.
+        """
+        if token.kind is not TokenKind.KEYWORD:
+            return
+        if Keyword(token.value) in {
+            Keyword.TRAIL,
+            Keyword.WALK,
+            Keyword.SIMPLE,
+            Keyword.ACYCLIC,
+        }:
+            self._reject_gated(Gated.PATH_MODE, token)
+
+    def _reject_ordinality(self) -> None:
+        """Reject ``WITH ORDINALITY`` and ``WITH OFFSET`` as gated.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the next clause is the gated ordinality modifier.
+        """
+        if self._current().is_keyword(Keyword.WITH) and (
+            self._peek_is_keyword(Keyword.ORDINALITY) or self._peek_is_keyword(Keyword.OFFSET)
+        ):
+            self._reject_gated(Gated.ORDINALITY, self._current())
+
+    def _reject_catalog_graph(self) -> None:
+        """Reject ``CREATE GRAPH`` and ``INSERT GRAPH`` as out of profile.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the write clause names a catalog operation.
+        """
+        token = self._current()
+        if token.kind is TokenKind.IDENTIFIER and str(token.value).upper() == "GRAPH":
+            self._reject_unsupported(token, "catalog statements are out of profile")
+
+    def _reject_gated(self, key: str, token: Token) -> typing.Never:
+        """Raise a positioned error for one gated construct.
+
+        Parameters
+        ----------
+        key : str
+            Gated construct key.
+        token : Token
+            Token that starts the construct.
+
+        Raises
+        ------
+        QuerySemanticError
+            Always.
+        """
+        self._reject_unsupported(token, Gated.message(key))
+
     def _peek_is_operator(self, text: str) -> bool:
         """Report whether the next token is an operator.
 
@@ -1459,9 +1875,14 @@ class Parser:
         Returns
         -------
         bool
-            ``True`` for plain or backtick-quoted identifiers.
+            ``True`` for a plain, quoted, or keyword token used in a data
+            position such as an alias, label, or property key.
         """
-        return token.kind in {TokenKind.IDENTIFIER, TokenKind.QUOTED_IDENTIFIER}
+        return token.kind in {
+            TokenKind.IDENTIFIER,
+            TokenKind.QUOTED_IDENTIFIER,
+            TokenKind.KEYWORD,
+        }
 
     @staticmethod
     def _identifier_text(token: Token) -> str:
@@ -1475,8 +1896,11 @@ class Parser:
         Returns
         -------
         str
-            Decoded identifier name.
+            Decoded identifier name, preserving the source case of a keyword
+            used in a data position.
         """
+        if token.kind is TokenKind.KEYWORD:
+            return token.text
         return str(token.value)
 
     @staticmethod

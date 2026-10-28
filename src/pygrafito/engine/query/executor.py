@@ -39,6 +39,7 @@ from pygrafito.engine.query.pattern import PatternEngine
 from pygrafito.engine.query.plan import Plan
 from pygrafito.engine.query.results import QueryResult, Row
 from pygrafito.engine.query.semantic import (
+    FilterStage,
     MatchStage,
     OptionalMatchStage,
     ReturnColumn,
@@ -365,7 +366,7 @@ class QueryExecutor:
 
     def _explain_stage(
         self,
-        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage,
+        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage,
         parameters: Mapping[str, QueryValue],
         resolver: PatternValueResolver,
     ) -> tuple[str, ...]:
@@ -373,7 +374,7 @@ class QueryExecutor:
 
         Parameters
         ----------
-        stage : MatchStage | OptionalMatchStage | UnwindStage | WithStage
+        stage : MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage
             Read stage to inspect.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
@@ -394,6 +395,8 @@ class QueryExecutor:
             return (f"UNWIND {stage.variable}",)
         if isinstance(stage, WithStage):
             return ()
+        if isinstance(stage, FilterStage):
+            return ("FILTER",)
         if self._is_quantified(stage.patterns):
             return self._explain_quantified(stage, parameters, resolver)
         match = Match(patterns=stage.patterns, where=stage.where)
@@ -437,6 +440,7 @@ class QueryExecutor:
                 variable="__pygrafito_start",
                 labels=first.labels,
                 properties=first.properties,
+                label_expression=first.label_expression,
             )
             match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
             compiled = Compiler(match, self._codec).compile(parameters, resolver=resolver)
@@ -723,7 +727,7 @@ class QueryExecutor:
 
     def _run_stage(
         self,
-        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage,
+        stage: MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage,
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         functions: ScalarFunctions,
@@ -755,6 +759,8 @@ class QueryExecutor:
             return self._run_optional_match_stage(stage, bindings, evaluator, parameters)
         if isinstance(stage, UnwindStage):
             return self._run_unwind_stage(stage, bindings, evaluator, parameters)
+        if isinstance(stage, FilterStage):
+            return self._run_filter_stage(stage, bindings, evaluator, parameters)
         if isinstance(stage, WithStage):
             return self._run_with_stage(stage, bindings, evaluator, functions, parameters)
         message = f"unsupported read stage: {type(stage).__name__}"
@@ -905,6 +911,37 @@ class QueryExecutor:
                 continue
             results.extend({**binding, **match} for match in matches)
         return results
+
+    def _run_filter_stage(
+        self,
+        stage: FilterStage,
+        bindings: Sequence[Mapping[str, QueryValue]],
+        evaluator: ExpressionEvaluator,
+        parameters: Mapping[str, QueryValue],
+    ) -> list[dict[str, QueryValue]]:
+        """Keep only the rows whose predicate is true.
+
+        Parameters
+        ----------
+        stage : FilterStage
+            Stage to run.
+        bindings : Sequence[Mapping[str, QueryValue]]
+            Input rows.
+        evaluator : ExpressionEvaluator
+            Scalar expression evaluator.
+        parameters : Mapping[str, QueryValue]
+            Query parameter values.
+
+        Returns
+        -------
+        list[dict[str, QueryValue]]
+            Rows whose predicate evaluated to ``True``.
+        """
+        return [
+            dict(binding)
+            for binding in bindings
+            if evaluator.evaluate(stage.where, binding, parameters) is True
+        ]
 
     def _run_with_stage(
         self,
@@ -1070,6 +1107,7 @@ class QueryExecutor:
             variable="__pygrafito_start",
             labels=pattern.labels,
             properties=pattern.properties,
+            label_expression=pattern.label_expression,
         )
         match = Match(patterns=(PathPattern(nodes=(synthetic,)),))
         resolver = PatternValueResolver(evaluator, parameters)
@@ -1569,7 +1607,9 @@ class QueryExecutor:
                         current.expression,
                         evaluator,
                         parameters,
-                    )
+                    ),
+                    descending=current.descending,
+                    nulls_first=current.nulls_first,
                 ),
                 reverse=sort.descending,
             )

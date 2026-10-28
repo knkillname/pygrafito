@@ -25,6 +25,13 @@ class Lexer:
     """
 
     OPERATORS: typing.ClassVar[tuple[str, ...]] = (
+        "<->",
+        "<--",
+        "-->",
+        "->",
+        "<-",
+        "~>",
+        "<~",
         "<>",
         "!=",
         "<=",
@@ -37,6 +44,9 @@ class Lexer:
         "*",
         "/",
         "%",
+        "&",
+        "!",
+        "~",
     )
     PUNCTUATION: typing.ClassVar[frozenset[str]] = frozenset("()[]{}:,.|;")
     WHITESPACE: typing.ClassVar[frozenset[str]] = frozenset(" \t\r\n\f\v")
@@ -145,10 +155,22 @@ class Lexer:
             if character == "/" and self._peek(1) == "*":
                 self._block_comment()
                 continue
+            if character == "-" and self._peek(1) == "-" and self._peek(2) != ">":
+                if self._offset > 0 and self._text[self._offset - 1] in ")]":
+                    self._fail(
+                        "a '--' comment cannot follow a node or relationship pattern; "
+                        "use '-' for an undirected relationship",
+                        self._line,
+                        self._column,
+                    )
+                self._advance()
+                self._advance()
+                self._line_comment()
+                continue
             return
 
     def _line_comment(self) -> None:
-        """Consume a ``//`` comment up to the end of the line."""
+        """Consume a line comment up to the end of the line."""
         while not self._at_end() and self._peek() != "\n":
             self._advance()
 

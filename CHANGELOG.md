@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A data-driven conformance corpus at `tests/conformance/cases.json`, executed by
+  `tests/test_conformance.py`. The matrix/corpus consistency test keeps every `supported` row
+  covered and every case tied to a matrix feature.
+- The canonical GQL surface is executable: `INSERT`, `FOR`, `FILTER`, `OFFSET`, `RETURN ALL`,
+  `RETURN *`, `NULLS FIRST`/`NULLS LAST`, `NODETACH DELETE`, the `->`, `<-`, `-`, and `~`
+  directions, label expressions with `&`, `|`, `!`, and `%`, `IS` labels, inline element
+  `WHERE`, and `--` line comments. `CREATE`, `UNWIND`, stage `WHERE`, `SKIP`, `-->`, `<--`, and
+  `:A:B` remain compatibility aliases.
 - A runnable example layer under `examples/` with a `python -m examples` front door, three
   audience lanes, terminal tours, and a deterministic builder. It ships a curated franchise graph
   spanning three sources, derived cast and place aggregates, and a version 2 JSONL snapshot.
@@ -35,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The frontend recognizes the target GQL vocabulary. Constructs the profile lists but this
+  release cannot execute now raise a positioned semantic error naming the construct and the
+  follow-up change, instead of a generic unexpected-token error.
 - The query-language policy now classifies every construct as canonical GQL, synthetic alias,
   compatibility construct, pygrafito extension, or out of profile. The target default path mode
   is ISO `WALK`, gated on a query budget; the legacy `*n..m` quantifier keeps `TRAIL`.
@@ -53,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **BREAKING** `--` is no longer an undirected relationship arrow. It is a line comment, a `--`
+  that immediately follows a node or relationship pattern is a syntax error, and the replacement
+  for the old form is `-`.
 - **BREAKING** `Relationship.type`, the single relationship-type column, the version 1 snapshot
   reader, and the version 1 view definitions.
 

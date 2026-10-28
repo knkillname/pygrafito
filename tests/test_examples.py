@@ -4,8 +4,11 @@
 """Verify the example datasets, builder, front door, and tours."""
 
 import json
+import os
 import pathlib
 import re
+import subprocess
+import sys
 import typing
 
 import pytest
@@ -188,18 +191,44 @@ class TestCuratedDatasets:
             assert len(list(graph.find_nodes("User", designation="Kevin Flynn"))) == 1
 
     def test_snapshot_is_deterministic(self, tmp_path: pathlib.Path) -> None:
-        """Compare snapshots from two separate builds.
+        """Compare snapshots from two separate processes.
 
         Parameters
         ----------
         tmp_path : pathlib.Path
             Temporary directory.
         """
+        root = pathlib.Path(__file__).resolve().parents[1]
         first = tmp_path / "first.jsonl"
         second = tmp_path / "second.jsonl"
-        Build.build("grid", output=first, format="jsonl")
-        Build.build("grid", output=second, format="jsonl")
+        for destination, seed in ((first, "1"), (second, "987654")):
+            environment = {
+                **os.environ,
+                "PYTHONHASHSEED": seed,
+                "PYTHONPATH": str(root),
+            }
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "examples",
+                    "build",
+                    "grid",
+                    "--output",
+                    str(destination),
+                    "--format",
+                    "jsonl",
+                ],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert completed.returncode == 0, completed.stderr
         assert first.read_bytes() == second.read_bytes()
+        committed = root / "examples" / "data" / "grid.jsonl"
+        assert first.read_bytes() == committed.read_bytes()
 
     def test_committed_snapshot_matches_a_fresh_build(self, tmp_path: pathlib.Path) -> None:
         """Keep the committed snapshot equal to a fresh build.
@@ -425,9 +454,32 @@ class TestTours:
         for path in sorted(self.DIRECTORY.glob("*.gql")):
             assert f"`{path.name}`" in catalog
 
+    TIERS: typing.ClassVar[tuple[str, ...]] = (
+        "canonical GQL",
+        "synthetic alias",
+        "compatibility",
+        "pygrafito extension",
+        "out of profile",
+    )
+
     def test_extension_constructs_are_labelled(self) -> None:
-        """Require the catalog to call pygrafito extensions extensions."""
+        """Require every catalog row to declare tier, section, and owner."""
         catalog = (self.DIRECTORY / "README.md").read_text(encoding="utf-8")
+        rows: dict[str, list[str]] = {}
+        for line in catalog.splitlines():
+            if not line.startswith("| `"):
+                continue
+            cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+            if len(cells) < 5:
+                continue
+            rows[cells[0].strip("`")] = cells
+        for path in sorted(self.DIRECTORY.glob("*.gql")):
+            assert path.name in rows, path.name
+            cells = rows[path.name]
+            tier = cells[2].lower()
+            assert any(name in tier for name in self.TIERS), path.name
+            assert cells[3], path.name
+            assert cells[4], path.name
         assert "pygrafito extension" in catalog
         for construct in ("MERGE", "WITH", "type()"):
             assert construct in catalog
@@ -435,7 +487,9 @@ class TestTours:
     def test_target_only_syntax_is_absent(self) -> None:
         """Reject syntax that the current release cannot execute."""
         forbidden = re.compile(
-            r"\b(?:INSERT|FILTER|FOR|LET|NEXT)\b|\bGROUP\s+BY\b|" r"\{\s*\d|~|^\s*--",
+            r"\b(?:LET|NEXT)\b|\bGROUP\s+BY\b|\bRETURN\s+NO\s+BINDINGS\b|"
+            r"\bMATCH\s+(?:WALK|TRAIL|SIMPLE|ACYCLIC)\b|"
+            r"\{\s*\d|<~|~>|<->",
             flags=re.MULTILINE,
         )
         for path in sorted(self.DIRECTORY.glob("*.gql")):

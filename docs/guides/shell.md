@@ -12,7 +12,7 @@ reference](../reference/cli.md) owns every option, dot command, output rule, and
 ```console
 $ pygrafito grid.db
 pygrafito 0.8.0 | grid.db | type ".help" for commands
-grid.db> CREATE (n:Program {designation: 'Tron', cycles: 40});
+grid.db> INSERT (n:Program {designation: 'Tron', cycles: 40});
 1 node created
 grid.db> MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles;
 +------+--------+
@@ -108,7 +108,7 @@ SEARCH n0 USING INDEX pygrafito_idx_node_cycles (<expr>=?)
 versioned JSONL snapshot format.
 
 ```console
-grid.db> .import programs.jsonl --statement "UNWIND $rows AS row MERGE (n:Program {designation: row.designation})"
+grid.db> .import programs.jsonl --statement "FOR row IN $rows MERGE (n:Program {designation: row.designation})"
 imported 2 rows in 1 batches; created 2 nodes/0 relationships; deleted 0 nodes/0 relationships; 0 properties set, 0 removed, 0 labels added, 0 removed
 grid.db> .export grid.jsonl
 exported 2 nodes and 0 relationships to grid.jsonl
@@ -127,7 +127,7 @@ keep the writes or `.rollback` to discard them.
 
 ```console
 grid.db> .begin
-grid.db*> CREATE (n:Program {designation: 'Clu', cycles: 41});
+grid.db*> INSERT (n:Program {designation: 'Clu', cycles: 41});
 grid.db*> .rollback
 ```
 
@@ -142,7 +142,7 @@ usable. Ending the session with an open transaction rolls it back.
 ```console
 $ pygrafito --readonly grid.db
 pygrafito 0.6.0 | grid.db (read-only) | type ".help" for commands
-grid.db> CREATE (n:Program {designation: 'Clu'});
+grid.db> INSERT (n:Program {designation: 'Clu'});
 error: graph handle is read-only
 ```
 

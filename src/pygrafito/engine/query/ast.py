@@ -220,6 +220,56 @@ class PropertyEntry:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class LabelName:
+    """A single required label.
+
+    Parameters
+    ----------
+    name : str
+        Exact label name.
+    """
+
+    name: str
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LabelAnd:
+    """A conjunction of two label expressions."""
+
+    left: LabelExpression
+    right: LabelExpression
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LabelOr:
+    """A disjunction of two label expressions."""
+
+    left: LabelExpression
+    right: LabelExpression
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LabelNot:
+    """A negated label expression.
+
+    Parameters
+    ----------
+    operand : LabelExpression
+        Expression to negate.
+    """
+
+    operand: LabelExpression
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class LabelWildcard:
+    """The wildcard label expression, matching any element."""
+
+
+type LabelExpression = LabelName | LabelAnd | LabelOr | LabelNot | LabelWildcard
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class NodePattern:
     """One node position inside a path pattern.
 
@@ -231,11 +281,17 @@ class NodePattern:
         Labels every match must carry, by default none.
     properties : tuple[PropertyEntry, ...], optional
         Property map every match must satisfy, by default none.
+    label_expression : LabelExpression | None, optional
+        Parsed label expression, or ``None`` when the pattern names no labels.
+    where : Expression | None, optional
+        Inline predicate scoped to the node, by default ``None``.
     """
 
     variable: str | None = None
     labels: tuple[str, ...] = ()
     properties: tuple[PropertyEntry, ...] = ()
+    label_expression: LabelExpression | None = None
+    where: Expression | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -259,6 +315,13 @@ class RelationshipPattern:
     max_hops : int | None, optional
         Maximum relationship count for a quantified pattern, by default
         ``None`` for an ordinary one-hop relationship.
+    undirected_only : bool, optional
+        Whether the pattern matches only relationships stored as undirected,
+        by default ``False``.
+    label_expression : LabelExpression | None, optional
+        Parsed relationship label expression, or ``None`` when it names none.
+    where : Expression | None, optional
+        Inline predicate scoped to the relationship, by default ``None``.
     """
 
     variable: str | None = None
@@ -267,6 +330,9 @@ class RelationshipPattern:
     properties: tuple[PropertyEntry, ...] = ()
     min_hops: int | None = None
     max_hops: int | None = None
+    undirected_only: bool = False
+    label_expression: LabelExpression | None = None
+    where: Expression | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -321,6 +387,7 @@ class SortItem:
 
     expression: Expression
     descending: bool = False
+    nulls_first: bool | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -505,6 +572,7 @@ class Return:
     order_by: tuple[SortItem, ...] = ()
     skip: Expression | None = None
     limit: Expression | None = None
+    star: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -533,6 +601,19 @@ class With:
     order_by: tuple[SortItem, ...] = ()
     skip: Expression | None = None
     limit: Expression | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class Filter:
+    """A ``FILTER`` stage that keeps rows whose predicate is true.
+
+    Parameters
+    ----------
+    where : Expression
+        Boolean expression evaluated against the current row.
+    """
+
+    where: Expression
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -570,7 +651,7 @@ class Merge:
     on_match: Set | None = None
 
 
-type Clause = Match | With | Unwind | Create | Merge | Set | Remove | Delete | Return
+type Clause = Match | With | Unwind | Filter | Create | Merge | Set | Remove | Delete | Return
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -592,6 +673,7 @@ __all__ = [
     "Create",
     "Delete",
     "Expression",
+    "Filter",
     "FunctionCall",
     "IsNull",
     "LabelAssignment",

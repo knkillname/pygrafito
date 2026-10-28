@@ -1,9 +1,9 @@
-// 02-write.gql - CREATE alias, MERGE extension, label writes, and DETACH DELETE.
-// Current transitional dialect. CREATE is an alias for canonical INSERT; MERGE is an extension.
+// 02-write.gql - INSERT, MERGE extension, label writes, and DETACH DELETE.
+// INSERT is canonical and SET is canonical; MERGE, labels(), and type() are extensions.
 
 MATCH (p:Program {designation: 'Ares-Example'}) DETACH DELETE p;
 
-CREATE (p:Program {designation: 'Ares-Example', cycles: 1, active: true});
+INSERT (p:Program {designation: 'Ares-Example', cycles: 1, active: true});
 
 MATCH (p:Program {designation: 'Ares-Example'})
 SET p:Example, p.cycles = 2

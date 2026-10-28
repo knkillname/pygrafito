@@ -14,6 +14,7 @@ from pygrafito.engine.query.ast import (
     PropertyEntry,
     RelationshipPattern,
 )
+from pygrafito.engine.query.labels import LabelExpressions
 from pygrafito.engine.query.values import (
     ExpressionEvaluator,
     PatternValueResolver,
@@ -203,9 +204,11 @@ class PatternEngine:
             value = base[name]
             if not isinstance(value, Node):
                 return ()
-            if not all(label in value.labels for label in pattern.labels):
+            if not self._labels_match(pattern, value.labels):
                 return ()
             if not self._properties_match(pattern.properties, value.properties, base):
+                return ()
+            if not self._where_matches(pattern.where, pattern.variable, value, base):
                 return ()
             return (value,)
         return self._select_nodes(pattern, self._parameters, self._evaluator, base)
@@ -501,9 +504,11 @@ class PatternEngine:
         dict[str, QueryValue] | None
             Extended binding, or ``None`` when the pattern does not match.
         """
-        if not all(label in node.labels for label in pattern.labels):
+        if not self._labels_match(pattern, node.labels):
             return None
         if not self._properties_match(pattern.properties, node.properties, binding):
+            return None
+        if not self._where_matches(pattern.where, pattern.variable, node, binding):
             return None
         name = pattern.variable
         if name is None:
@@ -576,7 +581,14 @@ class PatternEngine:
         bool
             ``True`` when the relationship satisfies the pattern.
         """
-        if pattern.types and not set(pattern.types) & set(relationship.labels):
+        if pattern.undirected_only and relationship.directed:
+            return False
+        if pattern.label_expression is not None:
+            if not LabelExpressions.matches(pattern.label_expression, relationship.labels):
+                return False
+        elif pattern.types and not set(pattern.types) & set(relationship.labels):
+            return False
+        if not self._where_matches(pattern.where, pattern.variable, relationship, binding):
             return False
         return self._properties_match(pattern.properties, relationship.properties, binding)
 
@@ -614,6 +626,61 @@ class PatternEngine:
             if not relationship.directed and direction is not Direction.BOTH:
                 continue
             yield relationship, target
+
+    @staticmethod
+    def _labels_match(
+        pattern: NodePattern | RelationshipPattern,
+        labels: frozenset[str],
+    ) -> bool:
+        """Check one pattern's label expression against element labels.
+
+        Parameters
+        ----------
+        pattern : NodePattern | RelationshipPattern
+            Pattern carrying the label constraint.
+        labels : frozenset[str]
+            Labels carried by the candidate element.
+
+        Returns
+        -------
+        bool
+            ``True`` when the pattern matches.
+        """
+        if pattern.label_expression is not None:
+            return LabelExpressions.matches(pattern.label_expression, labels)
+        if isinstance(pattern, NodePattern):
+            return all(label in labels for label in pattern.labels)
+        return not pattern.types or any(label in labels for label in pattern.types)
+
+    def _where_matches(
+        self,
+        where: Expression | None,
+        variable: str | None,
+        value: QueryValue,
+        binding: Mapping[str, QueryValue],
+    ) -> bool:
+        """Evaluate an inline element predicate.
+
+        Parameters
+        ----------
+        where : Expression | None
+            Predicate to evaluate, or ``None``.
+        variable : str | None
+            Element variable, or ``None`` when anonymous.
+        value : QueryValue
+            Element snapshot the predicate is scoped to.
+        binding : Mapping[str, QueryValue]
+            Variables bound so far.
+
+        Returns
+        -------
+        bool
+            ``True`` when the predicate is absent or evaluates to ``True``.
+        """
+        if where is None:
+            return True
+        scope = binding if variable is None else {**binding, variable: value}
+        return self._values.resolve(where, scope) is True
 
     def _properties_match(
         self,

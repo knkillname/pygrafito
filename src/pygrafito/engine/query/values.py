@@ -123,26 +123,55 @@ class Values:
         return False
 
     @classmethod
-    def ordering_key(cls, value: QueryValue) -> tuple[object, ...]:
+    def ordering_key(
+        cls,
+        value: QueryValue,
+        *,
+        descending: bool = False,
+        nulls_first: bool | None = None,
+    ) -> tuple[object, ...]:
         """Build a total-order key for a query value.
 
         Parameters
         ----------
         value : QueryValue
             Value to order.
+        descending : bool, optional
+            Whether the surrounding sort is descending, by default ``False``.
+        nulls_first : bool | None, optional
+            Explicit null placement, or ``None`` for the direction default.
 
         Returns
         -------
         tuple[object, ...]
-            Sortable key whose null rank sorts after every other value.
+            Sortable key. A null key sorts to the requested end after the
+            caller applies the descending reverse.
 
         Raises
         ------
         QueryExecutionError
             If the value has no defined order.
         """
+        effective_first = descending if nulls_first is None else nulls_first
+        null_bucket = 0 if effective_first != descending else 1
         if value is None:
-            return (cls.NULL_RANK, 0)
+            return (null_bucket,)
+        return (1 - null_bucket, cls._ordering_value(value))
+
+    @classmethod
+    def _ordering_value(cls, value: QueryValue) -> tuple[object, ...]:
+        """Build the non-null ordering key for one value.
+
+        Parameters
+        ----------
+        value : QueryValue
+            Non-null value to order.
+
+        Returns
+        -------
+        tuple[object, ...]
+            Sortable key by type family.
+        """
         if isinstance(value, bool):
             return (cls.BOOLEAN_RANK, int(value))
         if cls.is_number(value):

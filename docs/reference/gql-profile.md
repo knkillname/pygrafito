@@ -5,11 +5,11 @@ the compatibility aliases and constructs, the pygrafito extensions, the path-mod
 policy, and how conformance is claimed. It is the contract for the query-language changes that
 follow.
 
-:::{warning}
-The current release still uses the transitional Cypher-flavored dialect described in the
-[query-language reference](query-language.md). This page is the target profile, not a description
-of what the current release executes. Canonical forms are marked **target** or **gated** until the
-frontend, budget, and path-semantics changes land.
+:::{note}
+This page is both the language profile and its conformance status board. Canonical spellings are
+executable except the rows marked **gated**; a gated construct raises a positioned error that names
+the follow-up change. The [query-language reference](query-language.md) describes the executable
+dialect.
 :::
 
 ## Current status
@@ -18,22 +18,21 @@ The profile is deliberately ahead of the implementation. The current release rem
 transitional dialect so existing examples keep working while the language is rewritten in small
 changes.
 
-| Area | Current release | Target profile |
+| Area | Implemented | Target |
 | --- | --- | --- |
-| Data modification | `CREATE`, `MERGE`, `SET`, `REMOVE`, `DELETE` | `INSERT` canonical, `CREATE` alias, `MERGE` extension |
-| Iteration | `UNWIND` | `FOR` canonical, `UNWIND` alias |
-| Filtering | `WHERE` after `MATCH` or `WITH` | `FILTER` canonical, stage `WHERE` alias, `MATCH ... WHERE` canonical |
-| Binding and composition | `WITH` | `LET` and `NEXT` canonical, `WITH` extension |
-| Grouping | Implicit grouping | `GROUP BY` canonical, implicit grouping extension |
-| Quantifiers | Bounded `*n..m`, trail semantics | `{n,m}` canonical, legacy `*n..m` compatibility construct |
-| Edge directions | `-->`, `<--`, `--` | GQL directions canonical, double-dash forms aliases |
-| Comments | `//` and `/* ... */` | `//`, `--`, and `/* ... */` |
-| Path modes | Trail only | `WALK` default, `TRAIL`, `SIMPLE`, and `ACYCLIC` in scope |
+| Data modification | `INSERT`, `SET`, `REMOVE`, `DELETE`, `DETACH DELETE`, `NODETACH DELETE`; `CREATE` alias; `MERGE` extension | `INSERT` canonical, `CREATE` alias, `MERGE` extension |
+| Iteration | `FOR`; `UNWIND` alias; ordinality gated | `FOR` canonical, `UNWIND` alias |
+| Filtering | `FILTER`, stage `WHERE` alias, `MATCH ... WHERE` | `FILTER` canonical, stage `WHERE` alias, `MATCH ... WHERE` canonical |
+| Binding and composition | `WITH` extension; `LET` and `NEXT` gated | `LET` and `NEXT` canonical, `WITH` extension |
+| Grouping | Implicit grouping; `GROUP BY` gated | `GROUP BY` canonical, implicit grouping extension |
+| Quantifiers | Bounded `*n..m`, trail semantics; `{n,m}` gated | `{n,m}` canonical, legacy `*n..m` compatibility construct |
+| Edge directions | `->`, `<-`, `-`, `~`; `-->` and `<--` aliases; `--` is a comment | GQL directions canonical, double-dash forms aliases |
+| Comments | `//`, `--`, and `/* ... */` | `//`, `--`, and `/* ... */` |
+| Path modes | Trail only; explicit modes gated | `WALK` default, `TRAIL`, `SIMPLE`, `ACYCLIC` in scope |
 | Query budget | None | Expansion and intermediate-row counters, gating `WALK` |
 
-The runnable examples in `README.md` and the quickstart stay on the current dialect until the
-frontend change lands. The profile does not claim that the current release executes the canonical
-forms below.
+The runnable examples in `README.md`, the quickstart, and the guides use the canonical spellings
+where the release supports them; compatibility aliases appear only in the migration guidance.
 
 ## The five tiers
 
@@ -239,42 +238,42 @@ corpus case land. The corpus column is `pending` until the case exists.
 
 | Feature | Tier | Status | Current | Deviation | Corpus |
 | --- | --- | --- | --- | --- | --- |
-| `MATCH` and `OPTIONAL MATCH` | Canonical GQL | gated | implemented | None | pending |
-| `INSERT` | Canonical GQL | gated | not implemented (`CREATE` alias) | None | pending |
-| `SET` | Canonical GQL | gated | implemented | None | pending |
-| `REMOVE` | Canonical GQL | gated | implemented | None | pending |
-| `DELETE`, `DETACH DELETE`, `NODETACH DELETE` | Canonical GQL | gated | implemented; explicit `NODETACH` pending | `NODETACH` keyword pending | pending |
-| `FOR` with ordinality/offset | Canonical GQL | gated | not implemented (`UNWIND` alias) | Ordinality not implemented | pending |
-| `FILTER` | Canonical GQL | gated | not implemented (stage `WHERE` alias) | None | pending |
+| `MATCH` and `OPTIONAL MATCH` | Canonical GQL | supported | implemented | None | match-program-designations |
+| `INSERT` | Canonical GQL | supported | implemented | None | insert-creates-a-node |
+| `SET` | Canonical GQL | supported | implemented | None | set-assigns-a-property |
+| `REMOVE` | Canonical GQL | supported | implemented | None | remove-removes-a-property |
+| `DELETE`, `DETACH DELETE`, `NODETACH DELETE` | Canonical GQL | supported | implemented | None | nodetach-delete-removes-a-disconnected-node |
+| `FOR` with ordinality/offset | Canonical GQL | gated | implemented without ordinality | `WITH ORDINALITY` and `WITH OFFSET` gated | for-iterates-a-list |
+| `FILTER` | Canonical GQL | supported | implemented | None | filter-stage-alias |
 | `LET` | Canonical GQL | gated | not implemented | None | pending |
 | `NEXT` | Canonical GQL | gated | not implemented | One result per call; final `RETURN` only | pending |
 | `GROUP BY` | Canonical GQL | gated | implicit grouping only | Explicit grouping target | pending |
-| `RETURN` with `DISTINCT`/`ALL` or `*` | Canonical GQL | gated | `DISTINCT` implemented; `ALL` and `*` pending | `ALL` and `*` pending | pending |
-| `ORDER BY` with null ordering | Canonical GQL | gated | implemented; `NULLS FIRST/LAST` pending | Null ordering pending | pending |
-| `OFFSET` and `SKIP` | Canonical GQL | gated | `SKIP` implemented; `OFFSET` pending | `OFFSET` spelling pending | pending |
-| `LIMIT` | Canonical GQL | gated | implemented | None | pending |
+| `RETURN` with `DISTINCT`/`ALL` or `*` | Canonical GQL | supported | implemented | `RETURN NO BINDINGS` gated | return-all-is-the-default |
+| `ORDER BY` with null ordering | Canonical GQL | supported | implemented | None | nulls-first-explicit |
+| `OFFSET` and `SKIP` | Canonical GQL | supported | implemented | None | offset-paginates |
+| `LIMIT` | Canonical GQL | supported | implemented | None | limit-bounds-the-result |
 | `{n,m}` quantifier | Canonical GQL | gated | not implemented (legacy `*n..m`) | Canonical quantifier pending | pending |
-| Label expressions (and, or, not, wildcard) | Canonical GQL | gated | conjunction and edge alternatives only | Full expressions pending | pending |
-| Edge directions `->`, `<-`, `-`, `~` | Canonical GQL | gated | `-->`, `<--`, `--` only | Single-dash and `~` pending | pending |
-| Comments `//`, `--`, `/* ... */` | Canonical GQL | gated | `//` and `/* ... */` only | `--` comments pending | pending |
-| Inline element `WHERE` | Canonical GQL | gated | not implemented | None | pending |
-| `IS` label syntax | Canonical GQL | gated | `:` only | `IS` pending | pending |
-| Path variables | Canonical GQL | gated | implemented | None | pending |
-| Parameters | Canonical GQL | gated | implemented | None | pending |
+| Label expressions (and, or, not, wildcard) | Canonical GQL | supported | implemented | None | label-conjunction |
+| Edge directions `->`, `<-`, `-`, `~` | Canonical GQL | supported | implemented | `<~`, `~>`, and `<->` gated | arrow-outgoing |
+| Comments `//`, `--`, `/* ... */` | Canonical GQL | supported | implemented | None | dash-comment |
+| Inline element `WHERE` | Canonical GQL | supported | implemented | None | inline-node-predicate |
+| `IS` label syntax | Canonical GQL | supported | implemented | None | label-is-form |
+| Path variables | Canonical GQL | supported | implemented | None | diamond-finds-two-trails |
+| Parameters | Canonical GQL | supported | implemented | None | parameters-bind-data |
 | `WALK` path mode | Canonical GQL | gated | not implemented | Gated on the query budget | pending |
 | `TRAIL` path mode | Canonical GQL | gated | implicit trail only | Explicit keyword pending | pending |
 | `SIMPLE` path mode | Canonical GQL | gated | not implemented | None | pending |
 | `ACYCLIC` path mode | Canonical GQL | gated | not implemented | None | pending |
-| `CREATE` for `INSERT` | Synthetic alias | gated | implemented | Data statements only | pending |
-| `UNWIND` for `FOR` | Synthetic alias | gated | implemented | None | pending |
-| Stage `WHERE` for `FILTER` | Synthetic alias | gated | implemented | `MATCH ... WHERE` stays canonical | pending |
-| `-->`, `<--`, `--` for `->`, `<-`, `-` | Synthetic alias | gated | implemented | `--` comment disambiguation pending | pending |
-| `:A:B` for `:A&B` | Synthetic alias | gated | implemented | Nodes only | pending |
-| Legacy `*n..m` quantifier | Compatibility construct | gated | implemented, bounded trail | Default `TRAIL` | pending |
-| `MERGE` with conditional updates | pygrafito extension | gated | implemented | No GQL equivalent | pending |
-| `WITH` projection and aggregation | pygrafito extension | gated | implemented | No GQL equivalent | pending |
-| Implicit grouping | pygrafito extension | gated | implemented | `GROUP BY` alternative | pending |
-| `type()` | pygrafito extension | gated | implemented | `LABELS()` alternative | pending |
+| `CREATE` for `INSERT` | Synthetic alias | supported | implemented | Data statements only | create-alias-returns-a-node |
+| `UNWIND` for `FOR` | Synthetic alias | supported | implemented | None | unwind-alias-iterates |
+| Stage `WHERE` for `FILTER` | Synthetic alias | supported | implemented | `MATCH ... WHERE` stays canonical | stage-where-alias-filters |
+| `-->`, `<--`, `--` for `->`, `<-`, `-` | Synthetic alias | supported | implemented | `--` is a comment, not an alias | arrow-double-dash-alias |
+| `:A:B` for `:A&B` | Synthetic alias | supported | implemented | None | label-colon-conjunction-alias |
+| Legacy `*n..m` quantifier | Compatibility construct | supported | implemented | Default `TRAIL` | legacy-quantifier-trails |
+| `MERGE` with conditional updates | pygrafito extension | supported | implemented | No GQL equivalent | merge-conditional-updates |
+| `WITH` projection and aggregation | pygrafito extension | supported | implemented | No GQL equivalent | with-aggregation |
+| Implicit grouping | pygrafito extension | supported | implemented | `GROUP BY` alternative | implicit-grouping |
+| `type()` | pygrafito extension | supported | implemented | `LABELS()` alternative | type-extension |
 | Match modes | Deferred | deferred | not implemented | `DIFFERENT EDGES` / `REPEATABLE ELEMENTS` | n/a |
 | Grouped quantified paths | Deferred | deferred | not implemented | Parenthesized path repetition | n/a |
 | Path search prefixes | Deferred | deferred | not implemented | `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | n/a |
@@ -287,39 +286,48 @@ corpus case land. The corpus column is `pending` until the case exists.
 | `SELECT` | Out of profile | out of profile | rejected | Pattern query surface only | n/a |
 | Full temporal values | Out of profile | out of profile | rejected | No temporal storage | n/a |
 
-No feature is `supported` yet because the conformance corpus is a follow-up. This page therefore
-claims a profile, not ISO conformance.
+A feature is `supported` only while at least one corpus case covers it and passes in CI. This page
+therefore claims a tested profile, not ISO conformance beyond the matrix.
 
 ## Conformance corpus
 
-The corpus is data-driven so the matrix can require coverage without a bespoke test harness. Each
-case has this shape:
+The corpus is data-driven so the matrix can require coverage without a bespoke test harness. It
+lives in `tests/conformance/cases.json`, is executed by `hatch test tests/test_conformance.py`,
+and is checked against this page by `tests/test_gql_profile.py`. Each case has this shape:
 
 ```text
 name       unique kebab-case identifier
 feature    matrix feature id
-fixture    seed statements or a named TRON-themed fixture
+fixture    name of a fixture declared in the same document
 query      statement text
 params     optional parameter mapping
 expect     projected rows, or an error type and message fragment
-tags       optional: canonical, alias, compatibility, extension, deviation
+tags       optional: canonical, alias, compatibility, extension, gated
 ```
 
-Example case:
+The feature id is derived from the first matrix column: lower-case it and replace every run of
+non-alphanumeric characters with a hyphen. Four rows carry an explicit id because the derived one
+would be ambiguous: `edge-direction-aliases`, `label-conjunction-alias`, `quantifier`, and
+`legacy-quantifier`. A case tagged `gated` must name a gated row.
 
-```yaml
-name: gql-walk-reuses-an-edge
-feature: walk-path-mode
-fixture: tron-cycle
-query: MATCH (a)-[:ALLIES_WITH{1,3}]->(b) RETURN b
-expect:
-  rows:
-    - b: {designation: Quorra}
-tags: [canonical, path-mode]
+Fixtures are small named graphs declared in the same file, not the example datasets, so a corpus
+run stays fast and the language contract never depends on `examples/`. Example case:
+
+```json
+{
+  "name": "gql-walk-reuses-an-edge",
+  "feature": "walk-path-mode",
+  "fixture": "tron-cycle",
+  "query": "MATCH WALK (a)-[:TRUSTS{1,3}]->(b) RETURN b.designation AS name",
+  "expect": {"rows": [{"name": "Quorra"}]},
+  "tags": ["canonical", "gated"]
+}
 ```
 
-The runner belongs to the frontend change and runs in CI. A feature is marked `supported` only
-after at least one case covers it. A regression fails CI with the case name and feature id.
+A feature is marked `supported` only after at least one case covers it. A regression fails CI with
+the case name and feature id. The coverage rules are enforced in both directions: every
+`supported` row needs a case, every case needs a matrix row, and deferred or out-of-profile rows
+carry none.
 
 ## Migration guidance
 

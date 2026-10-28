@@ -94,6 +94,7 @@ ignore = [
 "src/pygrafito/engine/query/*.py" = [
   "PLR0911",
   "PLR0912",
+  "PLR0915",
 ]
 "tests/**" = [
   "ANN",

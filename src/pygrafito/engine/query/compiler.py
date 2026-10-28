@@ -11,6 +11,11 @@ from pygrafito.engine.query.ast import (
     Binary,
     Expression,
     IsNull,
+    LabelAnd,
+    LabelExpression,
+    LabelName,
+    LabelNot,
+    LabelWildcard,
     ListLiteral,
     Literal,
     Match,
@@ -770,6 +775,7 @@ class Compiler:
         self._bound: Mapping[str, QueryValue] = {}
         self._resolver: PatternValueResolver | None = None
         self._predicates_builder: PredicateCompiler | None = None
+        self._inline_residuals: list[Expression] = []
 
     def compile(
         self,
@@ -839,6 +845,7 @@ class Compiler:
         self._label_counter = 0
         self._parameters = parameters
         self._bound = {}
+        self._inline_residuals = []
         self._predicates_builder = PredicateCompiler(
             self._codec,
             parameters,
@@ -909,15 +916,101 @@ class Compiler:
         pattern : NodePattern
             Node pattern carrying the constraints.
         """
-        for label in pattern.labels:
-            label_alias = f"label_{self._label_counter}"
-            self._label_counter += 1
+        if pattern.label_expression is not None:
             self._predicates.append(
-                f"EXISTS (SELECT 1 FROM node_labels AS {label_alias} "
-                f"WHERE {label_alias}.node_id = {alias}.id AND {label_alias}.label = ?)"
+                self._label_sql(pattern.label_expression, alias, "node_labels", "node_id")
             )
-            self._arguments.append(label)
+        else:
+            for label in pattern.labels:
+                label_alias = f"label_{self._label_counter}"
+                self._label_counter += 1
+                self._predicates.append(
+                    f"EXISTS (SELECT 1 FROM node_labels AS {label_alias} "
+                    f"WHERE {label_alias}.node_id = {alias}.id AND {label_alias}.label = ?)"
+                )
+                self._arguments.append(label)
         self._add_property_predicates(alias, pattern.properties)
+        if pattern.where is not None:
+            self._add_pattern_predicate(alias, pattern.variable, pattern.where, False)
+
+    def _label_sql(
+        self,
+        expression: LabelExpression,
+        alias: str,
+        table: str,
+        id_column: str,
+    ) -> str:
+        """Compile one label expression into a SQL predicate.
+
+        Parameters
+        ----------
+        expression : LabelExpression
+            Expression to compile.
+        alias : str
+            Element table alias.
+        table : str
+            Label table name.
+        id_column : str
+            Foreign-key column in the label table.
+
+        Returns
+        -------
+        str
+            SQL predicate.
+        """
+        if isinstance(expression, LabelName):
+            self._arguments.append(expression.name)
+            return f"{alias}.id IN (SELECT {id_column} FROM {table} WHERE label = ?)"
+        if isinstance(expression, LabelWildcard):
+            return "1"
+        if isinstance(expression, LabelNot):
+            operand = self._label_sql(expression.operand, alias, table, id_column)
+            return f"(NOT {operand})"
+        if isinstance(expression, LabelAnd):
+            left = self._label_sql(expression.left, alias, table, id_column)
+            right = self._label_sql(expression.right, alias, table, id_column)
+            return f"({left} AND {right})"
+        left = self._label_sql(expression.left, alias, table, id_column)
+        right = self._label_sql(expression.right, alias, table, id_column)
+        return f"({left} OR {right})"
+
+    def _add_pattern_predicate(
+        self,
+        alias: str,
+        variable: str | None,
+        where: Expression,
+        relationship: bool,
+    ) -> None:
+        """Push an inline element predicate into SQL or the residual.
+
+        Parameters
+        ----------
+        alias : str
+            Element table alias.
+        variable : str | None
+            Element variable, or ``None`` when anonymous.
+        where : Expression
+            Inline predicate to apply.
+        relationship : bool
+            Whether the element is a relationship.
+        """
+        builder = self._predicates_builder
+        if builder is None:
+            message = "compiler was not initialized"
+            raise QuerySemanticError(message)
+        aliases: dict[str, tuple[str, bool]] = {}
+        for name, node_alias in self._node_aliases.items():
+            aliases[name] = (node_alias, False)
+        for name, relationship_alias in self._relationship_aliases.items():
+            aliases[name] = (relationship_alias, True)
+        if variable is not None:
+            aliases[variable] = (alias, relationship)
+        analyzer = PushdownAnalyzer(aliases, builder, ConstantEvaluator(self._parameters))
+        sql, residual = analyzer.split(where)
+        if sql is not None:
+            self._predicates.append(sql)
+        if residual is not None:
+            self._inline_residuals.append(residual)
 
     def _bind_relationship(
         self,
@@ -951,7 +1044,12 @@ class Compiler:
         if alias is None or columns is None:
             alias = f"r{self._relationship_counter}"
             self._relationship_counter += 1
-            condition = self._direction_condition(pattern.direction, alias, current_id)
+            condition = self._direction_condition(
+                pattern.direction,
+                alias,
+                current_id,
+                pattern.undirected_only,
+            )
             self._joins.append(f"JOIN relationships AS {alias} ON {condition}")
             labels = self._select(
                 f"(SELECT json_group_array(label) FROM "
@@ -973,9 +1071,23 @@ class Compiler:
                 self._relationship_aliases[pattern.variable] = alias
                 self._add_bound_entity(alias, pattern.variable)
         else:
-            condition = self._direction_condition(pattern.direction, alias, current_id)
+            condition = self._direction_condition(
+                pattern.direction,
+                alias,
+                current_id,
+                pattern.undirected_only,
+            )
             self._predicates.append(condition)
-        if pattern.types:
+        if pattern.label_expression is not None:
+            self._predicates.append(
+                self._label_sql(
+                    pattern.label_expression,
+                    alias,
+                    "relationship_labels",
+                    "relationship_id",
+                )
+            )
+        elif pattern.types:
             placeholders = ", ".join("?" for _ in pattern.types)
             self._predicates.append(
                 f"{alias}.id IN (SELECT relationship_id FROM relationship_labels "
@@ -984,10 +1096,17 @@ class Compiler:
             )
             self._arguments.extend(pattern.types)
         self._add_property_predicates(alias, pattern.properties)
+        if pattern.where is not None:
+            self._add_pattern_predicate(alias, pattern.variable, pattern.where, True)
         return self._next_id(pattern.direction, alias, current_id), columns
 
     @staticmethod
-    def _direction_condition(direction: Direction, alias: str, current_id: str) -> str:
+    def _direction_condition(
+        direction: Direction,
+        alias: str,
+        current_id: str,
+        undirected_only: bool = False,
+    ) -> str:
         """Build the join condition for one relationship direction.
 
         Parameters
@@ -998,12 +1117,20 @@ class Compiler:
             Relationship table alias.
         current_id : str
             Table alias of the previous node.
+        undirected_only : bool, optional
+            Whether only relationships stored as undirected match, by default
+            ``False``.
 
         Returns
         -------
         str
             SQL condition.
         """
+        if undirected_only:
+            return (
+                f"{alias}.directed = 0 AND "
+                f"({alias}.src = {current_id}.id OR {alias}.dst = {current_id}.id)"
+            )
         if direction is Direction.OUTGOING:
             return f"{alias}.directed = 1 AND {alias}.src = {current_id}.id"
         if direction is Direction.INCOMING:
@@ -1068,8 +1195,6 @@ class Compiler:
         Expression | None
             Residual filter expression, if any.
         """
-        if self._match.where is None:
-            return None
         builder = self._predicates_builder
         if builder is None:
             message = "compiler was not initialized"
@@ -1084,9 +1209,17 @@ class Compiler:
             builder,
             ConstantEvaluator(self._parameters),
         )
-        sql, residual = analyzer.split(self._match.where)
-        if sql is not None:
-            self._predicates.append(sql)
+        residual: Expression | None = None
+        if self._match.where is not None:
+            sql, residual = analyzer.split(self._match.where)
+            if sql is not None:
+                self._predicates.append(sql)
+        for inline in self._inline_residuals:
+            residual = (
+                inline
+                if residual is None
+                else Binary(left=residual, operator=Operators.AND, right=inline)
+            )
         return residual
 
     def _add_bound_entity(self, alias: str, variable: str) -> None:

@@ -40,9 +40,9 @@ class TestNodeCompilation:
         assert "n0.id AS c0" in compiled.sql
         assert compiled.node_columns[0].variable == "n"
 
-    def test_labels_use_exists_and_placeholders(self) -> None:
+    def test_labels_use_placeholders(self) -> None:
         compiled = self.compile("MATCH (n:Program:ISO) RETURN n")
-        assert compiled.sql.count("EXISTS (SELECT 1 FROM node_labels") == 2
+        assert compiled.sql.count("id IN (SELECT node_id FROM node_labels WHERE label = ?)") == 2
         assert compiled.arguments == ("Program", "ISO")
         assert "= ?" in compiled.sql
 
@@ -125,7 +125,9 @@ class TestRelationshipCompilation:
         compiled = self.compile("MATCH (a)-[r:ALLIES_WITH]->(b) RETURN b")
         assert "JOIN relationships AS r0 ON r0.directed = 1 AND r0.src = n0.id" in compiled.sql
         assert "JOIN nodes AS n1 ON n1.id = r0.dst" in compiled.sql
-        assert "rel_label_r0.label IN (?)" in compiled.sql
+        assert (
+            "r0.id IN (SELECT relationship_id FROM relationship_labels WHERE label = ?)"
+        ) in compiled.sql
         assert "ALLIES_WITH" in compiled.arguments
 
     def test_incoming_join(self) -> None:
@@ -140,7 +142,7 @@ class TestRelationshipCompilation:
 
     def test_type_alternatives(self) -> None:
         compiled = self.compile("MATCH (a)-[r:ALLIES_WITH|TRUSTS]->(b) RETURN b")
-        assert "rel_label_r0.label IN (?, ?)" in compiled.sql
+        assert "OR r0.id IN (SELECT relationship_id FROM relationship_labels" in compiled.sql
         assert compiled.arguments == ("ALLIES_WITH", "TRUSTS")
 
     def test_relationship_properties(self) -> None:

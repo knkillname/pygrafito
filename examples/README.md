@@ -46,9 +46,9 @@ test keeps it byte-identical to a fresh build.
 ### Sources and provenance
 
 The curated graph covers the 1981 TRON fourth draft, the released TRON: Legacy script, and the
-TRON: Ares script. Each film is a `Film` node with `released` and `source_kind`, and every named
-entity carries a `sources` list. Shared entities merge across sources; era-specific elements stay
-separate and link through `ALIAS_OF`, `VERSION_OF`, `REPROGRAMMED_AS`, or `REINCARNATION_OF`.
+TRON: Ares script. Each film is a `Film` node with `released` and `source_kind`, and every
+non-film entity carries a `sources` list. Shared entities merge across sources; era-specific
+elements stay separate and link through `ALIAS_OF`, `REPROGRAMMED_AS`, or `REINCARNATION_OF`.
 
 The repository does not contain a screenplay or transcript. `tmp/` is ignored, the extractor is a
 local development tool, and its outputs contain names, counts, weights, and structural metadata

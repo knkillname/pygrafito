@@ -1,5 +1,5 @@
 // 01-match.gql - MATCH, WHERE, OPTIONAL MATCH, ordering, and relationship metadata.
-// Current transitional dialect. See examples/tours/README.md for the GQL profile tier.
+// Canonical GQL except type(), which is a pygrafito extension. See examples/tours/README.md.
 
 MATCH (f:Film) RETURN f.designation AS film, f.released AS released ORDER BY released;
 

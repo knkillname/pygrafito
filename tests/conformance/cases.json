@@ -1,0 +1,1303 @@
+{
+  "fixtures": {
+    "tron-cycle": {
+      "nodes": [
+        {
+          "handle": "kevin",
+          "labels": [
+            "User"
+          ],
+          "properties": {
+            "designation": "Kevin Flynn",
+            "cycles": 36
+          }
+        },
+        {
+          "handle": "quorra",
+          "labels": [
+            "Program",
+            "ISO"
+          ],
+          "properties": {
+            "designation": "Quorra",
+            "cycles": 37
+          }
+        },
+        {
+          "handle": "tron",
+          "labels": [
+            "Program",
+            "Security"
+          ],
+          "properties": {
+            "designation": "Tron",
+            "cycles": 40
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "start": "kevin",
+          "end": "quorra",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {
+            "since_cycle": 2020
+          }
+        },
+        {
+          "start": "quorra",
+          "end": "tron",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {
+            "since_cycle": 2021
+          }
+        },
+        {
+          "start": "tron",
+          "end": "kevin",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {
+            "since_cycle": 2022
+          }
+        }
+      ]
+    },
+    "tron-diamond": {
+      "nodes": [
+        {
+          "handle": "kevin",
+          "labels": [
+            "User"
+          ],
+          "properties": {
+            "designation": "Kevin Flynn"
+          }
+        },
+        {
+          "handle": "sam",
+          "labels": [
+            "User"
+          ],
+          "properties": {
+            "designation": "Sam Flynn"
+          }
+        },
+        {
+          "handle": "quorra",
+          "labels": [
+            "Program",
+            "ISO"
+          ],
+          "properties": {
+            "designation": "Quorra"
+          }
+        },
+        {
+          "handle": "alan",
+          "labels": [
+            "User"
+          ],
+          "properties": {
+            "designation": "Alan Bradley"
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "start": "kevin",
+          "end": "sam",
+          "labels": [
+            "PARENT_OF"
+          ],
+          "directed": true,
+          "properties": {}
+        },
+        {
+          "start": "kevin",
+          "end": "quorra",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {}
+        },
+        {
+          "start": "sam",
+          "end": "alan",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {}
+        },
+        {
+          "start": "quorra",
+          "end": "alan",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {}
+        }
+      ]
+    },
+    "tron-parallel": {
+      "nodes": [
+        {
+          "handle": "kevin",
+          "labels": [
+            "User"
+          ],
+          "properties": {
+            "designation": "Kevin Flynn"
+          }
+        },
+        {
+          "handle": "quorra",
+          "labels": [
+            "Program",
+            "ISO"
+          ],
+          "properties": {
+            "designation": "Quorra"
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "start": "kevin",
+          "end": "quorra",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {
+            "since_cycle": 2020
+          }
+        },
+        {
+          "start": "kevin",
+          "end": "quorra",
+          "labels": [
+            "ALLIES_WITH"
+          ],
+          "directed": true,
+          "properties": {
+            "since_cycle": 2021
+          }
+        }
+      ]
+    },
+    "tron-self-loop": {
+      "nodes": [
+        {
+          "handle": "tron",
+          "labels": [
+            "Program",
+            "Security"
+          ],
+          "properties": {
+            "designation": "Tron"
+          }
+        },
+        {
+          "handle": "quorra",
+          "labels": [
+            "Program",
+            "ISO"
+          ],
+          "properties": {
+            "designation": "Quorra"
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "start": "tron",
+          "end": "tron",
+          "labels": [
+            "MONITORS"
+          ],
+          "directed": true,
+          "properties": {}
+        },
+        {
+          "start": "quorra",
+          "end": "tron",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {}
+        }
+      ]
+    },
+    "tron-labels": {
+      "nodes": [
+        {
+          "handle": "kevin",
+          "labels": [
+            "User"
+          ],
+          "properties": {
+            "designation": "Kevin Flynn",
+            "cycles": 36
+          }
+        },
+        {
+          "handle": "quorra",
+          "labels": [
+            "Program",
+            "ISO"
+          ],
+          "properties": {
+            "designation": "Quorra",
+            "cycles": 37,
+            "rank": 2
+          }
+        },
+        {
+          "handle": "tron",
+          "labels": [
+            "Program",
+            "Security"
+          ],
+          "properties": {
+            "designation": "Tron",
+            "cycles": 40,
+            "rank": 1
+          }
+        },
+        {
+          "handle": "mcp",
+          "labels": [
+            "Program",
+            "System"
+          ],
+          "properties": {
+            "designation": "Master Control Program",
+            "cycles": 50
+          }
+        }
+      ],
+      "relationships": []
+    },
+    "tron-undirected": {
+      "nodes": [
+        {
+          "handle": "kevin",
+          "labels": [
+            "User"
+          ],
+          "properties": {
+            "designation": "Kevin Flynn"
+          }
+        },
+        {
+          "handle": "quorra",
+          "labels": [
+            "Program",
+            "ISO"
+          ],
+          "properties": {
+            "designation": "Quorra"
+          }
+        },
+        {
+          "handle": "tron",
+          "labels": [
+            "Program",
+            "Security"
+          ],
+          "properties": {
+            "designation": "Tron"
+          }
+        }
+      ],
+      "relationships": [
+        {
+          "start": "kevin",
+          "end": "quorra",
+          "labels": [
+            "ALLIES_WITH"
+          ],
+          "directed": false,
+          "properties": {}
+        },
+        {
+          "start": "quorra",
+          "end": "tron",
+          "labels": [
+            "TRUSTS"
+          ],
+          "directed": true,
+          "properties": {}
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "match-program-designations",
+      "feature": "match-and-optional-match",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "filter-stage-alias",
+      "feature": "filter",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WHERE n.cycles > 38 RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "create-alias-returns-a-node",
+      "feature": "create-for-insert",
+      "fixture": "tron-labels",
+      "query": "CREATE (n:Program {designation: 'Rinzler'}) RETURN n.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Rinzler"
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "insert-creates-a-node",
+      "feature": "insert",
+      "fixture": "tron-labels",
+      "query": "INSERT (n:Program {designation: 'Rinzler'}) RETURN n.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Rinzler"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "insert-graph-is-out-of-profile",
+      "feature": "insert",
+      "fixture": "tron-labels",
+      "query": "INSERT GRAPH (n)",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "out of profile"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "for-iterates-a-list",
+      "feature": "for-with-ordinality-offset",
+      "fixture": "tron-labels",
+      "query": "FOR value IN [1, 2] RETURN value ORDER BY value",
+      "expect": {
+        "rows": [
+          {
+            "value": 1
+          },
+          {
+            "value": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "for-null-list-produces-no-rows",
+      "feature": "for-with-ordinality-offset",
+      "fixture": "tron-labels",
+      "query": "FOR value IN $values RETURN value",
+      "params": {
+        "values": null
+      },
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "for-empty-list-produces-no-rows",
+      "feature": "for-with-ordinality-offset",
+      "fixture": "tron-labels",
+      "query": "FOR value IN [] RETURN value",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "for-ordinality-is-gated",
+      "feature": "for-with-ordinality-offset",
+      "fixture": "tron-labels",
+      "query": "FOR value IN [1, 2] WITH ORDINALITY index RETURN index",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "add-gql-composition"
+        }
+      },
+      "tags": [
+        "gated"
+      ]
+    },
+    {
+      "name": "filter-stage-keeps-true-rows",
+      "feature": "filter",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) FILTER n.cycles > 38 RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "filter-where-explicit-form",
+      "feature": "filter",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) FILTER WHERE n.cycles > 38 RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "filter-after-with",
+      "feature": "filter",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WITH n, n.cycles AS c FILTER c > 38 RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "filter-rejects-an-unbound-variable",
+      "feature": "filter",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) FILTER missing > 1 RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "is not bound"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "optional-match-where-filters-matches",
+      "feature": "match-and-optional-match",
+      "fixture": "tron-cycle",
+      "query": "MATCH (u:User) OPTIONAL MATCH (u)-[:TRUSTS]->(p:Program) WHERE p.cycles > 38 RETURN u.designation AS user, p.designation AS program",
+      "expect": {
+        "rows": [
+          {
+            "user": "Kevin Flynn",
+            "program": null
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "label-conjunction",
+      "feature": "label-expressions-and-or-not-wildcard",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program&ISO) RETURN n.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "label-disjunction",
+      "feature": "label-expressions-and-or-not-wildcard",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program|User) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 4
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "label-negation",
+      "feature": "label-expressions-and-or-not-wildcard",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program&!ISO) RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "label-wildcard",
+      "feature": "label-expressions-and-or-not-wildcard",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:%) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 4
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "label-is-form",
+      "feature": "is-label-syntax",
+      "fixture": "tron-labels",
+      "query": "MATCH (n IS Program&ISO) RETURN n.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "label-colon-conjunction-alias",
+      "feature": "label-conjunction-alias",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program:ISO) RETURN n.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "inline-node-predicate",
+      "feature": "inline-element-where",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program WHERE n.cycles > 38) RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "inline-relationship-predicate",
+      "feature": "inline-element-where",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a)-[r:TRUSTS WHERE r.since_cycle > 2021]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "inline-predicate-wrong-scope",
+      "feature": "inline-element-where",
+      "fixture": "tron-labels",
+      "query": "MATCH (a WHERE b.cycles > 1), (b:Program) RETURN a",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "is not bound"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-outgoing",
+      "feature": "edge-directions",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[r:TRUSTS]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-incoming",
+      "feature": "edge-directions",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Quorra'})<-[r:TRUSTS]-(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-any-direction",
+      "feature": "edge-directions",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Quorra'})-[r]-(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-undirected-only",
+      "feature": "edge-directions",
+      "fixture": "tron-undirected",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})~[r]~(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-extended-form-is-gated",
+      "feature": "edge-directions",
+      "fixture": "tron-undirected",
+      "query": "MATCH (a)<~(b) RETURN a",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "add-gql-path-semantics"
+        }
+      },
+      "tags": [
+        "gated"
+      ]
+    },
+    {
+      "name": "arrow-double-dash-alias",
+      "feature": "edge-direction-aliases",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "dash-comment",
+      "feature": "comments",
+      "fixture": "tron-labels",
+      "query": "-- count every program\nMATCH (n:Program) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 3
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "dash-comment-after-whitespace",
+      "feature": "comments",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) -- note\nRETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 3
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "dash-comment-cannot-abut-a-pattern",
+      "feature": "comments",
+      "fixture": "tron-labels",
+      "query": "MATCH (a)--(b) RETURN b",
+      "expect": {
+        "error": {
+          "type": "QuerySyntaxError",
+          "contains": "undirected relationship"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "diamond-finds-two-trails",
+      "feature": "path-variables",
+      "fixture": "tron-diamond",
+      "query": "MATCH p = (a {designation: 'Kevin Flynn'})-[:PARENT_OF|TRUSTS*1..2]->(b {designation: 'Alan Bradley'}) RETURN count(*) AS routes",
+      "expect": {
+        "rows": [
+          {
+            "routes": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "parallel-relationships-produce-two-rows",
+      "feature": "match-and-optional-match",
+      "fixture": "tron-parallel",
+      "query": "MATCH (a)-[r]->(b) RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 2
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "self-loop-binds-twice",
+      "feature": "match-and-optional-match",
+      "fixture": "tron-self-loop",
+      "query": "MATCH (a)-[r]->(a) RETURN a.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "offset-paginates",
+      "feature": "offset-and-skip",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name ORDER BY name OFFSET 1 LIMIT 1",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "skip-alias-paginates",
+      "feature": "offset-and-skip",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name ORDER BY name SKIP 1 LIMIT 1",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "offset-accepts-a-parameter",
+      "feature": "offset-and-skip",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name ORDER BY name OFFSET $offset LIMIT 1",
+      "params": {
+        "offset": 2
+      },
+      "expect": {
+        "rows": [
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "return-all-is-the-default",
+      "feature": "return-with-distinct-all-or",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN ALL n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "return-star-projects-every-binding",
+      "feature": "return-with-distinct-all-or",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WITH n.designation AS name, n.cycles AS cycles RETURN * ORDER BY name LIMIT 1",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program",
+            "cycles": 50
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "return-no-bindings-is-gated",
+      "feature": "return-with-distinct-all-or",
+      "fixture": "tron-labels",
+      "query": "MATCH (n) RETURN NO BINDINGS",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "add-gql-composition"
+        }
+      },
+      "tags": [
+        "gated"
+      ]
+    },
+    {
+      "name": "nulls-first-explicit",
+      "feature": "order-by-with-null-ordering",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name ORDER BY n.rank ASC NULLS FIRST",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Tron"
+          },
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "nulls-last-explicit",
+      "feature": "order-by-with-null-ordering",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name ORDER BY n.rank DESC NULLS LAST",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          },
+          {
+            "name": "Master Control Program"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "nodetach-delete-removes-a-disconnected-node",
+      "feature": "delete-detach-delete-nodetach-delete",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) NODETACH DELETE n RETURN n.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "nodetach-delete-rejects-a-connected-node",
+      "feature": "delete-detach-delete-nodetach-delete",
+      "fixture": "tron-cycle",
+      "query": "MATCH (n {designation: 'Quorra'}) NODETACH DELETE n",
+      "expect": {
+        "error": {
+          "type": "QueryExecutionError",
+          "contains": "relationship"
+        }
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "set-assigns-a-property",
+      "feature": "set",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) SET n.cycles = 38 RETURN n.cycles AS cycles",
+      "expect": {
+        "rows": [
+          {
+            "cycles": 38
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "remove-removes-a-property",
+      "feature": "remove",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program {designation: 'Quorra'}) REMOVE n.cycles RETURN n.cycles AS cycles",
+      "expect": {
+        "rows": [
+          {
+            "cycles": null
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "limit-bounds-the-result",
+      "feature": "limit",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.designation AS name ORDER BY name LIMIT 2",
+      "expect": {
+        "rows": [
+          {
+            "name": "Master Control Program"
+          },
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "parameters-bind-data",
+      "feature": "parameters",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WHERE n.designation = $name RETURN n.cycles AS cycles",
+      "params": {
+        "name": "Quorra"
+      },
+      "expect": {
+        "rows": [
+          {
+            "cycles": 37
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "unwind-alias-iterates",
+      "feature": "unwind-for-for",
+      "fixture": "tron-labels",
+      "query": "UNWIND [1, 2] AS value RETURN value ORDER BY value",
+      "expect": {
+        "rows": [
+          {
+            "value": 1
+          },
+          {
+            "value": 2
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "stage-where-alias-filters",
+      "feature": "stage-where-for-filter",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WITH n WHERE n.cycles > 38 RETURN count(*) AS total",
+      "expect": {
+        "rows": [
+          {
+            "total": 2
+          }
+        ]
+      },
+      "tags": [
+        "alias"
+      ]
+    },
+    {
+      "name": "legacy-quantifier-trails",
+      "feature": "legacy-quantifier",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS*1..2]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "compatibility"
+      ]
+    },
+    {
+      "name": "with-aggregation",
+      "feature": "with-projection-and-aggregation",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WITH count(*) AS programs RETURN programs",
+      "expect": {
+        "rows": [
+          {
+            "programs": 3
+          }
+        ]
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "implicit-grouping",
+      "feature": "implicit-grouping",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN n.cycles > 38 AS veteran, count(*) AS total ORDER BY veteran",
+      "expect": {
+        "rows": [
+          {
+            "veteran": false,
+            "total": 1
+          },
+          {
+            "veteran": true,
+            "total": 2
+          }
+        ]
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "type-extension",
+      "feature": "type",
+      "fixture": "tron-cycle",
+      "query": "MATCH ()-[r:TRUSTS]->() RETURN type(r) AS kind LIMIT 1",
+      "expect": {
+        "rows": [
+          {
+            "kind": "TRUSTS"
+          }
+        ]
+      },
+      "tags": [
+        "extension"
+      ]
+    },
+    {
+      "name": "merge-conditional-updates",
+      "feature": "merge-with-conditional-updates",
+      "fixture": "tron-labels",
+      "query": "MERGE (n:Program {designation: 'Rinzler'}) ON CREATE SET n.cycles = 40 ON MATCH SET n.cycles = 41 RETURN n.cycles AS cycles",
+      "expect": {
+        "rows": [
+          {
+            "cycles": 40
+          }
+        ]
+      },
+      "tags": [
+        "extension"
+      ]
+    }
+  ]
+}

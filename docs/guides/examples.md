@@ -53,15 +53,16 @@ pygrafito grid.db -f examples/tours/03-compose.gql
 pygrafito grid.db -f examples/tours/04-paths.gql
 ```
 
-The tours use the current transitional dialect. The target GQL spellings are documented in the
-[GQL profile](../reference/gql-profile.md); each tour is catalogued with its tier and the follow-up
-change that will migrate it in `examples/tours/README.md`. `MERGE`, `WITH`, implicit grouping, and
-`type()` are pygrafito extensions, not canonical GQL.
+The tours use the canonical GQL spellings where the release supports them. The
+[GQL profile](../reference/gql-profile.md) records every construct and its tier; each tour is
+catalogued with its tier and the follow-up change that will migrate it in
+`examples/tours/README.md`. `MERGE`, `WITH`, implicit grouping, and `type()` are pygrafito
+extensions, not canonical GQL.
 
 | Tour | Focus | Migrated by |
 | --- | --- | --- |
-| `01-match.gql` | `MATCH`, `OPTIONAL MATCH`, filtering, and ordering | `adopt-gql-query-frontend` |
-| `02-write.gql` | `CREATE` alias, `MERGE` extension, labels, and deletion | `adopt-gql-query-frontend` |
+| `01-match.gql` | `MATCH`, `OPTIONAL MATCH`, filtering, and ordering | `adopt-gql-query-frontend` (migrated) |
+| `02-write.gql` | `INSERT`, `MERGE` extension, labels, and deletion | `adopt-gql-query-frontend` (migrated) |
 | `03-compose.gql` | `UNWIND` alias, `WITH`, and grouping | `add-gql-composition` |
 | `04-paths.gql` | quantified compatibility syntax, directions, and path variables | `add-gql-path-semantics` |
 

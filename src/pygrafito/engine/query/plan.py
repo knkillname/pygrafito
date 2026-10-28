@@ -9,6 +9,7 @@ import typing
 from pygrafito.engine.query.ast import Binary, Create, Delete, Merge, Operators, Remove, Set
 from pygrafito.engine.query.semantic import (
     Analysis,
+    FilterStage,
     MatchStage,
     OptionalMatchStage,
     ReadStage,
@@ -223,6 +224,8 @@ class PlanBuilder:
                 operators.append(PlanOperator.FILTER)
         elif isinstance(stage, UnwindStage):
             operators.append(PlanOperator.UNWIND)
+        elif isinstance(stage, FilterStage):
+            operators.append(PlanOperator.FILTER)
         elif isinstance(stage, WithStage):
             operators.append(PlanOperator.WITH)
             operators.append(PlanOperator.PROJECT)

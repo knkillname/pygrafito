@@ -91,9 +91,11 @@ class TestPlanSelection(_ExplainTestCase):
         assert "pygrafito_idx_node_" in details
         assert "SCAN n0" not in details
 
-    def test_unindexed_filter_scans_the_node_table(self, graph: Graph) -> None:
+    def test_unindexed_filter_starts_from_the_label_index(self, graph: Graph) -> None:
         plan = graph.explain("MATCH (n:Program) WHERE n.cycles = 36 RETURN n")
-        assert any(line.startswith("SCAN n0") for line in plan)
+        details = " ".join(plan)
+        assert "node_labels_by_label" in details
+        assert "pygrafito_idx_node_" not in details
 
     def test_relationship_label_filter_uses_an_index(self, graph: Graph) -> None:
         plan = graph.explain("MATCH (a)-[r:ALLIES_WITH]->(b) RETURN b")
@@ -116,7 +118,7 @@ class TestExplainUnwindAndDynamicValues(_ExplainTestCase):
     def test_unwind_stage_is_reported(self, graph: Graph) -> None:
         plan = graph.explain("UNWIND [1, 2] AS value MATCH (n:Program) RETURN n")
         assert any("UNWIND value" in line for line in plan)
-        assert any(line.startswith("SCAN n0") for line in plan)
+        assert any(line.startswith("SEARCH n0") for line in plan)
 
     def test_dynamic_pattern_value_is_planned_without_a_row(self, graph: Graph) -> None:
         plan = graph.explain(

@@ -4,6 +4,7 @@
 """Tests for lexing query source text."""
 
 import dataclasses
+import typing
 
 import pytest
 
@@ -197,3 +198,49 @@ class TestLexer:
     def test_range_dots_are_not_part_of_a_number(self) -> None:
         tokens = Lexer.tokenize("1..3")
         assert [token.value for token in tokens[:-1]] == [1, ".", ".", 3]
+
+
+class TestGqlVocabulary:
+    """Verify the GQL keywords and the dash comment rule."""
+
+    KEYWORDS: typing.ClassVar[tuple[str, ...]] = (
+        "INSERT",
+        "FOR",
+        "FILTER",
+        "OFFSET",
+        "NODETACH",
+        "NULLS",
+        "FIRST",
+        "LAST",
+        "ALL",
+        "TRAIL",
+        "WALK",
+        "SIMPLE",
+        "ACYCLIC",
+        "LET",
+        "NEXT",
+        "GROUP",
+        "ORDINALITY",
+    )
+
+    def test_new_keywords_are_reserved(self) -> None:
+        """Require every new GQL word to lex as a keyword."""
+        for word in self.KEYWORDS:
+            token = Lexer.tokenize(word)[0]
+            assert token.kind is TokenKind.KEYWORD, word
+            assert token.value == word
+
+    def test_similar_identifiers_are_not_keywords(self) -> None:
+        """Require longer identifiers to stay identifiers."""
+        for word in ("inserts", "foreach", "filtered", "grouping", "offsets", "next_step"):
+            assert Lexer.tokenize(word)[0].kind is TokenKind.IDENTIFIER, word
+
+    def test_dash_comment_is_skipped(self) -> None:
+        """Require a dash comment to be ignored."""
+        tokens = Lexer.tokenize("MATCH (n) -- explanation\nRETURN n")
+        assert [token.value for token in tokens[:3]] == ["MATCH", "(", "n"]
+
+    def test_dash_comment_cannot_follow_a_pattern(self) -> None:
+        """Require an abutting dash pair after a pattern to fail."""
+        with pytest.raises(QuerySyntaxError, match="undirected relationship"):
+            Lexer.tokenize("MATCH (a)--(b) RETURN b")

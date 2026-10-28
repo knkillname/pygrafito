@@ -1,9 +1,10 @@
 # Query language reference
 
 :::{note}
-This page describes the transitional Cypher-flavored dialect that the current release executes.
-The target language contract is the [GQL profile](gql-profile.md). The profile marks canonical
-forms that are not yet implemented as target or gated.
+This page describes the dialect the current release executes. GQL spellings are canonical; the
+compatibility aliases in the [GQL profile](gql-profile.md) are accepted with identical semantics.
+Constructs the profile lists but this release cannot execute are rejected with a positioned error
+that names the follow-up change; see [Gated constructs](#gated-constructs).
 :::
 
 This page is the complete reference for the `pygrafito` query dialect: grammar, pattern
@@ -42,15 +43,19 @@ A statement is a non-empty ordered sequence of clauses:
 
 ```text
 { [OPTIONAL] MATCH <path pattern> [, <path pattern> ...] [WHERE <expression>]
+  | FOR <identifier> IN <expression>
   | UNWIND <expression> AS <identifier>
+  | FILTER [WHERE] <expression>
   | WITH [DISTINCT] <projection> [WHERE <expression>]
-    [ORDER BY <sort item> [, <sort item> ...]] [SKIP <expression>] [LIMIT <expression>] }
-[{CREATE <path pattern>
+    [ORDER BY <sort item> [, <sort item> ...]] [OFFSET|SKIP <expression>] [LIMIT <expression>] }
+[{INSERT <path pattern>
+  | CREATE <path pattern>
   | MERGE <path pattern> [ON CREATE SET <assignments>] [ON MATCH SET <assignments>]
-  | SET | REMOVE | DELETE | DETACH DELETE} ...]
-[RETURN [DISTINCT] <projection> [, <projection> ...]
+  | SET | REMOVE | DELETE | DETACH DELETE | NODETACH DELETE} ...]
+[RETURN [ALL | DISTINCT] <projection> [, <projection> ...]
+ | RETURN *]
  [ORDER BY <sort item> [, <sort item> ...]]
- [SKIP <expression>]
+ [OFFSET|SKIP <expression>]
  [LIMIT <expression>]]
 [;]
 ```
@@ -58,35 +63,53 @@ A statement is a non-empty ordered sequence of clauses:
 A `MATCH` clause carries one or more comma-separated path patterns and an
 optional `WHERE`; `OPTIONAL MATCH` uses the same shape with left-join semantics.
 A statement may contain several `MATCH` clauses: each clause is a stage joined
-against the rows produced by the previous one. `UNWIND` is another read stage
-and a row source. `MATCH` and `UNWIND` are optional when the statement contains
-a write clause, and `RETURN` is optional in that case too. A read statement
-requires at least one row source and a `RETURN`. Every read stage precedes every
-write clause, and `RETURN` is at most once and always last. Multiple statements
-are rejected.
+against the rows produced by the previous one. `FOR` (with `UNWIND` as its
+alias) is another read stage and a row source, and `FILTER` (with a stage-level
+`WHERE` as its alias) keeps only rows whose predicate is true. `MATCH` and
+`FOR` are optional when the statement contains a write clause, and `RETURN` is
+optional in that case too. A read statement requires at least one row source
+and a `RETURN`. Every read stage precedes every write clause, and `RETURN` is
+at most once and always last. Multiple statements are rejected.
 
-## UNWIND
+## FOR
 
-`UNWIND` expands a list-valued expression into one row per element:
+`FOR` expands a list-valued expression into one row per element. `UNWIND
+<expression> AS <variable>` is accepted as the compatibility alias:
 
 ```text
-UNWIND $rows AS row ...
-UNWIND [36, 37, 40] AS cycles ...
+FOR row IN $rows ...
+FOR cycles IN [36, 37, 40] ...
 ```
 
 A null value or an empty list produces no rows. A value that is not a list is a
 query error. The bound variable is available to later stages and write clauses,
-and `UNWIND` may serve as the only row source of a read statement:
+and `FOR` may serve as the only row source of a read statement:
 
 ```python
 graph.query(
-    "UNWIND $rows AS row MERGE (n:Program {designation: row.designation})",
+    "FOR row IN $rows MERGE (n:Program {designation: row.designation})",
     {"rows": [{"designation": "Tron"}, {"designation": "Quorra"}]},
 )
-graph.query("UNWIND [1, 2, 3] AS value RETURN value")
+graph.query("FOR value IN [1, 2, 3] RETURN value")
 ```
 
 A row can be a mapping, so `row.designation` reads a field from the current row.
+`WITH ORDINALITY` and `WITH OFFSET` are gated until `add-gql-composition`.
+
+## FILTER
+
+`FILTER` keeps only the rows whose boolean predicate is true. `FILTER WHERE` is
+the explicit spelling, and a `WHERE` attached to a `WITH` stage is its alias:
+
+```text
+MATCH (n:Program) FILTER n.cycles > 36 RETURN n
+MATCH (n:Program) WITH n WHERE n.cycles > 36 RETURN n
+```
+
+A filter never introduces a binding. `MATCH ... WHERE` stays part of the match
+stage: it filters matches before a later stage sees them, and an
+`OPTIONAL MATCH ... WHERE` filters that optional match rather than the input
+rows.
 
 ## Pattern property expressions
 
@@ -113,13 +136,21 @@ property map:
 ```text
 (n)
 (:Program)
-(p:Program:ISO)
+(p:Program&ISO)
+(p:Program|Agent)
+(p:Program&!ISO)
+(p:%)
+(p IS Program&ISO)
 (p:Program {designation: 'Quorra', cycles: 36})
+(n:Program WHERE n.cycles > 36)
 ```
 
-Labels are a conjunction: every listed label must be present. Property map
-entries compare stored values with the dialect's equality rules. An anonymous
-node still participates in path matching but is not bound to a variable.
+Labels form an expression: `&` is conjunction, `|` disjunction, `!` negation,
+and `%` the wildcard. `IS` is accepted as the explicit form in place of `:`.
+`:A:B` remains a conjunction alias. Property map entries compare stored values
+with the dialect's equality rules, and an inline `WHERE` predicate is scoped to
+that element. An anonymous node still participates in path matching but is not
+bound to a variable.
 
 Property keys may contain dots, spaces, and other punctuation when written in
 backticks:
@@ -138,22 +169,25 @@ direction, and an optional property map:
 (a)-[r:ALLIES_WITH]->(b)          directed, forward
 (a)<-[r:ALLIES_WITH]-(b)          directed, reverse
 (a)-[r:ALLIES_WITH]-(b)           any incident relationship
-(a)-[r:ALLIES_WITH|TRUSTS]->(b)   label alternatives
+(a)~[r:ALLIES_WITH]~(b)           undirected relationship only
+(a)-[r:ALLIES_WITH|TRUSTS]->(b)   label disjunction
 (a)-[r {since_cycle: 2020}]->(b)  property filter
-(a)-->(b)                         anonymous directed relationship
-(a)-[:ALLIES_WITH*1..3]->(b)      quantified, bounded
+(a)->(b)                          anonymous directed relationship
+(a)-(b)                           anonymous, any direction
+(a)-[:ALLIES_WITH*1..3]->(b)      legacy quantifier, bounded
+(a)-[r:TRUSTS WHERE r.since_cycle > 2010]->(b)  inline predicate
 ```
 
 A bound relationship snapshot preserves its endpoints, labels, and directed
 flag even when the pattern traverses it against its stored direction. A
-`:LABEL` filter matches a relationship carrying that label; a relationship may
-carry several labels at once.
+relationship label expression supports the same operators as a node label
+expression. `-->` and `<--` are accepted as aliases for `->` and `<-`.
 
-The arrows are storage-direction constraints: `-->` matches only directed
-relationships traversed forward, and `<--` matches only directed relationships
-traversed backward. The undirected form `--` matches every incident
-relationship, including an undirected one. An undirected relationship does not
-match `-->` or `<--` in this transitional dialect.
+The arrows are storage-direction constraints: `->` matches only directed
+relationships traversed forward, `<-` only directed relationships traversed
+backward, `-` matches every incident relationship, and `~` matches only
+relationships stored as undirected. `--` is a line comment, not an arrow; see
+[Comments](#comments).
 
 ## Variable-length relationships
 
@@ -168,10 +202,15 @@ A relationship may carry a quantifier after its labels:
 
 Every hop applies the pattern's direction, label alternatives, and property
 map. An arrow quantified pattern cannot follow an undirected relationship; use
-the `--` form to include undirected relationships in a quantified path. The
+the `-` form to include undirected relationships in a quantified path. The
 upper bound is required: a bare `*` or an open range such as `*1..` is rejected,
 because the engine never explores an unbounded trail space. Bounds are
 non-negative integers and the lower bound cannot exceed the upper bound.
+
+The canonical `{n,m}` quantifier is gated until `add-gql-path-semantics`: it
+raises a positioned error naming that change and is never interpreted as the
+legacy form. The legacy `*n..m` quantifier always means a relationship-unique
+trail.
 
 Trails are relationship-unique: one match never uses the same relationship
 twice, while nodes may repeat. That is the same rule the Python `paths()` API
@@ -261,7 +300,8 @@ MATCH (a:Program)-[:ALLIES_WITH]->(b) WITH a, count(*) AS friends RETURN a, frie
 MATCH (n:Program) WITH n.designation AS name WHERE name STARTS WITH 'Q' RETURN name
 ```
 
-A `WITH` stage supports `DISTINCT`, `WHERE`, `ORDER BY`, `SKIP`, and `LIMIT`, and
+A `WITH` stage supports `DISTINCT`, `FILTER` (with `WHERE` as its alias),
+`ORDER BY`, `OFFSET` (with `SKIP` as its alias), and `LIMIT`, and
 its aggregate aliases are ordinary names downstream. This is how a grouped result
 is filtered, ordered, or paginated:
 
@@ -290,28 +330,32 @@ A write clause operates on the rows produced by `MATCH` or `UNWIND`, or on a
 single empty row when the statement has no row source. Write clauses run in
 source order, and each one observes the mutations of the clauses before it.
 
-### CREATE
+### INSERT
 
-`CREATE` creates nodes and relationships from one pattern. A node pattern whose
-variable is not yet bound creates a node; a node pattern whose variable is
-already bound refers to that node. A created relationship needs at most one
-label, the `-->` direction, and both endpoints already bound. An unlabeled
-relationship is created when the pattern names no label:
+`INSERT` creates nodes and relationships from one pattern. `CREATE` is the
+compatibility alias for a data pattern:
 
 ```python
 graph.query(
     "MATCH (a:Program {designation: 'Kevin Flynn'})-[x:ALLIES_WITH]->(b) "
-    "CREATE (a)-[r:TRUSTS {since_cycle: 2020}]->(b)"
+    "INSERT (a)-[r:TRUSTS {since_cycle: 2020}]->(b)"
 )
-graph.query("CREATE (n:Program {designation: 'Quorra', cycles: 37})")
+graph.query("INSERT (n:Program {designation: 'Quorra', cycles: 37})")
 # An unlabeled relationship:
 graph.query(
     "MATCH (a:Program {designation: 'Kevin Flynn'}), "
-    "(b:Program {designation: 'Quorra'}) CREATE (a)-[r]->(b)"
+    "(b:Program {designation: 'Quorra'}) INSERT (a)-[r]->(b)"
 )
 ```
 
-`CREATE` never matches an existing element. Property values in a create pattern
+An `INSERT` pattern creates new elements. A node pattern whose variable is not
+yet bound creates a node; a node pattern whose variable is already bound refers
+to that node. A created relationship needs at most one label, the `->`
+direction, and both endpoints already bound. An unlabeled relationship is
+created when the pattern names no label. `CREATE GRAPH` and `INSERT GRAPH` are
+out of profile.
+
+`INSERT` never matches an existing element. Property values in a create pattern
 may be expressions evaluated against the current row, and a null entry is
 ignored.
 
@@ -367,11 +411,13 @@ element unchanged.
 
 `DELETE` removes relationships and disconnected nodes. A node that still has an
 incident relationship is rejected unless `DETACH DELETE` is used, which removes
-its incident relationships first:
+its incident relationships first. `NODETACH DELETE` is the explicit
+non-detaching form and behaves exactly as `DELETE`:
 
 ```python
 graph.query("MATCH (a)-[r:TRUSTS]->(b) DELETE r")
 graph.query("MATCH (n:Program {designation: 'Tron'}) DETACH DELETE n")
+graph.query("MATCH (n:Program {designation: 'Quorra'}) NODETACH DELETE n")
 ```
 
 A `RETURN` clause can still project an element deleted by the same statement.
@@ -484,10 +530,15 @@ execution error rather than returning a coerced value.
 ## Projection and result columns
 
 `RETURN` projects expressions, aliases, and node, relationship, or path values.
-A column takes its alias when present and otherwise its source expression text:
+A column takes its alias when present and otherwise its source expression text.
+`RETURN ALL` is the explicit default, and `RETURN *` projects every variable in
+scope in introduction order. `RETURN NO BINDINGS` is gated until
+`add-gql-composition`:
 
 ```text
 RETURN n.designation AS name, n.cycles
+RETURN ALL n.designation AS name
+RETURN *
 ```
 
 produces columns `name` and `n.cycles` in that order. Duplicate column names
@@ -523,17 +574,22 @@ semantic error.
 
 `ORDER BY` accepts projected expressions, projected aliases, or expressions
 that can be evaluated from the match binding. Each key may be followed by `ASC`
-(the default) or `DESC`; earlier keys are more significant.
+(the default) or `DESC`, and by `NULLS FIRST` or `NULLS LAST`. Earlier keys are
+more significant.
 
-Nulls sort last in ascending order and first in descending order. Other values
-order by type family: booleans, numbers, strings, then lists. Entity and map
-values are not orderable and raise an execution error if used as a sort key.
+By default, nulls sort last in ascending order and first in descending order.
+An explicit `NULLS FIRST` or `NULLS LAST` overrides that placement without
+changing the value order. Other values order by type family: booleans, numbers,
+strings, then lists. Entity and map values are not orderable and raise an
+execution error if used as a sort key.
 
-`SKIP` and `LIMIT` accept non-negative integers or parameters. Negative,
-non-integer, and boolean values are rejected before SQL runs.
+`OFFSET` (with `SKIP` as its alias) and `LIMIT` accept non-negative integers or
+parameters. Negative, non-integer, and boolean values are rejected before SQL
+runs.
 
 ```text
-MATCH (n:Program) RETURN n.designation ORDER BY n.cycles DESC SKIP 2 LIMIT 5
+MATCH (n:Program) RETURN n.designation ORDER BY n.cycles DESC OFFSET 2 LIMIT 5
+MATCH (n:Program) RETURN n.designation ORDER BY n.rank ASC NULLS FIRST
 ```
 
 ## Parameters and injection safety
@@ -636,6 +692,16 @@ Write failures follow the same rule. A storage failure such as a protected
 deletion, a missing element, or an invalid stored value is raised as
 `QueryExecutionError` rather than as a storage or domain exception.
 
+A construct that the GQL profile lists but this release cannot execute is
+rejected with a positioned `QuerySemanticError` that names the construct and the
+follow-up change. For example, the `{n,m}` quantifier, an explicit path mode, and
+the `<~`, `~>`, and `<->` directions report that they land with
+`add-gql-path-semantics`; `LET`, `NEXT`, `GROUP BY`, `WITH ORDINALITY`,
+`WITH OFFSET`, and `RETURN NO BINDINGS` report `add-gql-composition`. A gated
+construct stops the whole statement before execution, so a gated clause never
+writes data. Constructs the profile does not list remain out of profile and keep
+their existing explicit rejection.
+
 ## Consistent execution snapshot
 
 A statement evaluates against one consistent graph state. `Graph.query` and
@@ -663,13 +729,16 @@ Backtick-quoted identifiers may contain spaces, dots, and escaped backticks
 
 ```text
 statement        = { clause } [";"]
-clause           = match-clause | unwind-clause | with-clause | create-clause
-                 | merge-clause | set-clause | remove-clause | delete-clause
-                 | return-clause
+clause           = match-clause | for-clause | unwind-clause | filter-clause
+                 | with-clause | insert-clause | create-clause | merge-clause
+                 | set-clause | remove-clause | delete-clause | return-clause
 match-clause     = [ "OPTIONAL" ] "MATCH" path-pattern { "," path-pattern } [where-clause]
+for-clause       = "FOR" identifier "IN" expression
 unwind-clause    = "UNWIND" expression "AS" identifier
+filter-clause    = "FILTER" [ "WHERE" ] expression
 with-clause      = "WITH" [ "DISTINCT" ] return-item { "," return-item }
-                   [where-clause] [order-clause] [skip-clause] [limit-clause]
+                   [where-clause] [order-clause] [offset-clause] [limit-clause]
+insert-clause    = "INSERT" path-pattern
 create-clause    = "CREATE" path-pattern
 merge-clause     = "MERGE" path-pattern [on-create] [on-match]
 on-create        = "ON" "CREATE" "SET" set-item { "," set-item }
@@ -680,30 +749,68 @@ set-item         = identifier "." key "=" expression
 remove-clause    = "REMOVE" remove-item { "," remove-item }
 remove-item      = identifier "." key
                  | identifier { ":" label }
-delete-clause    = ["DETACH"] "DELETE" identifier { "," identifier }
-return-clause    = "RETURN" ["DISTINCT"] return-item { "," return-item }
-                   [order-clause] [skip-clause] [limit-clause]
+delete-clause    = [ "DETACH" | "NODETACH" ] "DELETE" identifier { "," identifier }
+return-clause    = "RETURN" [ "ALL" | "DISTINCT" ] return-item { "," return-item }
+                   [order-clause] [offset-clause] [limit-clause]
+                 | "RETURN" "*" [order-clause] [offset-clause] [limit-clause]
 path-pattern     = [identifier "="] node-pattern
                    { relationship-pattern node-pattern }
-node-pattern     = "(" [identifier] { ":" label } [property-map] ")"
-relationship     = "-" [ "[" [identifier] [":" label {"|" label}]
-                   [quantifier] [property-map] "]" ] "-" [">"]
-                 | "<" "-" [ "[" [identifier] [":" label {"|" label}]
-                   [quantifier] [property-map] "]" ] "-"
+node-pattern     = "(" [identifier] [label-spec] [property-map] [where-clause] ")"
+label-spec       = ( ":" | "IS" ) label-or
+label-or         = label-and { "|" label-and }
+label-and        = label-not { ( "&" | ":" ) label-not }
+label-not        = [ "!" ] ( label | "%" )
+relationship     = "-" [ "[" [identifier] [label-spec] [quantifier]
+                   [property-map] [where-clause] "]" ] ( "->" | "-" )
+                 | "<-" [ "[" [identifier] [label-spec] [quantifier]
+                   [property-map] [where-clause] "]" ] "-"
+                 | "->" | "<-" | "-" | "~"
 quantifier       = "*" [ INTEGER [ ".." [ INTEGER ] ] ]
 property-map     = "{" [ key ":" expression { "," key ":" expression } ] "}"
 where-clause     = "WHERE" expression
 return-item      = expression [ "AS" identifier ]
 order-clause     = "ORDER" "BY" sort-item { "," sort-item }
-sort-item        = expression [ "ASC" | "DESC" ]
-skip-clause      = "SKIP" expression
+sort-item        = expression [ "ASC" | "DESC" | "ASCENDING" | "DESCENDING" ]
+                   [ "NULLS" ( "FIRST" | "LAST" ) ]
+offset-clause    = ( "OFFSET" | "SKIP" ) expression
 limit-clause     = "LIMIT" expression
 ```
 
 An identifier is a plain name or a backtick-quoted name. A label, key, or alias
-may be backtick-quoted. A write clause may omit `MATCH` and `RETURN`, and
-`RETURN` is always the final clause. Expression precedence is listed in
+may be backtick-quoted. Keywords are reserved, but a keyword used where a name
+is expected — an alias, a label, or a property key — is read as that name. A
+write clause may omit `MATCH` and `RETURN`, and `RETURN` is always the final
+clause. Expression precedence is listed in
 [Filtering expressions](#filtering-expressions).
+
+## Comments
+
+The dialect accepts `//` line comments, `/* ... */` block comments, and `--`
+line comments. `-->` and `<--` are arrows and are never read as comments. A `--`
+that immediately follows a node or relationship pattern is a syntax error, so
+`MATCH (a)--(b)` can never be silently truncated into `MATCH (a)`:
+
+```text
+MATCH (n:Program) -- keep the programs
+RETURN count(*) AS total
+```
+
+Use `-` for an undirected relationship.
+
+## Gated constructs
+
+A construct the profile lists but this release cannot execute raises a
+positioned `QuerySemanticError` that names the construct and the follow-up
+change, and the statement does not execute:
+
+| Construct | Follow-up change |
+| --- | --- |
+| `{n,m}` quantifier | `add-gql-path-semantics` |
+| `WALK`, `TRAIL`, `SIMPLE`, `ACYCLIC` | `add-gql-path-semantics` |
+| `<~`, `~>`, `<->` | `add-gql-path-semantics` |
+| `WITH ORDINALITY`, `WITH OFFSET` | `add-gql-composition` |
+| `LET`, `NEXT`, `GROUP BY` | `add-gql-composition` |
+| `RETURN NO BINDINGS` | `add-gql-composition` |
 
 ## Unsupported constructs
 
@@ -715,6 +822,7 @@ The following are recognized and rejected with a query error before execution:
 - whole-map assignment (`SET n = {...}`) and merge assignment (`SET n += {...}`)
 - index access such as `n.list[0]`
 - `MERGE` over a quantified pattern, a path variable, or more than one pattern
+- `INSERT GRAPH` and `CREATE GRAPH`
 
 These boundaries are deliberate. Extending the dialect requires its own
 specification change rather than silently accepting partial behavior.

@@ -13,12 +13,14 @@ from pygrafito.engine.query.ast import (
     Create,
     Delete,
     Expression,
+    Filter,
     FunctionCall,
     IsNull,
     ListLiteral,
     Literal,
     Match,
     Merge,
+    NodePattern,
     Operators,
     Parameter,
     PathPattern,
@@ -37,6 +39,7 @@ from pygrafito.engine.query.ast import (
     Variable,
     With,
 )
+from pygrafito.engine.query.labels import LabelExpressions
 from pygrafito.engine.query.tokens import Span
 from pygrafito.engine.query.values import (
     ArgumentKind,
@@ -90,11 +93,14 @@ class SortSpec:
         Projected column index when the key resolves to a projection.
     expression : Expression | None, optional
         Expression evaluated against the match binding.
+    nulls_first : bool | None, optional
+        Explicit null placement, or ``None`` for the direction default.
     """
 
     descending: bool
     column: int | None = None
     expression: Expression | None = None
+    nulls_first: bool | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -182,7 +188,20 @@ class UnwindStage:
     variable: str
 
 
-type ReadStage = MatchStage | OptionalMatchStage | UnwindStage | WithStage
+@dataclasses.dataclass(frozen=True, slots=True)
+class FilterStage:
+    """One ``FILTER`` stage that keeps rows whose predicate is true.
+
+    Parameters
+    ----------
+    where : Expression
+        Boolean expression evaluated against the current row.
+    """
+
+    where: Expression
+
+
+type ReadStage = MatchStage | OptionalMatchStage | UnwindStage | WithStage | FilterStage
 type WriteClause = Create | Merge | Set | Remove | Delete
 
 
@@ -319,6 +338,9 @@ class SemanticAnalyzer:
                 stages.append(self._bind_with(clause))
             elif isinstance(clause, Unwind):
                 stages.append(self._bind_unwind(clause))
+            elif isinstance(clause, Filter):
+                self._validate_expression(clause.where, aggregates_allowed=False)
+                stages.append(FilterStage(where=clause.where))
             elif isinstance(clause, Create):
                 self._bind_create(clause.pattern)
                 write_clauses.append(clause)
@@ -384,6 +406,18 @@ class SemanticAnalyzer:
         """
         if clause is None:
             return ()
+        if clause.star:
+            items = tuple(
+                ReturnColumn(
+                    expression=Variable(name=name),
+                    name=name,
+                    text=name,
+                    aggregate=False,
+                )
+                for name in self._kinds
+            )
+            self._require_unique_columns(items)
+            return items
         items = tuple(self._column(item) for item in clause.items)
         self._require_unique_columns(items)
         return items
@@ -505,8 +539,10 @@ class SemanticAnalyzer:
                 raise QuerySemanticError(message)
         for node in pattern.nodes:
             self._validate_property_map(node.properties)
+            self._validate_created_element(node)
         for relationship in pattern.relationships:
             self._validate_property_map(relationship.properties)
+            self._validate_created_element(relationship)
         for node in pattern.nodes:
             if node.variable is None:
                 continue
@@ -559,8 +595,10 @@ class SemanticAnalyzer:
         bound = frozenset(self._kinds)
         for node in pattern.nodes:
             self._validate_property_map(node.properties)
+            self._validate_created_element(node)
         for relationship in pattern.relationships:
             self._validate_property_map(relationship.properties)
+            self._validate_created_element(relationship)
         for index, _relationship in enumerate(pattern.relationships):
             endpoints = (pattern.nodes[index], pattern.nodes[index + 1])
             for node in endpoints:
@@ -726,6 +764,12 @@ class SemanticAnalyzer:
                     relationship.variable,
                     VariableKind.RELATIONSHIP_LIST if quantified else VariableKind.RELATIONSHIP,
                 )
+        for node in pattern.nodes:
+            if node.where is not None:
+                self._validate_expression(node.where, aggregates_allowed=False)
+        for relationship in pattern.relationships:
+            if relationship.where is not None:
+                self._validate_expression(relationship.where, aggregates_allowed=False)
 
     @staticmethod
     def _validate_quantifier(relationship: RelationshipPattern) -> None:
@@ -778,6 +822,34 @@ class SemanticAnalyzer:
                 f"variable {name!r} is already bound as a "
                 f"{existing.value} and cannot be a {kind.value}"
             )
+            raise QuerySemanticError(message)
+
+    @classmethod
+    def _validate_created_element(cls, pattern: NodePattern | RelationshipPattern) -> None:
+        """Reject unsupported constraints on a created element.
+
+        Parameters
+        ----------
+        pattern : NodePattern | RelationshipPattern
+            Created element pattern.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the pattern carries an inline predicate or a label expression
+            that is not a plain conjunction.
+        """
+        if pattern.where is not None:
+            message = "an inline predicate is not supported in a write pattern"
+            raise QuerySemanticError(message)
+        if (
+            pattern.label_expression is not None
+            and LabelExpressions.conjunction(pattern.label_expression) is None
+        ):
+            if isinstance(pattern, RelationshipPattern):
+                message = "a created relationship must have at most one label"
+            else:
+                message = "a written node must use a conjunction of labels"
             raise QuerySemanticError(message)
 
     def _validate_property_map(self, entries: Iterable[PropertyEntry]) -> None:
@@ -948,17 +1020,30 @@ class SemanticAnalyzer:
                     SortSpec(
                         descending=sort.descending,
                         column=aliases[sort.expression.name],
+                        nulls_first=sort.nulls_first,
                     )
                 )
                 continue
             key = self._expression_key(sort.expression)
             if key in expression_indexes:
-                specs.append(SortSpec(descending=sort.descending, column=expression_indexes[key]))
+                specs.append(
+                    SortSpec(
+                        descending=sort.descending,
+                        column=expression_indexes[key],
+                        nulls_first=sort.nulls_first,
+                    )
+                )
                 continue
             self._validate_expression(sort.expression, aggregates_allowed=False)
             if has_aggregates:
                 self._validate_grouped(sort.expression, grouping_keys)
-            specs.append(SortSpec(descending=sort.descending, expression=sort.expression))
+            specs.append(
+                SortSpec(
+                    descending=sort.descending,
+                    expression=sort.expression,
+                    nulls_first=sort.nulls_first,
+                )
+            )
         return tuple(specs)
 
     def _validate_pagination(self, expression: Expression | None, clause: str) -> None:
@@ -1450,6 +1535,7 @@ class SemanticAnalyzer:
 
 __all__ = [
     "Analysis",
+    "FilterStage",
     "MatchStage",
     "OptionalMatchStage",
     "ReadStage",

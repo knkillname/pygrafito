@@ -13,15 +13,14 @@ tier of every construct the tour relies on and the follow-up change that will mi
 
 | Tour | Constructs | Tier | Profile section | Migrated by |
 | --- | --- | --- | --- | --- |
-| `01-match.gql` | `MATCH`, `OPTIONAL MATCH`, `MATCH ... WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `type()` | canonical GQL; `type()` is a pygrafito extension | Canonical surface; Extensions | `adopt-gql-query-frontend` for `FILTER` alternatives |
-| `02-write.gql` | `CREATE`, `MERGE`, `SET`, `DETACH DELETE`, `labels()`, `type()` | `CREATE` is a synthetic alias for `INSERT`; `MERGE`, `labels()`, and `type()` are pygrafito extensions | Data modification; Extensions | `adopt-gql-query-frontend` for `INSERT` |
+| `01-match.gql` | `MATCH`, `OPTIONAL MATCH`, `MATCH ... WHERE`, `RETURN`, `ORDER BY`, `LIMIT`, `type()` | canonical GQL; `type()` is a pygrafito extension | Canonical surface; Extensions | `adopt-gql-query-frontend` (migrated) |
+| `02-write.gql` | `INSERT`, `MERGE`, `SET`, `DETACH DELETE`, `labels()`, `type()` | `INSERT` and `SET` are canonical GQL; `MERGE`, `labels()`, and `type()` are pygrafito extensions | Data modification; Extensions | `adopt-gql-query-frontend` (migrated) |
 | `03-compose.gql` | `UNWIND`, `WITH`, implicit grouping, `MERGE` | `UNWIND` is a synthetic alias for `FOR`; `WITH`, implicit grouping, and `MERGE` are pygrafito extensions | Synthetic aliases; Extensions | `add-gql-composition` |
-| `04-paths.gql` | `*n..m`, `-->`, `--`, label alternatives, path variables | legacy quantifier compatibility (`TRAIL`); double-dash directions are synthetic aliases | Legacy quantifier; Edge directions | `add-gql-path-semantics` |
+| `04-paths.gql` | `*n..m`, `-->`, label alternatives, path variables | legacy quantifier compatibility (`TRAIL`); double-dash directions are synthetic aliases | Legacy quantifier; Edge directions | `add-gql-path-semantics` |
 
-The tours do not use target-only syntax: no `INSERT`, `FILTER`, `FOR`, `LET`, `NEXT`, `GROUP BY`,
-`~`, or `{n,m}`, and no single-dash anonymous `->` (anonymous edges use `-->`). They use `//`
-comments only, because `--` is not a comment in the current release. A test enforces both rules.
+The tours do not use target-only syntax: no `LET`, `NEXT`, `GROUP BY`, `{n,m}`, path modes,
+`RETURN NO BINDINGS`, or the `<~`, `~>`, and `<->` directions. They use `//` and `--` comments, and
+the single-dash arrows are now canonical. A test enforces the forbidden set.
 
 `03-compose.gql` binds its `UNWIND` rows with `.param`, because the current release does not accept
-map literals as list elements. That is a limitation of the transitional dialect, not of the target
-profile.
+map literals as list elements. That is a limitation of the current dialect, not of the profile.
