@@ -35,8 +35,8 @@
 
 ## 5. Release commit and tag
 
-- [ ] 5.1 Review `git status` and `git diff`; verify the release commit contains only the version, classifier, changelog, documentation, and this OpenSpec change, with no build output or local artifacts. Commit as `chore: release 1.0.0` and verify with `git show --stat HEAD`.
-- [ ] 5.2 Create an annotated `v1.0.0` tag on the release commit; verify `git tag -n v1.0.0` shows the annotation and `git rev-parse v1.0.0^{}` matches `git rev-parse HEAD`. Do not push the tag in this task.
+- [x] 5.1 Review `git status` and `git diff`; verify the release commit contains only the version, classifier, changelog, documentation, and this OpenSpec change, with no build output or local artifacts. Commit as `chore: release 1.0.0` and verify with `git show --stat HEAD`.
+- [x] 5.2 Create an annotated `v1.0.0` tag on the release commit; verify `git tag -n v1.0.0` shows the annotation and `git rev-parse v1.0.0^{}` matches `git rev-parse HEAD`. Do not push the tag in this task.
 - [ ] 5.3 After explicit maintainer approval, push the release commit and the `v1.0.0` tag; verify the release workflow's check, test, tag/version, build, twine, and publish steps succeed and PyPI serves `pygrafito 1.0.0`.
 
 ## 6. Post-release verification
