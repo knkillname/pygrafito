@@ -1,0 +1,11 @@
+name: pygrafito
+
+services:
+  test-sqlite:
+    build:
+      context: docker
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      COVERAGE_FILE: /tmp/.coverage

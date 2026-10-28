@@ -22,6 +22,7 @@ class PropertyCodec:
 
     INTEGER_MIN: int = -(2**63)
     INTEGER_MAX: int = 2**63 - 1
+    CONTROL_CHARACTER_LIMIT: int = 0x20
 
     def validate_value(self, value: object) -> Value:
         """Validate a scalar or homogeneous list of scalars.
@@ -237,7 +238,114 @@ class PropertyCodec:
             If the key is not a non-empty string or contains a null character.
         """
         path = self.json_path(key)
-        return "'" + path.replace("'", "''") + "'"
+        return self._sql_literal(path)
+
+    def needs_property_scan(self, key: str) -> bool:
+        """Report whether a key cannot be addressed by a portable JSON path.
+
+        SQLite parses double quotes and control characters inside a quoted
+        label only from version 3.47. Earlier builds reject or miss those
+        paths, so the codec matches such keys by scanning the stored object
+        with ``json_each`` instead.
+
+        Parameters
+        ----------
+        key : str
+            Property key.
+
+        Returns
+        -------
+        bool
+            ``True`` when the key contains a double quote or a control
+            character.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        property_key = self.validate_identifier(key, "property key")
+        return any(char == '"' or ord(char) < self.CONTROL_CHARACTER_LIMIT for char in property_key)
+
+    def property_type_expression(self, props: str, key: str) -> str:
+        """Render the SQL type expression for one stored property.
+
+        Parameters
+        ----------
+        props : str
+            SQL expression that yields the stored property object, such as
+            ``nodes.props`` or ``NEW.props``.
+        key : str
+            Exact property key.
+
+        Returns
+        -------
+        str
+            An expression usable in a predicate, such as
+            ``json_type(nodes.props, '$."cycles"')`` or a correlated
+            ``json_each`` subquery for keys without a portable path.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        property_key = self.validate_identifier(key, "property key")
+        if self.needs_property_scan(property_key):
+            return self._scanned_property(props, property_key, "type")
+        return f"json_type({props}, {self.sql_json_path(property_key)})"
+
+    def property_value_expression(self, props: str, key: str) -> str:
+        """Render the SQL value expression for one stored property.
+
+        Parameters
+        ----------
+        props : str
+            SQL expression that yields the stored property object, such as
+            ``nodes.props`` or ``NEW.props``.
+        key : str
+            Exact property key.
+
+        Returns
+        -------
+        str
+            An expression usable in a predicate, such as
+            ``json_extract(nodes.props, '$."cycles"')`` or a correlated
+            ``json_each`` subquery for keys without a portable path.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        property_key = self.validate_identifier(key, "property key")
+        if self.needs_property_scan(property_key):
+            return self._scanned_property(props, property_key, "value")
+        return f"json_extract({props}, {self.sql_json_path(property_key)})"
+
+    def portable_index_columns(self, key: str) -> str | None:
+        """Render the index columns for one property key.
+
+        Parameters
+        ----------
+        key : str
+            Exact property key.
+
+        Returns
+        -------
+        str | None
+            A parenthesized expression list for ``CREATE INDEX``, or ``None``
+            when the key needs a scan and SQLite cannot index it portably.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        if self.needs_property_scan(key):
+            return None
+        path = self.sql_json_path(key)
+        return f"(json_extract(props, {path}), json_type(props, {path}))"
 
     def json_type(self, value: Value) -> str:
         """Return the SQLite JSON type reported for a property value.
@@ -338,6 +446,45 @@ class PropertyCodec:
             raise ValidationError(message)
         message = f"unsupported property value type: {type(value).__name__}"
         raise ValidationError(message)
+
+    @classmethod
+    def _scanned_property(cls, props: str, key: str, column: str) -> str:
+        """Render a correlated scan for one property of a stored object.
+
+        Parameters
+        ----------
+        props : str
+            SQL expression that yields the stored property object.
+        key : str
+            Exact property key.
+        column : str
+            ``json_each`` column to read, either ``type`` or ``value``.
+
+        Returns
+        -------
+        str
+            A correlated scalar subquery over ``json_each``.
+        """
+        return (
+            f"(SELECT property.{column} FROM json_each({props}) AS property "
+            f"WHERE property.key = {cls._sql_literal(key)})"
+        )
+
+    @classmethod
+    def _sql_literal(cls, value: str) -> str:
+        """Render text as an embeddable SQL string literal.
+
+        Parameters
+        ----------
+        value : str
+            Text to embed. Null characters must already have been rejected.
+
+        Returns
+        -------
+        str
+            The text with surrounding single quotes and doubled quotes.
+        """
+        return "'" + value.replace("'", "''") + "'"
 
     @staticmethod
     def _dumps(value: object) -> str:

@@ -100,6 +100,14 @@ class TestDeclaration(_ConstraintTestCase):
         after = graph._database.connection.execute("PRAGMA user_version").fetchone()
         assert before == after
 
+    @pytest.mark.parametrize("key", ['a"b', "a\nb"])
+    def test_special_key_is_enforced(self, graph: Graph, key: str) -> None:
+        constraint = graph.create_node_uniqueness_constraint("Program", key)
+        assert graph.constraints() == (constraint,)
+        graph.add_node("Program", **{key: "Tron"})
+        with pytest.raises(ConstraintViolationError):
+            graph.add_node("Program", **{key: "Tron"})
+
     def test_reopen_preserves_and_enforces(self, tmp_path: Path) -> None:
         path = tmp_path / "grid.db"
         with Graph.open(path) as graph:

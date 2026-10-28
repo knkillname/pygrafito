@@ -60,6 +60,19 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Show SQLite version
+        run: |
+          version=$(python -c "import sqlite3; print(sqlite3.sqlite_version)")
+          expected=$(sed -n 's/^ARG SQLITE_VERSION=//p' docker/Dockerfile)
+          echo "SQLite version: $version (Docker pin: $expected)"
+          {
+            echo "SQLite version: $version"
+            echo "Docker pin: $expected"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$version" != "$expected" ]; then
+            echo "::warning title=SQLite pin drift::CI runs SQLite $version but docker/Dockerfile pins $expected. Update SQLITE_VERSION and SQLITE_URL in docker/Dockerfile."
+          fi
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
         with:

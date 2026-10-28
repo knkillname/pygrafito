@@ -81,6 +81,15 @@ class TestDeclaration(_IndexTestCase):
         assert dict(graph.node(kevin.id)) == before
         assert [node.id for node in graph.find_nodes("Program")] == [kevin.id]
 
+    @pytest.mark.parametrize("key", ['a"b', "a\nb"])
+    def test_special_key_is_reported_and_matchable(self, graph: Graph, key: str) -> None:
+        index = graph.create_node_index(key)
+        tron = graph.add_node("Program", **{key: "Tron"})
+        assert graph.indexes() == (index,)
+        assert [node.id for node in graph.find_nodes("Program", **{key: "Tron"})] == [tron.id]
+        graph.drop_index(index)
+        assert graph.indexes() == ()
+
 
 class TestTransactionGuard(_IndexTestCase):
     """Verify index changes are rejected inside an explicit transaction."""

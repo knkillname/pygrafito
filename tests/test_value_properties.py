@@ -52,7 +52,9 @@ class TestValueProperties:
         )
     )
     SPECIAL_KEYS: typing.ClassVar[tuple[str, ...]] = (
+        '"',
         'a"b',
+        'a"b\nc',
         "a'b",
         "a\\b",
         "a\nb",

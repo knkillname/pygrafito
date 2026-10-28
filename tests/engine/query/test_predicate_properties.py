@@ -89,9 +89,11 @@ class TestPredicateProperties:
         parsed = Parser.parse_statement(statement)
         match = next(clause for clause in parsed.clauses if isinstance(clause, Match))
         compiled = Compiler(match).compile({})
-        path = PropertyCodec().sql_json_path(key)
-        assert f"json_type(n0.props, {path}) = 'text'" in compiled.sql
-        assert f"json_extract(n0.props, {path}) = ?" in compiled.sql
+        codec = PropertyCodec()
+        type_expression = codec.property_type_expression("n0.props", key)
+        value_expression = codec.property_value_expression("n0.props", key)
+        assert f"{type_expression} = 'text'" in compiled.sql
+        assert f"{value_expression} = ?" in compiled.sql
         assert compiled.arguments == ("Tron",)
 
     @hypothesis.given(key=KEY)

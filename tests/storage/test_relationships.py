@@ -195,6 +195,21 @@ class TestFind(_RelationshipTestCase):
         found = list(relationship_repository.find("ALLIES_WITH", {"since_cycle": 2020}))
         assert [item.id for item in found] == [matching.id]
 
+    @pytest.mark.parametrize("key", ['a"b', "a\nb"])
+    def test_find_by_special_property_key(self, repositories: Repositories, key: str) -> None:
+        node_repository, relationship_repository = repositories
+        first = node_repository.create()
+        second = node_repository.create()
+        matching = relationship_repository.create(
+            first.id,
+            "ALLIES_WITH",
+            second.id,
+            {key: "Tron"},
+        )
+        relationship_repository.create(first.id, "ALLIES_WITH", second.id, {key: "Clu"})
+        found = list(relationship_repository.find("ALLIES_WITH", {key: "Tron"}))
+        assert [item.id for item in found] == [matching.id]
+
     def test_all_relationships(self, repositories: Repositories) -> None:
         node_repository, relationship_repository = repositories
         first = node_repository.create()

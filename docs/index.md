@@ -140,5 +140,6 @@ api/errors
 :maxdepth: 2
 :caption: Contributing
 
+contributing/testing
 contributing/documentation-style
 ```

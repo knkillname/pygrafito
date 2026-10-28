@@ -299,7 +299,6 @@ class PredicateCompiler:
         QuerySemanticError
             If the value is not a storable property value.
         """
-        path = self._literal_path(key)
         if value is None:
             return "0"
         try:
@@ -307,28 +306,27 @@ class PredicateCompiler:
         except ValidationError as error:
             message = "query value is not a storable property value"
             raise QuerySemanticError(message) from error
+        type_expression = self._codec.property_type_expression(f"{table}.props", key)
+        value_expression = self._codec.property_value_expression(f"{table}.props", key)
         if isinstance(validated, bool):
             json_type = "true" if validated else "false"
             return self._add(
-                f"json_type({table}.props, {path}) = ? AND json_extract({table}.props, {path}) = ?",
+                f"{type_expression} = ? AND {value_expression} = ?",
                 json_type,
                 int(validated),
             )
         if isinstance(validated, (int, float)):
             return self._add(
-                f"json_type({table}.props, {path}) IN ('integer', 'real') "
-                f"AND json_extract({table}.props, {path}) = ?",
+                f"{type_expression} IN ('integer', 'real') AND {value_expression} = ?",
                 validated,
             )
         if isinstance(validated, str):
             return self._add(
-                f"json_type({table}.props, {path}) = 'text' "
-                f"AND json_extract({table}.props, {path}) = ?",
+                f"{type_expression} = 'text' AND {value_expression} = ?",
                 validated,
             )
         return self._add(
-            f"json_type({table}.props, {path}) = 'array' "
-            f"AND json_extract({table}.props, {path}) = ?",
+            f"{type_expression} = 'array' AND {value_expression} = ?",
             self._codec.comparison_value(validated),
         )
 
@@ -367,17 +365,16 @@ class PredicateCompiler:
             return f"NOT ({symbolic})"
         if value is None:
             return "NULL"
-        path = self._literal_path(key)
+        type_expression = self._codec.property_type_expression(f"{table}.props", key)
+        value_expression = self._codec.property_value_expression(f"{table}.props", key)
         if Values.is_number(value):
             return self._add(
-                f"json_type({table}.props, {path}) IN ('integer', 'real') "
-                f"AND json_extract({table}.props, {path}) {operator} ?",
+                f"{type_expression} IN ('integer', 'real') AND {value_expression} {operator} ?",
                 value,
             )
         if isinstance(value, str):
             return self._add(
-                f"json_type({table}.props, {path}) = 'text' "
-                f"AND json_extract({table}.props, {path}) {operator} ?",
+                f"{type_expression} = 'text' AND {value_expression} {operator} ?",
                 value,
             )
         return None
@@ -411,24 +408,25 @@ class PredicateCompiler:
             return "NULL"
         if not isinstance(value, str):
             return None
-        path = self._literal_path(key)
-        guard = f"json_type({table}.props, {path}) = 'text'"
+        type_expression = self._codec.property_type_expression(f"{table}.props", key)
+        value_expression = self._codec.property_value_expression(f"{table}.props", key)
+        guard = f"{type_expression} = 'text'"
         if operator == Operators.STARTS_WITH:
             return self._add(
-                f"{guard} AND instr(json_extract({table}.props, {path}), ?) = 1",
+                f"{guard} AND instr({value_expression}, ?) = 1",
                 value,
             )
         if operator == Operators.ENDS_WITH:
             if not value:
                 return self._add(guard)
             return self._add(
-                f"{guard} AND substr(json_extract({table}.props, {path}), -length(?)) = ?",
+                f"{guard} AND substr({value_expression}, -length(?)) = ?",
                 value,
                 value,
             )
         if operator == Operators.CONTAINS:
             return self._add(
-                f"{guard} AND instr(json_extract({table}.props, {path}), ?) > 0",
+                f"{guard} AND instr({value_expression}, ?) > 0",
                 value,
             )
         return None
@@ -451,22 +449,8 @@ class PredicateCompiler:
             SQL predicate.
         """
         operator = "IS NOT NULL" if negated else "IS NULL"
-        return f"json_type({table}.props, {self._literal_path(key)}) {operator}"
-
-    def _literal_path(self, key: str) -> str:
-        """Render a key as an embeddable SQL literal holding its JSON path.
-
-        Parameters
-        ----------
-        key : str
-            Exact property key.
-
-        Returns
-        -------
-        str
-            SQL string literal such as ``'$."a.b"'``.
-        """
-        return self._codec.sql_json_path(key)
+        type_expression = self._codec.property_type_expression(f"{table}.props", key)
+        return f"{type_expression} {operator}"
 
     def _add(self, template: str, *values: object) -> str:
         """Append placeholder values and return the SQL fragment.

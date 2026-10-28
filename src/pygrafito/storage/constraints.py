@@ -268,52 +268,55 @@ class ConstraintRegistry:
         Returns
         -------
         tuple[str, ...]
-            Support index, property trigger, and label trigger.
+            Support index when the key is indexable, then the property trigger
+            and the label trigger.
         """
         stem = self.name(constraint)
-        path = self._codec.sql_json_path(constraint.key)
+        key = constraint.key
         label = self._quote(constraint.scope)
         token = self._quote(self.token(constraint))
-        index = (
-            f"CREATE INDEX IF NOT EXISTS {stem}_idx ON relationships "
-            f"(json_extract(props, {path}), json_type(props, {path}))"
-        )
+        columns = self._codec.portable_index_columns(key)
+        new_type = self._codec.property_type_expression("NEW.props", key)
+        new_value = self._codec.property_value_expression("NEW.props", key)
+        other_type = self._codec.property_type_expression("other.props", key)
+        other_value = self._codec.property_value_expression("other.props", key)
+        current = "(SELECT props FROM relationships WHERE id = NEW.relationship_id)"
+        current_type = self._codec.property_type_expression(current, key)
+        current_value = self._codec.property_value_expression(current, key)
         props = (
             f"CREATE TRIGGER IF NOT EXISTS {stem}_props "
             f"BEFORE UPDATE OF props ON relationships "
             f"WHEN EXISTS (SELECT 1 FROM relationship_labels "
             f"WHERE relationship_id = NEW.id AND label = {label}) "
-            f"AND json_extract(NEW.props, {path}) IS NOT NULL "
+            f"AND {new_type} IS NOT NULL "
             f"BEGIN "
             f"SELECT RAISE(ABORT, {token}) WHERE EXISTS ("
             f"SELECT 1 FROM relationships other "
             f"JOIN relationship_labels other_label ON other_label.relationship_id = other.id "
             f"WHERE other.id != NEW.id AND other_label.label = {label} "
-            f"AND json_extract(other.props, {path}) IS NOT NULL "
-            f"AND json_extract(other.props, {path}) = json_extract(NEW.props, {path}) "
-            f"AND json_type(other.props, {path}) = json_type(NEW.props, {path})); "
+            f"AND {other_type} IS NOT NULL "
+            f"AND {other_value} = {new_value} "
+            f"AND {other_type} = {new_type}); "
             f"END"
         )
         labels = (
             f"CREATE TRIGGER IF NOT EXISTS {stem}_labels "
             f"AFTER INSERT ON relationship_labels "
             f"WHEN NEW.label = {label} "
-            f"AND json_extract((SELECT props FROM relationships WHERE id = NEW.relationship_id), "
-            f"{path}) IS NOT NULL "
+            f"AND {current_type} IS NOT NULL "
             f"BEGIN "
             f"SELECT RAISE(ABORT, {token}) WHERE EXISTS ("
             f"SELECT 1 FROM relationships other "
             f"JOIN relationship_labels other_label ON other_label.relationship_id = other.id "
             f"WHERE other.id != NEW.relationship_id AND other_label.label = {label} "
-            f"AND json_extract(other.props, {path}) IS NOT NULL "
-            f"AND json_extract(other.props, {path}) = "
-            f"json_extract((SELECT props FROM relationships WHERE id = NEW.relationship_id), "
-            f"{path}) "
-            f"AND json_type(other.props, {path}) = "
-            f"json_type((SELECT props FROM relationships WHERE id = NEW.relationship_id), "
-            f"{path})); "
+            f"AND {other_type} IS NOT NULL "
+            f"AND {other_value} = {current_value} "
+            f"AND {other_type} = {current_type}); "
             f"END"
         )
+        if columns is None:
+            return (props, labels)
+        index = f"CREATE INDEX IF NOT EXISTS {stem}_idx ON relationships {columns}"
         return (index, props, labels)
 
     def _node_ddl(self, constraint: Constraint) -> tuple[str, ...]:
@@ -327,49 +330,54 @@ class ConstraintRegistry:
         Returns
         -------
         tuple[str, ...]
-            Support index, property trigger, and label trigger.
+            Support index when the key is indexable, then the property trigger
+            and the label trigger.
         """
         stem = self.name(constraint)
-        path = self._codec.sql_json_path(constraint.key)
+        key = constraint.key
         label = self._quote(constraint.scope)
         token = self._quote(self.token(constraint))
-        index = (
-            f"CREATE INDEX IF NOT EXISTS {stem}_idx ON nodes "
-            f"(json_extract(props, {path}), json_type(props, {path}))"
-        )
+        columns = self._codec.portable_index_columns(key)
+        new_type = self._codec.property_type_expression("NEW.props", key)
+        new_value = self._codec.property_value_expression("NEW.props", key)
+        other_type = self._codec.property_type_expression("other.props", key)
+        other_value = self._codec.property_value_expression("other.props", key)
+        current = "(SELECT props FROM nodes WHERE id = NEW.node_id)"
+        current_type = self._codec.property_type_expression(current, key)
+        current_value = self._codec.property_value_expression(current, key)
         props = (
             f"CREATE TRIGGER IF NOT EXISTS {stem}_props "
             f"BEFORE UPDATE OF props ON nodes "
             f"WHEN EXISTS (SELECT 1 FROM node_labels WHERE node_id = NEW.id AND label = {label}) "
-            f"AND json_extract(NEW.props, {path}) IS NOT NULL "
+            f"AND {new_type} IS NOT NULL "
             f"BEGIN "
             f"SELECT RAISE(ABORT, {token}) WHERE EXISTS ("
             f"SELECT 1 FROM nodes other "
             f"JOIN node_labels other_label ON other_label.node_id = other.id "
             f"WHERE other.id != NEW.id AND other_label.label = {label} "
-            f"AND json_extract(other.props, {path}) IS NOT NULL "
-            f"AND json_extract(other.props, {path}) = json_extract(NEW.props, {path}) "
-            f"AND json_type(other.props, {path}) = json_type(NEW.props, {path})); "
+            f"AND {other_type} IS NOT NULL "
+            f"AND {other_value} = {new_value} "
+            f"AND {other_type} = {new_type}); "
             f"END"
         )
         labels = (
             f"CREATE TRIGGER IF NOT EXISTS {stem}_labels "
             f"AFTER INSERT ON node_labels "
             f"WHEN NEW.label = {label} "
-            f"AND json_extract((SELECT props FROM nodes WHERE id = NEW.node_id), {path}) "
-            f"IS NOT NULL "
+            f"AND {current_type} IS NOT NULL "
             f"BEGIN "
             f"SELECT RAISE(ABORT, {token}) WHERE EXISTS ("
             f"SELECT 1 FROM nodes other "
             f"JOIN node_labels other_label ON other_label.node_id = other.id "
             f"WHERE other.id != NEW.node_id AND other_label.label = {label} "
-            f"AND json_extract(other.props, {path}) IS NOT NULL "
-            f"AND json_extract(other.props, {path}) = "
-            f"json_extract((SELECT props FROM nodes WHERE id = NEW.node_id), {path}) "
-            f"AND json_type(other.props, {path}) = "
-            f"json_type((SELECT props FROM nodes WHERE id = NEW.node_id), {path})); "
+            f"AND {other_type} IS NOT NULL "
+            f"AND {other_value} = {current_value} "
+            f"AND {other_type} = {current_type}); "
             f"END"
         )
+        if columns is None:
+            return (props, labels)
+        index = f"CREATE INDEX IF NOT EXISTS {stem}_idx ON nodes {columns}"
         return (index, props, labels)
 
     def find_conflict(self, constraint: Constraint) -> tuple[int, Value] | None:
@@ -412,17 +420,15 @@ class ConstraintRegistry:
         int | None
             Identifier of a holder, or ``None`` when the value is free.
         """
-        path = self._codec.sql_json_path(constraint.key)
         json_type = self._codec.json_type(value)
         comparison = self._codec.comparison_value(value)
         if constraint.kind is ElementKind.RELATIONSHIP:
-            return self._relationship_holder(constraint, path, json_type, comparison, exclude_id)
-        return self._node_holder(constraint, path, json_type, comparison, exclude_id)
+            return self._relationship_holder(constraint, json_type, comparison, exclude_id)
+        return self._node_holder(constraint, json_type, comparison, exclude_id)
 
     def _node_holder(
         self,
         constraint: Constraint,
-        path: str,
         json_type: str,
         comparison: int | float | str,
         exclude_id: int | None,
@@ -433,8 +439,6 @@ class ConstraintRegistry:
         ----------
         constraint : Constraint
             Node constraint whose scope is searched.
-        path : str
-            Quoted JSON path of the constrained key.
         json_type : str
             JSON type of the attempted value.
         comparison : int | float | str
@@ -449,6 +453,8 @@ class ConstraintRegistry:
         """
         clause = ""
         parameters: list[object] = [constraint.scope, json_type, comparison]
+        type_expression = self._codec.property_type_expression("nodes.props", constraint.key)
+        value_expression = self._codec.property_value_expression("nodes.props", constraint.key)
         if exclude_id is not None:
             clause = "AND nodes.id != ? "
             parameters.append(exclude_id)
@@ -456,8 +462,8 @@ class ConstraintRegistry:
             f"SELECT nodes.id FROM nodes "
             f"JOIN node_labels ON node_labels.node_id = nodes.id "
             f"WHERE node_labels.label = ? "
-            f"AND json_type(nodes.props, {path}) = ? "
-            f"AND json_extract(nodes.props, {path}) = ? "
+            f"AND {type_expression} = ? "
+            f"AND {value_expression} = ? "
             f"{clause}"
             f"ORDER BY nodes.id LIMIT 1",
             parameters,
@@ -467,7 +473,6 @@ class ConstraintRegistry:
     def _relationship_holder(
         self,
         constraint: Constraint,
-        path: str,
         json_type: str,
         comparison: int | float | str,
         exclude_id: int | None,
@@ -478,8 +483,6 @@ class ConstraintRegistry:
         ----------
         constraint : Constraint
             Relationship constraint whose scope is searched.
-        path : str
-            Quoted JSON path of the constrained key.
         json_type : str
             JSON type of the attempted value.
         comparison : int | float | str
@@ -494,6 +497,12 @@ class ConstraintRegistry:
         """
         clause = ""
         parameters: list[object] = [constraint.scope, json_type, comparison]
+        type_expression = self._codec.property_type_expression(
+            "relationships.props", constraint.key
+        )
+        value_expression = self._codec.property_value_expression(
+            "relationships.props", constraint.key
+        )
         if exclude_id is not None:
             clause = "AND relationships.id != ? "
             parameters.append(exclude_id)
@@ -501,8 +510,8 @@ class ConstraintRegistry:
             f"SELECT relationships.id FROM relationships "
             f"JOIN relationship_labels ON relationship_labels.relationship_id = relationships.id "
             f"WHERE relationship_labels.label = ? "
-            f"AND json_type(relationships.props, {path}) = ? "
-            f"AND json_extract(relationships.props, {path}) = ? "
+            f"AND {type_expression} = ? "
+            f"AND {value_expression} = ? "
             f"{clause}"
             f"ORDER BY relationships.id LIMIT 1",
             parameters,
@@ -522,21 +531,23 @@ class ConstraintRegistry:
         tuple[int, Value] | None
             Later duplicate id and value, or ``None``.
         """
-        path = self._codec.sql_json_path(constraint.key)
         label = self._quote(constraint.scope)
+        later_type = self._codec.property_type_expression("later.props", constraint.key)
+        later_value = self._codec.property_value_expression("later.props", constraint.key)
+        earlier_type = self._codec.property_type_expression("earlier.props", constraint.key)
+        earlier_value = self._codec.property_value_expression("earlier.props", constraint.key)
         row = self._connection.execute(
-            f"SELECT later.id, json_extract(later.props, {path}), "
-            f"json_type(later.props, {path}) "
+            f"SELECT later.id, {later_value}, {later_type} "
             f"FROM nodes later "
             f"JOIN node_labels later_label ON later_label.node_id = later.id "
             f"WHERE later_label.label = {label} "
-            f"AND json_extract(later.props, {path}) IS NOT NULL "
+            f"AND {later_type} IS NOT NULL "
             f"AND EXISTS ("
             f"SELECT 1 FROM nodes earlier "
             f"JOIN node_labels earlier_label ON earlier_label.node_id = earlier.id "
             f"WHERE earlier.id < later.id AND earlier_label.label = {label} "
-            f"AND json_extract(earlier.props, {path}) = json_extract(later.props, {path}) "
-            f"AND json_type(earlier.props, {path}) = json_type(later.props, {path})) "
+            f"AND {earlier_value} = {later_value} "
+            f"AND {earlier_type} = {later_type}) "
             f"ORDER BY later.id LIMIT 1"
         ).fetchone()
         return self._conflict_from_row(row)
@@ -557,23 +568,25 @@ class ConstraintRegistry:
         tuple[int, Value] | None
             Later duplicate id and value, or ``None``.
         """
-        path = self._codec.sql_json_path(constraint.key)
         label = self._quote(constraint.scope)
+        later_type = self._codec.property_type_expression("later.props", constraint.key)
+        later_value = self._codec.property_value_expression("later.props", constraint.key)
+        earlier_type = self._codec.property_type_expression("earlier.props", constraint.key)
+        earlier_value = self._codec.property_value_expression("earlier.props", constraint.key)
         row = self._connection.execute(
-            f"SELECT later.id, json_extract(later.props, {path}), "
-            f"json_type(later.props, {path}) "
+            f"SELECT later.id, {later_value}, {later_type} "
             f"FROM relationships later "
             f"JOIN relationship_labels later_label "
             f"ON later_label.relationship_id = later.id "
             f"WHERE later_label.label = {label} "
-            f"AND json_extract(later.props, {path}) IS NOT NULL "
+            f"AND {later_type} IS NOT NULL "
             f"AND EXISTS ("
             f"SELECT 1 FROM relationships earlier "
             f"JOIN relationship_labels earlier_label "
             f"ON earlier_label.relationship_id = earlier.id "
             f"WHERE earlier.id < later.id AND earlier_label.label = {label} "
-            f"AND json_extract(earlier.props, {path}) = json_extract(later.props, {path}) "
-            f"AND json_type(earlier.props, {path}) = json_type(later.props, {path})) "
+            f"AND {earlier_value} = {later_value} "
+            f"AND {earlier_type} = {later_type}) "
             f"ORDER BY later.id LIMIT 1"
         ).fetchone()
         return self._conflict_from_row(row)

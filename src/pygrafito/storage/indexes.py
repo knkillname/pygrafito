@@ -127,11 +127,17 @@ class IndexRegistry:
             ``CREATE INDEX`` statement over the stored property document.
         """
         table = self.TABLES[index.kind]
-        path = self._codec.sql_json_path(index.key)
-        return (
-            f"CREATE INDEX IF NOT EXISTS {self.name(index)} ON {table} "
-            f"(json_extract(props, {path}), json_type(props, {path}))"
-        )
+        columns = self._codec.portable_index_columns(index.key)
+        if columns is None:
+            # SQLite builds before 3.47 cannot address a key that contains a
+            # double quote or a control character. Keep the declaration
+            # discoverable with an empty partial index; lookups fall back to
+            # a json_each scan.
+            return (
+                f"CREATE INDEX IF NOT EXISTS {self.name(index)} ON {table} "
+                f"(json_type(props, '$')) WHERE 0"
+            )
+        return f"CREATE INDEX IF NOT EXISTS {self.name(index)} ON {table} {columns}"
 
     def create(self, index: Index) -> None:
         """Create one declared index when it is absent.

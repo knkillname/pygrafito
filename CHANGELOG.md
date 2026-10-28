@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Contributors can now run the test suite against the same SQLite release as CI with
+  `docker compose run --rm test-sqlite`. The container pins and verifies the runtime version, and
+  CI reports its SQLite version in the job summary so the pin stays current.
 - The public Python API is now frozen for the 1.x series, with a documented deprecation policy.
   Existing imports and calls keep working throughout 1.x; additive changes arrive in minor
   releases, and removals wait for a major release.
@@ -82,6 +85,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Database, snapshot, and view formats are now frozen at version 2 for the 1.x series. Version 2
   files written by 0.9 or 1.0 open without conversion; files from other versions are refused with
   an export path instead of being migrated automatically.
+
+### Fixed
+
+- Property keys that contain a double quote or a control character now match on every supported
+  SQLite version, including the 3.38 to 3.46 builds that ship with common Linux distributions.
+  Lookups on those rare keys scan the element instead of using an index; ordinary keys keep the
+  indexed fast path.
 
 ## [0.9.0] - 2026-10-27
 

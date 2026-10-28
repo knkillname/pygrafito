@@ -126,10 +126,19 @@ for declaration, enforcement, and violation reporting.
 
 ## Property key handling
 
-Indexes and filters embed the property key as an escaped JSON path inside the statement.
-Keys may contain dots, spaces, single quotes, double quotes, backslashes, and Unicode;
-they are matched literally. Keys may not contain null characters, because the JSON path
-that addresses a value is a C string in SQLite.
+Indexes and filters address a property key with an escaped JSON path when the key has a
+portable path. Keys may contain dots, spaces, single quotes, double quotes, backslashes,
+and Unicode; they are matched literally. Keys may not contain null characters, because a
+JSON path is a C string in SQLite.
+
+A key that contains a double quote or a control character has no portable JSON path
+before SQLite 3.47: those builds cannot read an escaped quote or a literal control
+character inside a quoted label. The engine matches such a key by scanning the stored
+property object with `json_each` instead. A declared index on that key is still reported,
+persists, and keeps results identical, but it does not accelerate lookups; filters on the
+key scan candidate elements on every supported SQLite version. A uniqueness constraint on
+such a key keeps its triggers and stays enforced; its support index is omitted. Ordinary
+keys keep the indexed fast path.
 
 ## Reading a plan
 

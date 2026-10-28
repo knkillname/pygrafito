@@ -271,6 +271,35 @@ class TestJsonPaths(_CodecTestCase):
         connection.close()
 
 
+class TestScannedProperties(_CodecTestCase):
+    """Verify the scan fallback for keys without a portable JSON path."""
+
+    @pytest.mark.parametrize("key", ['"', 'a"b', "a\nb", "a\tb", 'a"b\nc'])
+    def test_keys_that_need_a_scan(self, property_codec: PropertyCodec, key: str) -> None:
+        assert property_codec.needs_property_scan(key)
+
+    @pytest.mark.parametrize("key", ["age", "a.b", "a b", "a\\b", "a'b", "café"])
+    def test_keys_with_a_portable_path(self, property_codec: PropertyCodec, key: str) -> None:
+        assert not property_codec.needs_property_scan(key)
+
+    def test_type_expression_scans_the_stored_object(self, property_codec: PropertyCodec) -> None:
+        expression = property_codec.property_type_expression("nodes.props", 'a"b')
+        assert expression.startswith("(SELECT property.type FROM json_each(nodes.props)")
+        assert "property.key = 'a\"b'" in expression
+
+    def test_value_expression_scans_the_stored_object(self, property_codec: PropertyCodec) -> None:
+        expression = property_codec.property_value_expression("NEW.props", "a\nb")
+        assert expression.startswith("(SELECT property.value FROM json_each(NEW.props)")
+        assert "property.key = 'a\nb'" in expression
+
+    def test_portable_index_columns_use_the_json_path(self, property_codec: PropertyCodec) -> None:
+        columns = property_codec.portable_index_columns("a.b")
+        assert columns == ("(json_extract(props, '$.\"a.b\"'), json_type(props, '$.\"a.b\"'))")
+
+    def test_portable_index_columns_refuse_a_scan_key(self, property_codec: PropertyCodec) -> None:
+        assert property_codec.portable_index_columns('a"b') is None
+
+
 class TestTypeMetadata(_CodecTestCase):
     """Verify SQLite type names and comparison values."""
 

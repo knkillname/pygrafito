@@ -375,10 +375,11 @@ class NodeRepository:
             parameters.append(label)
         if properties:
             for key, value in properties.items():
-                path = self._codec.sql_json_path(key)
-                clauses.append(f"json_type(nodes.props, {path}) = ?")
+                type_expression = self._codec.property_type_expression("nodes.props", key)
+                value_expression = self._codec.property_value_expression("nodes.props", key)
+                clauses.append(f"{type_expression} = ?")
                 parameters.append(self._codec.json_type(value))
-                clauses.append(f"json_extract(nodes.props, {path}) = ?")
+                clauses.append(f"{value_expression} = ?")
                 parameters.append(self._codec.comparison_value(value))
         query = "SELECT nodes.id, nodes.props FROM nodes"
         if clauses:
