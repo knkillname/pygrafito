@@ -40,14 +40,15 @@ Every Python example in this README is executed by the test suite.
 - A single embedded database file, with no server and no runtime dependencies.
 - Nodes with labels, strict typed properties, and indexed lookups.
 - Labeled relationships with properties, either directed or undirected.
-- A pattern-matching query language with writes, aggregation, and prepared statements.
-- Bounded traversal, shortest paths, and relationship-unique trail enumeration.
+- A GQL-first query language with writes, aggregation, path modes, a query budget, and
+  prepared statements.
+- Bounded traversal, shortest paths, and relationship-unique trail enumeration in the Python API.
 - Property indexes and uniqueness constraints enforced by the database.
 - CSV and JSONL import, versioned JSONL export/restore, and read-only SQL views.
 - An interactive shell, transactions, read-only handles, backups, and integrity checks.
 
-The query language is moving to GQL. The target profile, including the canonical spelling,
-compatibility aliases, and pygrafito extensions, is documented in the
+The query language is GQL-first. The canonical spelling, compatibility aliases, path modes, the
+query budget, and pygrafito extensions are documented in the
 [GQL profile](https://knkillname.github.io/pygrafito/reference/gql-profile.html).
 
 ## Documentation

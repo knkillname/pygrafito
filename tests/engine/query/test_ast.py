@@ -11,6 +11,7 @@ from pygrafito.engine.query.ast import (
     Binary,
     Create,
     Delete,
+    EdgeDirection,
     FunctionCall,
     IsNull,
     LabelAssignment,
@@ -40,7 +41,6 @@ from pygrafito.engine.query.ast import (
     Variable,
 )
 from pygrafito.engine.query.tokens import Span
-from pygrafito.model import Direction
 
 SPAN = Span(line=1, column=1, offset=0, end=1)
 
@@ -102,7 +102,7 @@ class TestAstNodes:
         relationship = RelationshipPattern(
             variable="r",
             types=("ALLIES_WITH", "TRUSTS"),
-            direction=Direction.OUTGOING,
+            direction=EdgeDirection.OUTGOING,
         )
         path = PathPattern(
             nodes=(node, NodePattern(variable="b")),
@@ -110,7 +110,7 @@ class TestAstNodes:
             variable="p",
         )
         assert path.nodes[0].labels == ("Program", "ISO")
-        assert path.relationships[0].direction is Direction.OUTGOING
+        assert path.relationships[0].direction is EdgeDirection.OUTGOING
 
     def test_statement(self) -> None:
         statement = Statement(

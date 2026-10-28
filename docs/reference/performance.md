@@ -88,6 +88,29 @@ from finding the start nodes by `cycles` instead of scanning the node table. Exp
 work itself is bounded by the region the start node can reach within two hops, not by
 the size of the database.
 
+### Path modes
+
+The harness measures the same fixed two-hop pattern under `WALK` and `TRAIL`. `WALK` adds no
+uniqueness predicate; `TRAIL` adds one relationship-id inequality for each pair of relationship
+positions in the path.
+
+| Scenario | No index | Indexed |
+| --- | ---: | ---: |
+| `MATCH WALK (a:Program {cycles: 36})-[r]->(b)-[s]->(c)` | 1.94 ms | 2.30 ms |
+| `MATCH TRAIL (a:Program {cycles: 36})-[r]->(b)-[s]->(c)` | 1.75 ms | 2.06 ms |
+
+At this scale the predicate cost is within run-to-run noise (`repeats=3`), so the mode does not
+change the access plan. The same measurement at 200,000 nodes / 400,000 relationships gives
+19.97 ms for `WALK` and 21.48 ms for `TRAIL` without declared indexes, and 19.70 ms and 19.90 ms
+with them; the difference remains within noise. The query budget defaults are 1,000,000
+relationship expansions and 100,000 intermediate rows, with no time limit. Every benchmark
+scenario stays well below both counters, so the budget never fires in these measurements; it
+exists for cyclic and dense graphs that the synthetic workload does not model.
+
+The command is the same `python -m benchmarks.run --nodes 20000 --relationships 60000` run shown
+above; the `walk path` and `trail path` rows are reported in its query table. The 200,000-node
+figures come from `python -m benchmarks.run --nodes 200000 --relationships 400000`.
+
 ### Ingestion
 
 The harness also measures a 10,000-row `UNWIND` + `MERGE` statement and the

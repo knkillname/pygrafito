@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `QueryBudget` and `QueryBudgetExceededError` bound every query with relationship-expansion and
+  intermediate-row counters plus an optional wall-clock limit. `Graph.open` sets the default, and
+  `Graph.query`, `Transaction.query`, and `PreparedQuery.execute` accept a per-execution override.
+  Exceeding a counter raises before any result and rolls a write statement back entirely.
+- Path modes `WALK`, `TRAIL`, `SIMPLE`, and `ACYCLIC`, accepted per clause or per path. `SIMPLE`
+  allows a closed path and `ACYCLIC` does not.
+- The canonical closed quantifiers `{n}`, `{m,n}`, and `{,n}`, with the legacy `*n..m` form kept
+  as a compatibility construct.
+- The remaining canonical edge directions: `<->` for either stored direction but never an
+  undirected relationship, `<~` for incoming-or-undirected, and `~>` for outgoing-or-undirected.
 - A data-driven conformance corpus at `tests/conformance/cases.json`, executed by
   `tests/test_conformance.py`. The matrix/corpus consistency test keeps every `supported` row
   covered and every case tied to a matrix feature.
@@ -47,8 +57,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release cannot execute now raise a positioned semantic error naming the construct and the
   follow-up change, instead of a generic unexpected-token error.
 - The query-language policy now classifies every construct as canonical GQL, synthetic alias,
-  compatibility construct, pygrafito extension, or out of profile. The target default path mode
-  is ISO `WALK`, gated on a query budget; the legacy `*n..m` quantifier keeps `TRAIL`.
+  compatibility construct, pygrafito extension, or out of profile. Canonical GQL paths default to
+  `WALK`; the legacy `*n..m` quantifier keeps `TRAIL`, and an explicit path or clause mode wins
+  over both.
+- **BREAKING** A canonical path without an explicit mode now defaults to `WALK` instead of the
+  implicit relationship-unique trail. Use `MATCH TRAIL` or a legacy `*n..m` quantifier to keep the
+  old behavior. The Python `paths()` API remains a bounded, relationship-unique trail enumerator.
+- Open-ended upper bounds (`*`, `+`, `*n..`, and `{m,}`) are deferred and raise a positioned error
+  naming `add-gql-unbounded-traversal`. The `{n,m}` quantifier is implemented and no longer
+  gated.
 - **BREAKING** Element ids are allocated with `AUTOINCREMENT` and are never reused after a
   delete.
 - **BREAKING** `Relationship.type` is replaced by `Relationship.labels` and

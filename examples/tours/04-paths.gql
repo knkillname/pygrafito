@@ -1,17 +1,20 @@
-// 04-paths.gql - quantified compatibility syntax, directions, and path variables.
-// Current transitional dialect. The *n..m quantifier is a compatibility construct whose default
-// path mode is TRAIL. Canonical {n,m} and WALK are target behavior in the GQL profile.
+// 04-paths.gql - canonical quantifiers, path modes, directions, and path variables.
+// The closed {n,m} quantifier and WALK are implemented. The legacy *n..m form remains a
+// compatibility construct whose default path mode is TRAIL.
 
-MATCH (a:Place {designation: 'The Grid'})-[:HAS_PART*1..2]->(b:Place)
+MATCH (a:Place {designation: 'The Grid'})-[:HAS_PART{1,2}]->(b:Place)
 RETURN count(DISTINCT b) AS places;
 
-MATCH (a:Place {designation: 'Real World'})-[:CONNECTED_BY]-(b:Place)
+MATCH (a:Place {designation: 'The Grid'})<-[r:HAS_PART]->(b:Place)
+RETURN b.designation AS part ORDER BY part LIMIT 10;
+
+MATCH (a:Place {designation: 'Real World'})~[r:CONNECTED_BY]->(b:Place)
 RETURN b.designation AS world;
 
-MATCH (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY*1..4]-(b:Place {designation: 'I/O Tower'})
+MATCH TRAIL (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY{1,4}]-(b:Place {designation: 'I/O Tower'})
 RETURN count(*) AS routes;
 
-MATCH p = (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY*1..4]-(b:Place {designation: 'I/O Tower'})
+MATCH p = (a:Place {designation: "Flynn's Arcade"})-[:HAS_PART|CONNECTED_BY{1,4}]-(b:Place {designation: 'I/O Tower'})
 RETURN p LIMIT 1;
 
 MATCH (a:Program {designation: 'Tron'})-[r]-(b)

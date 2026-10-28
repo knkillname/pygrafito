@@ -8,12 +8,15 @@ import typing
 from collections.abc import Callable, Iterator, Mapping, Sequence
 
 from pygrafito.engine.query.ast import (
+    EdgeDirection,
     Expression,
     NodePattern,
+    PathMode,
     PathPattern,
     PropertyEntry,
     RelationshipPattern,
 )
+from pygrafito.engine.query.budget import BudgetTracker
 from pygrafito.engine.query.labels import LabelExpressions
 from pygrafito.engine.query.values import (
     ExpressionEvaluator,
@@ -58,7 +61,11 @@ class WalkState:
     path_rels : tuple[Relationship, ...]
         Relationships accumulated for the whole path.
     used : frozenset[int]
-        Relationship identifiers already used by the path.
+        Relationship identifiers already used by the path, for ``TRAIL``.
+    visited : frozenset[int]
+        Node identifiers reached by the path, for ``SIMPLE`` and ``ACYCLIC``.
+    closed : bool
+        Whether a ``SIMPLE`` path has returned to its start and cannot extend.
     binding : Mapping[str, QueryValue]
         Variables bound so far.
     """
@@ -71,6 +78,8 @@ class WalkState:
     path_nodes: tuple[Node, ...]
     path_rels: tuple[Relationship, ...]
     used: frozenset[int]
+    visited: frozenset[int]
+    closed: bool
     binding: Mapping[str, QueryValue]
 
 
@@ -89,6 +98,8 @@ class PatternEngine:
         Query parameter values.
     evaluator : ExpressionEvaluator
         Evaluator used for the stage filter.
+    budget : BudgetTracker | None, optional
+        Budget counters of this execution, by default none.
     """
 
     _MISSING: object = object()
@@ -100,13 +111,25 @@ class PatternEngine:
         select_nodes: NodeSelector,
         parameters: Mapping[str, QueryValue],
         evaluator: ExpressionEvaluator,
+        budget: BudgetTracker | None = None,
     ) -> None:
         self._nodes = nodes
         self._relationships = relationships
         self._select_nodes = select_nodes
         self._parameters = parameters
         self._evaluator = evaluator
+        self._budget = budget
         self._values = PatternValueResolver(evaluator, parameters)
+
+    def _consume_expansion(self) -> None:
+        """Count one relationship expansion against the execution budget."""
+        if self._budget is not None:
+            self._budget.consume_expansions()
+
+    def _consume_row(self) -> None:
+        """Count one intermediate binding against the execution budget."""
+        if self._budget is not None:
+            self._budget.consume_rows()
 
     def match(
         self,
@@ -134,7 +157,9 @@ class PatternEngine:
         for pattern in patterns:
             next_rows: list[dict[str, QueryValue]] = []
             for row in rows:
-                next_rows.extend(self._match_pattern(pattern, row))
+                for match in self._match_pattern(pattern, row):
+                    self._consume_row()
+                    next_rows.append(match)
             rows = next_rows
         if where is None:
             return rows
@@ -167,6 +192,12 @@ class PatternEngine:
             if binding is None:
                 continue
             snapshot = self._capture(start, self._depth(pattern))
+            mode = self._mode(pattern)
+            visited = (
+                frozenset({start.id})
+                if mode in {PathMode.SIMPLE, PathMode.ACYCLIC}
+                else frozenset()
+            )
             state = WalkState(
                 position=0,
                 current=start.id,
@@ -176,6 +207,8 @@ class PatternEngine:
                 path_nodes=(start,),
                 path_rels=(),
                 used=frozenset(),
+                visited=visited,
+                closed=False,
                 binding=binding,
             )
             yield from self._walk(pattern, state, snapshot)
@@ -254,6 +287,65 @@ class PatternEngine:
             1 if relationship.max_hops is None else relationship.max_hops
             for relationship in pattern.relationships
         )
+
+    @staticmethod
+    def _mode(pattern: PathPattern) -> PathMode:
+        """Return the effective mode of one pattern.
+
+        Parameters
+        ----------
+        pattern : PathPattern
+            Pattern whose mode is read.
+
+        Returns
+        -------
+        PathMode
+            Resolved mode, or ``WALK`` when analysis assigned none.
+        """
+        return PathMode.WALK if pattern.mode is None else pattern.mode
+
+    @classmethod
+    def _extend_memory(
+        cls,
+        pattern: PathPattern,
+        state: WalkState,
+        edge: Relationship,
+        target: Node,
+    ) -> tuple[frozenset[int], frozenset[int], bool] | None:
+        """Apply the path mode to one candidate extension.
+
+        Parameters
+        ----------
+        pattern : PathPattern
+            Pattern being matched.
+        state : WalkState
+            Current partial match.
+        edge : Relationship
+            Candidate relationship.
+        target : Node
+            Node reached through the candidate relationship.
+
+        Returns
+        -------
+        tuple[frozenset[int], frozenset[int], bool] | None
+            Relationship set, node set, and closed flag for the extended
+            state, or ``None`` when the mode rejects the extension.
+        """
+        mode = cls._mode(pattern)
+        if mode is PathMode.WALK:
+            return state.used, state.visited, False
+        if mode is PathMode.TRAIL:
+            if edge.id in state.used:
+                return None
+            return state.used | {edge.id}, state.visited, False
+        if state.closed:
+            return None
+        if target.id in state.visited:
+            start = state.path_nodes[0].id
+            if mode is PathMode.SIMPLE and target.id == start:
+                return state.used, state.visited, True
+            return None
+        return state.used, state.visited | {target.id}, False
 
     def _walk(
         self,
@@ -346,6 +438,8 @@ class PatternEngine:
         dict[str, QueryValue]
             Complete binding for one match.
         """
+        if state.closed:
+            return
         types = frozenset(relationship.types) if relationship.types else None
         for edge, target_id in self._arrow_edges(
             snapshot,
@@ -353,13 +447,18 @@ class PatternEngine:
             relationship.direction,
             types,
         ):
-            if edge.id in state.used or not self._relationship_matches(
+            self._consume_expansion()
+            if not self._relationship_matches(
                 relationship,
                 edge,
                 state.binding,
             ):
                 continue
             target = snapshot.node(target_id)
+            memory = self._extend_memory(pattern, state, edge, target)
+            if memory is None:
+                continue
+            used, visited, closed = memory
             binding = self._bind_node(pattern.nodes[state.position + 1], target, state.binding)
             if binding is None:
                 continue
@@ -374,7 +473,9 @@ class PatternEngine:
                 segment_nodes=(),
                 path_nodes=(*state.path_nodes, target),
                 path_rels=(*state.path_rels, edge),
-                used=state.used | {edge.id},
+                used=used,
+                visited=visited,
+                closed=closed,
                 binding=binding,
             )
             yield from self._walk(pattern, next_state, snapshot)
@@ -408,7 +509,7 @@ class PatternEngine:
         maximum = 0 if relationship.max_hops is None else relationship.max_hops
         if state.hops >= minimum:
             yield from self._finish_segment(pattern, state, relationship, snapshot)
-        if state.hops >= maximum:
+        if state.closed or state.hops >= maximum:
             return
         types = frozenset(relationship.types) if relationship.types else None
         for edge, target_id in self._arrow_edges(
@@ -417,13 +518,18 @@ class PatternEngine:
             relationship.direction,
             types,
         ):
-            if edge.id in state.used or not self._relationship_matches(
+            self._consume_expansion()
+            if not self._relationship_matches(
                 relationship,
                 edge,
                 state.binding,
             ):
                 continue
             target = snapshot.node(target_id)
+            memory = self._extend_memory(pattern, state, edge, target)
+            if memory is None:
+                continue
+            used, visited, closed = memory
             next_state = WalkState(
                 position=state.position,
                 current=target_id,
@@ -432,7 +538,9 @@ class PatternEngine:
                 segment_nodes=(*state.segment_nodes, target),
                 path_nodes=state.path_nodes,
                 path_rels=state.path_rels,
-                used=state.used | {edge.id},
+                used=used,
+                visited=visited,
+                closed=closed,
                 binding=state.binding,
             )
             yield from self._walk(pattern, next_state, snapshot)
@@ -478,6 +586,8 @@ class PatternEngine:
             path_nodes=(*state.path_nodes, *state.segment_nodes),
             path_rels=(*state.path_rels, *state.segment_rels),
             used=state.used,
+            visited=state.visited,
+            closed=state.closed,
             binding=binding,
         )
         yield from self._walk(pattern, next_state, snapshot)
@@ -581,8 +691,6 @@ class PatternEngine:
         bool
             ``True`` when the relationship satisfies the pattern.
         """
-        if pattern.undirected_only and relationship.directed:
-            return False
         if pattern.label_expression is not None:
             if not LabelExpressions.matches(pattern.label_expression, relationship.labels):
                 return False
@@ -596,15 +704,14 @@ class PatternEngine:
     def _arrow_edges(
         snapshot: AdjacencySnapshot,
         node_id: int,
-        direction: Direction,
+        direction: EdgeDirection,
         labels: frozenset[str] | None,
     ) -> Iterator[tuple[Relationship, int]]:
         """Yield edges allowed by one query relationship direction.
 
-        The traversal API follows undirected edges from either endpoint in
-        both outgoing and incoming walks. The query dialect's arrows are
-        storage-direction constraints, so an undirected edge is reachable only
-        through the undirected ``--`` pattern.
+        The storage traversal follows undirected edges from either endpoint in
+        both outgoing and incoming walks. The query direction then admits or
+        excludes those undirected candidates according to its directedness.
 
         Parameters
         ----------
@@ -612,8 +719,8 @@ class PatternEngine:
             Captured region.
         node_id : int
             Current node.
-        direction : Direction
-            Pattern direction.
+        direction : EdgeDirection
+            Direction form of the relationship pattern.
         labels : frozenset[str] | None
             Allowed labels, or ``None`` for all labels.
 
@@ -622,8 +729,11 @@ class PatternEngine:
         tuple[Relationship, int]
             Followable edge and the node reached through it.
         """
-        for relationship, target in snapshot.edges(node_id, direction, labels):
-            if not relationship.directed and direction is not Direction.BOTH:
+        directedness = direction.directedness
+        for relationship, target in snapshot.edges(node_id, direction.traversal, labels):
+            if directedness is True and not relationship.directed:
+                continue
+            if directedness is False and relationship.directed:
                 continue
             yield relationship, target
 

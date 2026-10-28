@@ -183,11 +183,31 @@ flag even when the pattern traverses it against its stored direction. A
 relationship label expression supports the same operators as a node label
 expression. `-->` and `<--` are accepted as aliases for `->` and `<-`.
 
-The arrows are storage-direction constraints: `->` matches only directed
-relationships traversed forward, `<-` only directed relationships traversed
-backward, `-` matches every incident relationship, and `~` matches only
-relationships stored as undirected. `--` is a line comment, not an arrow; see
-[Comments](#comments).
+The arrows are storage-direction constraints. Each form admits a different set of stored
+relationships:
+
+| Form | Admits |
+| --- | --- |
+| `-[r]->` | A directed relationship stored from the left node to the right node. |
+| `-[r]-` | Every incident relationship, directed or undirected. |
+| `<-[r]-` | A directed relationship stored from the right node to the left node. |
+| `~[r]~` | Only a relationship stored as undirected. |
+| `<-[r]->` | A directed relationship in either stored direction; never an undirected one. |
+| `<-[r]~` | A directed relationship stored from the right node to the left node, or an undirected one. |
+| `~[r]->` | A directed relationship stored from the left node to the right node, or an undirected one. |
+
+```text
+MATCH (a)-[r:TRUSTS]->(b) RETURN b        forward only
+MATCH (a)-[r:TRUSTS]-(b) RETURN b         every incident relationship
+MATCH (a)<-[r:TRUSTS]-(b) RETURN b        backward only
+MATCH (a)~[r:TRUSTS]~(b) RETURN b         undirected only
+MATCH (a)<-[r:TRUSTS]->(b) RETURN b       either directed direction
+MATCH (a)<-[r:TRUSTS]~(b) RETURN b        backward or undirected
+MATCH (a)~[r:TRUSTS]->(b) RETURN b        forward or undirected
+```
+
+`-->` and `<--` are accepted as aliases for `->` and `<-`. `--` is a line comment, not an arrow;
+see [Comments](#comments).
 
 ## Variable-length relationships
 
@@ -202,21 +222,29 @@ A relationship may carry a quantifier after its labels:
 
 Every hop applies the pattern's direction, label alternatives, and property
 map. An arrow quantified pattern cannot follow an undirected relationship; use
-the `-` form to include undirected relationships in a quantified path. The
-upper bound is required: a bare `*` or an open range such as `*1..` is rejected,
-because the engine never explores an unbounded trail space. Bounds are
-non-negative integers and the lower bound cannot exceed the upper bound.
+the `-` form to include undirected relationships in a quantified path. Bounds
+are non-negative integers and the lower bound cannot exceed the upper bound.
 
-The canonical `{n,m}` quantifier is gated until `add-gql-path-semantics`: it
-raises a positioned error naming that change and is never interpreted as the
-legacy form. The legacy `*n..m` quantifier always means a relationship-unique
-trail.
+The canonical closed forms are `{n}` for exactly `n` hops, `{m,n}` for a range,
+and `{,n}` for at most `n` hops:
 
-Trails are relationship-unique: one match never uses the same relationship
+```text
+(a)-[:ALLIES_WITH{2}]->(b)         exactly two hops
+(a)-[:ALLIES_WITH{1,3}]->(b)       between one and three hops
+(a)-[:ALLIES_WITH{,2}]->(b)        zero through two hops
+```
+
+The canonical form does not imply `TRAIL`: its mode comes from the
+[path-mode rule](#path-modes), so a canonical path without an explicit mode is a
+`WALK`. The legacy `*n..m` form keeps its `TRAIL` default. An open-ended upper
+bound is deferred: `*`, `+`, `*n..`, and `{m,}` raise a positioned error naming
+`add-gql-unbounded-traversal`.
+
+`TRAIL` is relationship-unique: one match never uses the same relationship
 twice, while nodes may repeat. That is the same rule the Python `paths()` API
-uses. A relationship variable on a quantified pattern binds the ordered list of
-traversed relationships, and a path variable includes every expanded
-relationship:
+uses; `WALK` removes it. A relationship variable on a quantified pattern binds
+the ordered list of traversed relationships, and a path variable includes every
+expanded relationship:
 
 ```text
 MATCH (a)-[r:ALLIES_WITH*1..3]->(b) RETURN r, size(r)
@@ -227,6 +255,46 @@ A relationship-list variable may be projected or passed to `size`; it cannot be
 used where a single relationship is required, so `type(r)` and `r.property` are
 semantic errors. Pattern property maps may contain expressions; see
 [Pattern property expressions](#pattern-property-expressions).
+
+## Path modes
+
+A match clause or an individual path may name how that path may repeat:
+
+```text
+MATCH WALK (a)-[:ALLIES_WITH*1..3]->(b)         nodes and relationships may repeat
+MATCH TRAIL (a)-[:ALLIES_WITH*1..3]->(b)        no relationship repeats
+MATCH SIMPLE (a)-[:ALLIES_WITH*1..3]->(b)       no node repeats, start may equal end
+MATCH ACYCLIC (a)-[:ALLIES_WITH*1..3]->(b)      no node repeats
+MATCH WALK (a)-[:TRUSTS]->(b), ACYCLIC (b)-[:TRUSTS]->(c)
+```
+
+| Mode | Rule |
+| --- | --- |
+| `WALK` | A node and a relationship may repeat within one path. |
+| `TRAIL` | A relationship may not repeat; a node may. |
+| `SIMPLE` | A node may not repeat, except that the start and end node may be the same. |
+| `ACYCLIC` | No node may repeat, including the start and end node. |
+
+The effective mode of a path is resolved in this order: an explicit per-path mode, an explicit
+clause mode, `TRAIL` when the path contains a legacy `*n..m` quantifier, and `WALK` otherwise. An
+explicit mode wins over both defaults, and a path that mixes a legacy and a canonical quantifier
+without an explicit mode is a semantic error.
+
+A closed path is the difference between `SIMPLE` and `ACYCLIC`: `SIMPLE` allows the last node to
+equal the first, while `ACYCLIC` does not.
+
+```text
+MATCH SIMPLE (a)-[:TRUSTS]->(b)-[:TRUSTS]->(c)-[:TRUSTS]->(a) RETURN a
+MATCH ACYCLIC (a)-[:TRUSTS]->(b)-[:TRUSTS]->(c)-[:TRUSTS]->(a) RETURN a   -- no rows
+```
+
+Reusing a relationship is the difference between `WALK` and `TRAIL`. On a graph with a self-loop,
+the two positions may bind the same edge under `WALK` and must bind distinct edges under `TRAIL`.
+
+```text
+MATCH WALK (a)-[r:TRUSTS]->(b)-[s:TRUSTS]->(c) RETURN c
+MATCH TRAIL (a)-[r:TRUSTS]->(b)-[s:TRUSTS]->(c) RETURN c   -- r and s differ
+```
 
 ## Pattern variables and paths
 
@@ -694,13 +762,12 @@ deletion, a missing element, or an invalid stored value is raised as
 
 A construct that the GQL profile lists but this release cannot execute is
 rejected with a positioned `QuerySemanticError` that names the construct and the
-follow-up change. For example, the `{n,m}` quantifier, an explicit path mode, and
-the `<~`, `~>`, and `<->` directions report that they land with
-`add-gql-path-semantics`; `LET`, `NEXT`, `GROUP BY`, `WITH ORDINALITY`,
-`WITH OFFSET`, and `RETURN NO BINDINGS` report `add-gql-composition`. A gated
-construct stops the whole statement before execution, so a gated clause never
-writes data. Constructs the profile does not list remain out of profile and keep
-their existing explicit rejection.
+follow-up change. For example, an open-ended upper bound (`*`, `+`, `*n..`, or
+`{m,}`) reports `add-gql-unbounded-traversal`; `LET`, `NEXT`, `GROUP BY`,
+`WITH ORDINALITY`, `WITH OFFSET`, and `RETURN NO BINDINGS` report
+`add-gql-composition`. A gated construct stops the whole statement before
+execution, so a gated clause never writes data. Constructs the profile does not
+list remain out of profile and keep their existing explicit rejection.
 
 ## Consistent execution snapshot
 
@@ -732,7 +799,9 @@ statement        = { clause } [";"]
 clause           = match-clause | for-clause | unwind-clause | filter-clause
                  | with-clause | insert-clause | create-clause | merge-clause
                  | set-clause | remove-clause | delete-clause | return-clause
-match-clause     = [ "OPTIONAL" ] "MATCH" path-pattern { "," path-pattern } [where-clause]
+path-mode        = "WALK" | "TRAIL" | "SIMPLE" | "ACYCLIC"
+match-clause     = [ "OPTIONAL" ] "MATCH" [path-mode] [path-mode] path-pattern
+                   { "," [path-mode] path-pattern } [where-clause]
 for-clause       = "FOR" identifier "IN" expression
 unwind-clause    = "UNWIND" expression "AS" identifier
 filter-clause    = "FILTER" [ "WHERE" ] expression
@@ -760,12 +829,14 @@ label-spec       = ( ":" | "IS" ) label-or
 label-or         = label-and { "|" label-and }
 label-and        = label-not { ( "&" | ":" ) label-not }
 label-not        = [ "!" ] ( label | "%" )
-relationship     = "-" [ "[" [identifier] [label-spec] [quantifier]
-                   [property-map] [where-clause] "]" ] ( "->" | "-" )
-                 | "<-" [ "[" [identifier] [label-spec] [quantifier]
-                   [property-map] [where-clause] "]" ] "-"
-                 | "->" | "<-" | "-" | "~"
+relationship     = "-" [relationship-detail] ( "->" | "-" )
+                 | "<-" [relationship-detail] ( "-" | "->" | "~" )
+                 | "~" [relationship-detail] ( "~" | "->" )
+                 | "->" | "<-" | "-" | "~" | "<~" | "~>" | "<->"
+relationship-detail = "[" [identifier] [label-spec] [quantifier]
+                   [property-map] [where-clause] "]"
 quantifier       = "*" [ INTEGER [ ".." [ INTEGER ] ] ]
+                 | "{" INTEGER [ "," [ INTEGER ] ] "}"
 property-map     = "{" [ key ":" expression { "," key ":" expression } ] "}"
 where-clause     = "WHERE" expression
 return-item      = expression [ "AS" identifier ]
@@ -805,9 +876,7 @@ change, and the statement does not execute:
 
 | Construct | Follow-up change |
 | --- | --- |
-| `{n,m}` quantifier | `add-gql-path-semantics` |
-| `WALK`, `TRAIL`, `SIMPLE`, `ACYCLIC` | `add-gql-path-semantics` |
-| `<~`, `~>`, `<->` | `add-gql-path-semantics` |
+| Open-ended quantifiers `*`, `+`, `*n..`, `{m,}` | `add-gql-unbounded-traversal` |
 | `WITH ORDINALITY`, `WITH OFFSET` | `add-gql-composition` |
 | `LET`, `NEXT`, `GROUP BY` | `add-gql-composition` |
 | `RETURN NO BINDINGS` | `add-gql-composition` |

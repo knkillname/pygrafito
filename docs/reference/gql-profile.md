@@ -14,8 +14,8 @@ dialect.
 
 ## Current status
 
-The profile is deliberately ahead of the implementation. The current release remains the
-transitional dialect so existing examples keep working while the language is rewritten in small
+Path semantics and the query budget are implemented. The remaining gap is the composition
+surface (`LET`, `NEXT`, `GROUP BY`) and the expression vocabulary, which follow in separate
 changes.
 
 | Area | Implemented | Target |
@@ -25,11 +25,11 @@ changes.
 | Filtering | `FILTER`, stage `WHERE` alias, `MATCH ... WHERE` | `FILTER` canonical, stage `WHERE` alias, `MATCH ... WHERE` canonical |
 | Binding and composition | `WITH` extension; `LET` and `NEXT` gated | `LET` and `NEXT` canonical, `WITH` extension |
 | Grouping | Implicit grouping; `GROUP BY` gated | `GROUP BY` canonical, implicit grouping extension |
-| Quantifiers | Bounded `*n..m`, trail semantics; `{n,m}` gated | `{n,m}` canonical, legacy `*n..m` compatibility construct |
-| Edge directions | `->`, `<-`, `-`, `~`; `-->` and `<--` aliases; `--` is a comment | GQL directions canonical, double-dash forms aliases |
+| Quantifiers | Closed `{n}`, `{m,n}`, `{,n}`; legacy `*n..m` with `TRAIL`; open bounds deferred | `{n,m}` canonical, legacy `*n..m` compatibility construct |
+| Edge directions | `->`, `<-`, `-`, `~`, `<->`, `<~`, `~>`; `-->` and `<--` aliases; `--` is a comment | GQL directions canonical, double-dash forms aliases |
 | Comments | `//`, `--`, and `/* ... */` | `//`, `--`, and `/* ... */` |
-| Path modes | Trail only; explicit modes gated | `WALK` default, `TRAIL`, `SIMPLE`, `ACYCLIC` in scope |
-| Query budget | None | Expansion and intermediate-row counters, gating `WALK` |
+| Path modes | `WALK` default; `TRAIL`, `SIMPLE`, `ACYCLIC` explicit | `WALK` default, `TRAIL`, `SIMPLE`, `ACYCLIC` in scope |
+| Query budget | Expansion, row, and optional time counters with per-query override | Expansion and intermediate-row counters, gating `WALK` |
 
 The runnable examples in `README.md`, the quickstart, and the guides use the canonical spellings
 where the release supports them; compatibility aliases appear only in the migration guidance.
@@ -72,16 +72,16 @@ entry.
 | Comments | `//`, `--`, `/* ... */` | `--` is a GQL line comment; legacy double-dash arrows are an alias. |
 | Path variables | `p = <path pattern>` | Paths expose their nodes and relationships in traversal order. |
 | Parameters | `$name` | Bound as data, never as identifiers or SQL text. |
-| Path modes | `WALK`, `TRAIL`, `SIMPLE`, `ACYCLIC` | `WALK` is the canonical default, gated on the query budget. |
+| Path modes | `WALK`, `TRAIL`, `SIMPLE`, `ACYCLIC` | `WALK` is the canonical default, bounded by the query budget. |
 
 Label expressions use `&` for conjunction, `|` for disjunction, `!` for negation, and `%` for the
 wildcard. For example, `(:Program&:ISO)` matches a node carrying both labels, and
 `(:Program|:Agent)` matches either one.
 
-Target GQL example:
+Canonical example:
 
 ```text
-// Target GQL, not yet executable in the current release.
+// Canonical GQL.
 INSERT (n:Program {designation: 'Quorra'})
 MATCH (n:Program)
 FILTER n.cycles > 36
@@ -133,26 +133,26 @@ semantic error. The profile does not guess which default the author intended.
 
 ```text
 MATCH (a)-[:ALLIES_WITH*1..3]->(b)          -- legacy: TRAIL
-MATCH (a)-[:ALLIES_WITH{1,3}]->(b)          -- canonical: WALK (target)
+MATCH (a)-[:ALLIES_WITH{1,3}]->(b)          -- canonical: WALK
 MATCH WALK (a)-[:ALLIES_WITH*1..3]->(b)     -- explicit WALK wins
 MATCH TRAIL (a)-[:ALLIES_WITH{1,3}]->(b)    -- explicit TRAIL wins
 ```
 
-The current release is trail-only and requires an upper bound. The canonical and explicit-mode
-forms above are target behavior until the path-semantics change lands.
+The canonical closed forms require an explicit upper bound. An open upper bound (`*`, `+`, `*n..`,
+and `{m,}`) is deferred and names its follow-up change.
 
 ## Path modes
 
 | Mode | Rule | Profile status |
 | --- | --- | --- |
-| `WALK` | Repeated nodes and relationships are allowed. | Canonical default; gated on the query budget. |
-| `TRAIL` | A relationship may not repeat within one path; nodes may repeat. | In scope; matches the current engine and the Python `paths()` API. |
-| `SIMPLE` | Nodes may not repeat, except that the start and end may be the same. | In scope; gated. |
-| `ACYCLIC` | No node may repeat. | In scope; gated. |
+| `WALK` | Repeated nodes and relationships are allowed. | Canonical default; supported while the query budget is enforced. |
+| `TRAIL` | A relationship may not repeat within one path; nodes may repeat. | Supported; also the default for the legacy quantifier. |
+| `SIMPLE` | Nodes may not repeat, except that the start and end may be the same. | Supported. |
+| `ACYCLIC` | No node may repeat. | Supported. |
 | Match modes | `DIFFERENT EDGES` and `REPEATABLE ELEMENTS`. | Deferred until their interaction with path modes is defined. |
 | Grouped quantified paths | Repetition of a parenthesized path pattern. | Deferred. |
 | Path search | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k`. | Deferred. |
-| Unbounded `WALK` | `*`, `+`, `{m,}` in `WALK` mode. | Deferred until lazy traversal and the budget land. |
+| Open-ended quantifiers | `*`, `+`, `*n..`, and `{m,}` in any mode. | Deferred until lazy traversal lands. |
 
 The Python `paths()` API remains a relationship-unique, bounded trail enumerator. It does not
 follow the query language's `WALK` default. Use `paths()` when you want a trail, and `MATCH TRAIL`
@@ -179,7 +179,10 @@ The policy is:
   the guarantee; pushing `LIMIT` into the pattern engine is a follow-up optimization.
 - The budget does not change the Python `paths()` API, which already requires a maximum depth.
 
-The current release has no query budget. The `WALK` row in the matrix is therefore gated.
+The budget is enforced for every execution. `Graph.open` sets the graph default, `Graph.query`,
+`Transaction.query`, and `PreparedQuery.execute` accept a per-execution override, and a counter
+set to `None` is unlimited. The `WALK` row in the matrix is supported while this enforcement
+holds.
 
 ## Extensions
 
@@ -221,7 +224,7 @@ matrix rather than rejected forever.
 | Match modes (`DIFFERENT EDGES`, `REPEATABLE ELEMENTS`) | The path-semantics change must define their interaction with path modes. |
 | Grouped quantified path patterns | The path-semantics change needs a nested path-pattern representation. |
 | Path search prefixes (`ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k`) | Review after the shortest-path API and path modes settle. |
-| Unbounded `WALK` | Requires lazy traversal or frontier expansion plus the query budget. |
+| Open-ended quantifiers (`*`, `+`, `*n..`, `{m,}`) | Requires lazy traversal or frontier expansion; the budget already protects bounded walks. |
 
 ## Conformance matrix
 
@@ -232,7 +235,7 @@ The matrix is the profile's honest status board. The `status` column uses exactl
 - **deferred**: in the long-term direction but not in the initial profile.
 - **out of profile**: rejected.
 
-The `current` column records what the transitional dialect does today. A `gated` row may already
+The `current` column records what the release does today. A `gated` row may already
 be implemented in the current dialect; it becomes `supported` only when the canonical form and its
 corpus case land. The corpus column is `pending` until the case exists.
 
@@ -252,18 +255,18 @@ corpus case land. The corpus column is `pending` until the case exists.
 | `ORDER BY` with null ordering | Canonical GQL | supported | implemented | None | nulls-first-explicit |
 | `OFFSET` and `SKIP` | Canonical GQL | supported | implemented | None | offset-paginates |
 | `LIMIT` | Canonical GQL | supported | implemented | None | limit-bounds-the-result |
-| `{n,m}` quantifier | Canonical GQL | gated | not implemented (legacy `*n..m`) | Canonical quantifier pending | pending |
+| `{n,m}` quantifier | Canonical GQL | supported | implemented | Open upper bounds deferred | quantifier-bounded-range |
 | Label expressions (and, or, not, wildcard) | Canonical GQL | supported | implemented | None | label-conjunction |
-| Edge directions `->`, `<-`, `-`, `~` | Canonical GQL | supported | implemented | `<~`, `~>`, and `<->` gated | arrow-outgoing |
+| Edge directions `->`, `<-`, `-`, `~`, `<~`, `~>`, `<->` | Canonical GQL | supported | implemented | None | arrow-outgoing |
 | Comments `//`, `--`, `/* ... */` | Canonical GQL | supported | implemented | None | dash-comment |
 | Inline element `WHERE` | Canonical GQL | supported | implemented | None | inline-node-predicate |
 | `IS` label syntax | Canonical GQL | supported | implemented | None | label-is-form |
 | Path variables | Canonical GQL | supported | implemented | None | diamond-finds-two-trails |
 | Parameters | Canonical GQL | supported | implemented | None | parameters-bind-data |
-| `WALK` path mode | Canonical GQL | gated | not implemented | Gated on the query budget | pending |
-| `TRAIL` path mode | Canonical GQL | gated | implicit trail only | Explicit keyword pending | pending |
-| `SIMPLE` path mode | Canonical GQL | gated | not implemented | None | pending |
-| `ACYCLIC` path mode | Canonical GQL | gated | not implemented | None | pending |
+| `WALK` path mode | Canonical GQL | supported | implemented | Default; bounded by the query budget | walk-reuses-a-relationship |
+| `TRAIL` path mode | Canonical GQL | supported | implemented | None | trail-rejects-a-reused-relationship |
+| `SIMPLE` path mode | Canonical GQL | supported | implemented | None | simple-allows-a-closed-path |
+| `ACYCLIC` path mode | Canonical GQL | supported | implemented | None | acyclic-rejects-a-closed-path |
 | `CREATE` for `INSERT` | Synthetic alias | supported | implemented | Data statements only | create-alias-returns-a-node |
 | `UNWIND` for `FOR` | Synthetic alias | supported | implemented | None | unwind-alias-iterates |
 | Stage `WHERE` for `FILTER` | Synthetic alias | supported | implemented | `MATCH ... WHERE` stays canonical | stage-where-alias-filters |
@@ -274,6 +277,7 @@ corpus case land. The corpus column is `pending` until the case exists.
 | `WITH` projection and aggregation | pygrafito extension | supported | implemented | No GQL equivalent | with-aggregation |
 | Implicit grouping | pygrafito extension | supported | implemented | `GROUP BY` alternative | implicit-grouping |
 | `type()` | pygrafito extension | supported | implemented | `LABELS()` alternative | type-extension |
+| Query budget | pygrafito extension | supported | implemented | No GQL equivalent; expansion, row, and optional time counters | budget-row-limit |
 | Match modes | Deferred | deferred | not implemented | `DIFFERENT EDGES` / `REPEATABLE ELEMENTS` | n/a |
 | Grouped quantified paths | Deferred | deferred | not implemented | Parenthesized path repetition | n/a |
 | Path search prefixes | Deferred | deferred | not implemented | `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k` | n/a |
@@ -303,6 +307,7 @@ query      statement text
 params     optional parameter mapping
 expect     projected rows, or an error type and message fragment
 tags       optional: canonical, alias, compatibility, extension, gated
+budget     optional: per-case query-budget overrides, such as {"max_rows": 2}
 ```
 
 The feature id is derived from the first matrix column: lower-case it and replace every run of
@@ -315,12 +320,12 @@ run stays fast and the language contract never depends on `examples/`. Example c
 
 ```json
 {
-  "name": "gql-walk-reuses-an-edge",
+  "name": "walk-reuses-a-relationship",
   "feature": "walk-path-mode",
   "fixture": "tron-cycle",
-  "query": "MATCH WALK (a)-[:TRUSTS{1,3}]->(b) RETURN b.designation AS name",
+  "query": "MATCH WALK (a {designation: 'Kevin Flynn'})-[:TRUSTS*4]->(b) RETURN b.designation AS name",
   "expect": {"rows": [{"name": "Quorra"}]},
-  "tags": ["canonical", "gated"]
+  "tags": ["canonical"]
 }
 ```
 

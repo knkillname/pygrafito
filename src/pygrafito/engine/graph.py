@@ -37,6 +37,7 @@ from pygrafito.model import (
     IndexKind,
     Node,
     Path,
+    QueryBudget,
     Relationship,
     TransactionError,
     TraversalStep,
@@ -59,10 +60,14 @@ class Graph:
     ----------
     database : Database
         Open database wrapper owned by this graph.
+    budget : QueryBudget | None, optional
+        Default budget for every statement, by default the documented
+        defaults.
     """
 
-    def __init__(self, database: Database) -> None:
+    def __init__(self, database: Database, budget: QueryBudget | None = None) -> None:
         self._database = database
+        self._budget = QueryBudget() if budget is None else budget
         self._codec = PropertyCodec()
         self._nodes = NodeRepository(
             database.connection,
@@ -80,6 +85,7 @@ class Graph:
             self._relationships,
             self._codec,
             database,
+            self._budget,
         )
 
     @classmethod
@@ -90,6 +96,7 @@ class Graph:
         create: bool = True,
         readonly: bool = False,
         busy_timeout: int | None = None,
+        budget: QueryBudget | None = None,
     ) -> Self:
         """Open or create a graph database.
 
@@ -106,6 +113,9 @@ class Graph:
         busy_timeout : int | None, optional
             Milliseconds a lock wait may take before it fails, by default
             5000 milliseconds.
+        budget : QueryBudget | None, optional
+            Default query budget for every statement, by default the
+            documented defaults.
 
         Returns
         -------
@@ -131,7 +141,8 @@ class Graph:
                 create=create,
                 readonly=readonly,
                 busy_timeout=busy_timeout,
-            )
+            ),
+            budget,
         )
 
     @property
@@ -218,6 +229,8 @@ class Graph:
         self,
         text: str,
         parameters: Mapping[str, QueryValue] | None = None,
+        *,
+        budget: QueryBudget | None = None,
     ) -> QueryResult:
         """Parse and execute one statement.
 
@@ -227,6 +240,8 @@ class Graph:
             Query source text.
         parameters : Mapping[str, QueryValue] | None, optional
             Query parameter values, by default none.
+        budget : QueryBudget | None, optional
+            Budget for this execution, by default the graph default.
 
         Returns
         -------
@@ -237,7 +252,7 @@ class Graph:
         if self._database.connection.in_transaction:
             message = "a graph transaction is active; use Transaction.query"
             raise TransactionError(message)
-        return self.prepare(text).execute(parameters)
+        return self.prepare(text).execute(parameters, budget=budget)
 
     def prepare(self, text: str) -> PreparedQuery:
         """Parse and validate a query for repeated execution.

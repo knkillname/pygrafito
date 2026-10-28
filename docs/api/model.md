@@ -73,6 +73,16 @@ traversal start and the reached node.
 | `INCOMING` | `incoming` | Follow directed relationships from end to start and undirected relationships from either endpoint. |
 | `BOTH` | `both` | Follow every incident relationship. |
 
+## QueryBudget
+
+```{eval-rst}
+.. autoclass:: pygrafito.QueryBudget
+```
+
+`QueryBudget` bounds the work one execution may perform. `Graph.open` accepts a default,
+`Graph.query`, `Transaction.query`, and `PreparedQuery.execute` accept a per-execution override, and
+a counter set to `None` is unlimited. See [Bound query work](../guides/querying.md#bound-query-work).
+
 ## ElementKind
 
 ```{eval-rst}

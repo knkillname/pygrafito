@@ -9,6 +9,7 @@ from pygrafito.engine.query.executor import QueryExecutor
 from pygrafito.engine.query.plan import Plan
 from pygrafito.engine.query.results import QueryResult
 from pygrafito.engine.query.values import QueryValue
+from pygrafito.model import QueryBudget
 
 
 class PreparedQuery:
@@ -76,6 +77,8 @@ class PreparedQuery:
     def execute(
         self,
         parameters: Mapping[str, QueryValue] | None = None,
+        *,
+        budget: QueryBudget | None = None,
     ) -> QueryResult:
         """Execute the prepared statement with one parameter mapping.
 
@@ -83,6 +86,8 @@ class PreparedQuery:
         ----------
         parameters : Mapping[str, QueryValue] | None, optional
             Query parameter values, by default none.
+        budget : QueryBudget | None, optional
+            Budget for this execution, by default the graph default.
 
         Returns
         -------
@@ -90,7 +95,7 @@ class PreparedQuery:
             Materialized result.
         """
         values: Mapping[str, QueryValue] = {} if parameters is None else parameters
-        return self._executor.execute_graph(self._plan, values)
+        return self._executor.execute_graph(self._plan, values, budget)
 
 
 __all__ = ["PreparedQuery"]

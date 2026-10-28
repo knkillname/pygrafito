@@ -239,6 +239,72 @@ class QueryExecutionError(QueryError):
     """Raised when a query fails while it is being evaluated."""
 
 
+class QueryBudgetExceededError(QueryExecutionError):
+    """Raised when one execution exceeds its query budget.
+
+    Parameters
+    ----------
+    counter : str
+        Counter that was exceeded: ``"expansions"``, ``"rows"``, or
+        ``"seconds"``.
+    limit : int | float
+        Limit the execution reached.
+    """
+
+    def __init__(self, counter: str, limit: int | float) -> None:
+        self.counter = counter
+        self.limit = limit
+        super().__init__(f"query budget exceeded: {counter} limit {limit}")
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class QueryBudget:
+    """Limits that bound the work one query may perform.
+
+    A counter set to ``None`` is unlimited. The defaults bound a runaway walk
+    without interrupting ordinary queries.
+
+    Parameters
+    ----------
+    max_expansions : int | None, optional
+        Maximum relationship expansions, by default 1,000,000.
+    max_rows : int | None, optional
+        Maximum intermediate bindings produced by the stages, by default
+        100,000.
+    max_seconds : float | None, optional
+        Optional wall-clock limit, by default ``None`` for no time limit.
+    """
+
+    max_expansions: int | None = 1_000_000
+    max_rows: int | None = 100_000
+    max_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        """Validate every counter.
+
+        Raises
+        ------
+        ValidationError
+            If a counter is negative, or a value is not an integer count, a
+            number of seconds, or ``None``.
+        """
+        for name, value in (
+            ("max_expansions", self.max_expansions),
+            ("max_rows", self.max_rows),
+        ):
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                message = f"{name} must be a non-negative integer or None"
+                raise ValidationError(message)
+        seconds = self.max_seconds
+        if seconds is None:
+            return
+        if isinstance(seconds, bool) or not isinstance(seconds, int | float) or seconds < 0:
+            message = "max_seconds must be a non-negative number or None"
+            raise ValidationError(message)
+
+
 class _PropertyMapping(Mapping[str, Value]):
     """Read-only mapping behavior shared by element snapshots."""
 
@@ -476,6 +542,8 @@ __all__ = [
     "NotFoundError",
     "Path",
     "PygrafitoError",
+    "QueryBudget",
+    "QueryBudgetExceededError",
     "QueryError",
     "QueryExecutionError",
     "QuerySemanticError",

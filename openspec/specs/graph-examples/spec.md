@@ -98,14 +98,24 @@ arguments against an in-memory graph.
 ### Requirement: GQL tour classification and migration
 
 Every `.gql` tour SHALL execute against the built sample dataset in the current release and SHALL
-declare its GQL profile tier, the profile section it relies on, and the follow-up change that will
-migrate it. A tour SHALL NOT present an alias or extension as canonical GQL and SHALL NOT
-introduce a query construct absent from the profile.
+declare its GQL profile tier and the profile section it relies on. A tour that relies on a gated
+construct SHALL name the follow-up change that implements it. A tour SHALL NOT present an alias or
+extension as canonical GQL and SHALL NOT introduce a query construct absent from the profile.
 
 #### Scenario: Tier is declared
 
 - **WHEN** a reader opens a tour
-- **THEN** its tier, profile section, and migrating change are stated in the tour catalog
+- **THEN** its tier and profile section are stated in the tour catalog
+
+#### Scenario: Gated construct names its change
+
+- **WHEN** a tour relies on a gated construct
+- **THEN** the catalog names the follow-up change that implements it
+
+#### Scenario: Supported-only tour names no migrating change
+
+- **WHEN** a tour relies only on supported constructs
+- **THEN** the catalog does not claim a pending migration for it
 
 #### Scenario: Tour executes
 

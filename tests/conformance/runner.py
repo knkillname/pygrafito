@@ -9,7 +9,7 @@ import pathlib
 import typing
 from collections.abc import Mapping
 
-from pygrafito import Graph, PygrafitoError
+from pygrafito import Graph, PygrafitoError, QueryBudget
 from pygrafito.model import Value
 
 
@@ -93,6 +93,8 @@ class Case:
         Expected rows or expected error.
     tags : tuple[str, ...]
         Classification tags such as ``canonical``, ``alias``, or ``gated``.
+    budget : Mapping[str, object] | None, optional
+        Query-budget overrides, by default none.
     """
 
     name: str
@@ -102,6 +104,7 @@ class Case:
     params: Mapping[str, Value]
     expect: Mapping[str, object]
     tags: tuple[str, ...]
+    budget: Mapping[str, object] | None = None
 
     @property
     def gated(self) -> bool:
@@ -189,7 +192,12 @@ class Corpus:
         fixture = self._fixtures[case.fixture]
         with Graph.open(":memory:") as graph:
             self._build(graph, fixture)
-            result = graph.query(case.query, dict(case.params))
+            budget = (
+                None
+                if case.budget is None
+                else QueryBudget(**typing.cast("dict[str, typing.Any]", dict(case.budget)))
+            )
+            result = graph.query(case.query, dict(case.params), budget=budget)
             return [dict(row) for row in result.rows]
 
     @staticmethod
@@ -327,4 +335,5 @@ class Corpus:
             params=typing.cast("Mapping[str, Value]", document.get("params", {})),
             expect=typing.cast("Mapping[str, object]", document["expect"]),
             tags=tuple(typing.cast("list[str]", document.get("tags", []))),
+            budget=typing.cast("Mapping[str, object] | None", document.get("budget")),
         )

@@ -5,10 +5,11 @@
 
 import dataclasses
 import typing
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from pygrafito.engine.query.ast import (
     Binary,
+    EdgeDirection,
     Expression,
     IsNull,
     LabelAnd,
@@ -22,6 +23,7 @@ from pygrafito.engine.query.ast import (
     NodePattern,
     Operators,
     Parameter,
+    PathMode,
     PathPattern,
     Property,
     PropertyEntry,
@@ -768,6 +770,7 @@ class Compiler:
         self._relationship_by_alias: dict[str, RelationshipColumns] = {}
         self._path_node_aliases: list[str] = []
         self._path_relationships: list[RelationshipColumns] = []
+        self._path_relationship_aliases: list[str] = []
         self._node_counter = 0
         self._relationship_counter = 0
         self._label_counter = 0
@@ -808,6 +811,7 @@ class Compiler:
             node_start = len(self._path_node_aliases)
             relationship_start = len(self._path_relationships)
             self._compile_pattern(pattern)
+            self._add_mode_predicates(pattern, node_start, relationship_start)
             paths.extend(self._build_paths(pattern, node_start, relationship_start))
         residual = self._compile_where()
         sql = self._build_sql()
@@ -840,6 +844,7 @@ class Compiler:
         self._relationship_by_alias = {}
         self._path_node_aliases = []
         self._path_relationships = []
+        self._path_relationship_aliases = []
         self._node_counter = 0
         self._relationship_counter = 0
         self._label_counter = 0
@@ -863,8 +868,9 @@ class Compiler:
         current = self._bind_node(pattern.nodes[0], None)
         self._path_node_aliases.append(current)
         for index, relationship in enumerate(pattern.relationships):
-            next_id, relationship_columns = self._bind_relationship(relationship, current)
+            next_id, relationship_columns, alias = self._bind_relationship(relationship, current)
             self._path_relationships.append(relationship_columns)
+            self._path_relationship_aliases.append(alias)
             current = self._bind_node(pattern.nodes[index + 1], next_id)
             self._path_node_aliases.append(current)
 
@@ -1016,7 +1022,7 @@ class Compiler:
         self,
         pattern: RelationshipPattern,
         current_id: str,
-    ) -> tuple[str, RelationshipColumns]:
+    ) -> tuple[str, RelationshipColumns, str]:
         """Bind one relationship pattern and return its next-node expression.
 
         Parameters
@@ -1028,8 +1034,9 @@ class Compiler:
 
         Returns
         -------
-        tuple[str, RelationshipColumns]
-            SQL expression for the next node id and the row selection.
+        tuple[str, RelationshipColumns, str]
+            SQL expression for the next node id, the row selection, and the
+            relationship table alias.
         """
         builder = self._predicates_builder
         if builder is None:
@@ -1044,12 +1051,7 @@ class Compiler:
         if alias is None or columns is None:
             alias = f"r{self._relationship_counter}"
             self._relationship_counter += 1
-            condition = self._direction_condition(
-                pattern.direction,
-                alias,
-                current_id,
-                pattern.undirected_only,
-            )
+            condition = self._direction_condition(pattern.direction, alias, current_id)
             self._joins.append(f"JOIN relationships AS {alias} ON {condition}")
             labels = self._select(
                 f"(SELECT json_group_array(label) FROM "
@@ -1071,12 +1073,7 @@ class Compiler:
                 self._relationship_aliases[pattern.variable] = alias
                 self._add_bound_entity(alias, pattern.variable)
         else:
-            condition = self._direction_condition(
-                pattern.direction,
-                alias,
-                current_id,
-                pattern.undirected_only,
-            )
+            condition = self._direction_condition(pattern.direction, alias, current_id)
             self._predicates.append(condition)
         if pattern.label_expression is not None:
             self._predicates.append(
@@ -1098,53 +1095,60 @@ class Compiler:
         self._add_property_predicates(alias, pattern.properties)
         if pattern.where is not None:
             self._add_pattern_predicate(alias, pattern.variable, pattern.where, True)
-        return self._next_id(pattern.direction, alias, current_id), columns
+        return self._next_id(pattern.direction, alias, current_id), columns, alias
 
     @staticmethod
     def _direction_condition(
-        direction: Direction,
+        direction: EdgeDirection,
         alias: str,
         current_id: str,
-        undirected_only: bool = False,
     ) -> str:
         """Build the join condition for one relationship direction.
 
         Parameters
         ----------
-        direction : Direction
-            Direction relative to the previous node.
+        direction : EdgeDirection
+            Direction form of the relationship pattern.
         alias : str
             Relationship table alias.
         current_id : str
             Table alias of the previous node.
-        undirected_only : bool, optional
-            Whether only relationships stored as undirected match, by default
-            ``False``.
 
         Returns
         -------
         str
             SQL condition.
         """
-        if undirected_only:
-            return (
-                f"{alias}.directed = 0 AND "
-                f"({alias}.src = {current_id}.id OR {alias}.dst = {current_id}.id)"
-            )
-        if direction is Direction.OUTGOING:
-            return f"{alias}.directed = 1 AND {alias}.src = {current_id}.id"
-        if direction is Direction.INCOMING:
-            return f"{alias}.directed = 1 AND {alias}.dst = {current_id}.id"
-        return f"({alias}.src = {current_id}.id OR {alias}.dst = {current_id}.id)"
+        directedness = direction.directedness
+        incident = f"({alias}.src = {current_id}.id OR {alias}.dst = {current_id}.id)"
+        if directedness is False:
+            return f"{alias}.directed = 0 AND {incident}"
+        if direction.traversal is Direction.OUTGOING:
+            forward = f"{alias}.src = {current_id}.id"
+            if directedness is True:
+                return f"{alias}.directed = 1 AND {forward}"
+            directed = f"({alias}.directed = 1 AND {forward})"
+            undirected = f"({alias}.directed = 0 AND {incident})"
+            return f"({directed} OR {undirected})"
+        if direction.traversal is Direction.INCOMING:
+            backward = f"{alias}.dst = {current_id}.id"
+            if directedness is True:
+                return f"{alias}.directed = 1 AND {backward}"
+            directed = f"({alias}.directed = 1 AND {backward})"
+            undirected = f"({alias}.directed = 0 AND {incident})"
+            return f"({directed} OR {undirected})"
+        if directedness is True:
+            return f"{alias}.directed = 1 AND {incident}"
+        return incident
 
     @staticmethod
-    def _next_id(direction: Direction, alias: str, current_id: str) -> str:
+    def _next_id(direction: EdgeDirection, alias: str, current_id: str) -> str:
         """Build the SQL expression for the next node id.
 
         Parameters
         ----------
-        direction : Direction
-            Direction relative to the previous node.
+        direction : EdgeDirection
+            Direction form of the relationship pattern.
         alias : str
             Relationship table alias.
         current_id : str
@@ -1155,10 +1159,11 @@ class Compiler:
         str
             SQL expression identifying the next node.
         """
-        if direction is Direction.OUTGOING:
-            return f"{alias}.dst"
-        if direction is Direction.INCOMING:
-            return f"{alias}.src"
+        if direction.directedness is True:
+            if direction is EdgeDirection.OUTGOING:
+                return f"{alias}.dst"
+            if direction is EdgeDirection.INCOMING:
+                return f"{alias}.src"
         return f"CASE WHEN {alias}.src = {current_id}.id THEN {alias}.dst ELSE {alias}.src END"
 
     def _add_property_predicates(
@@ -1262,6 +1267,70 @@ class Compiler:
             return value
         message = f"variable {variable!r} cannot be used as a pattern element"
         raise QuerySemanticError(message)
+
+    def _add_mode_predicates(
+        self,
+        pattern: PathPattern,
+        node_start: int,
+        relationship_start: int,
+    ) -> None:
+        """Add the uniqueness predicates implied by a path mode.
+
+        Parameters
+        ----------
+        pattern : PathPattern
+            Compiled path pattern.
+        node_start : int
+            Index of the pattern's first node selection.
+        relationship_start : int
+            Index of the pattern's first relationship selection.
+        """
+        mode = PathMode.WALK if pattern.mode is None else pattern.mode
+        if mode is PathMode.WALK:
+            return
+        if mode is PathMode.TRAIL:
+            aliases = self._unique_aliases(self._path_relationship_aliases[relationship_start:])
+            self._append_inequalities(aliases, skip_last_pair=False)
+            return
+        aliases = self._unique_aliases(self._path_node_aliases[node_start:])
+        self._append_inequalities(aliases, skip_last_pair=mode is PathMode.SIMPLE)
+
+    def _append_inequalities(self, aliases: Sequence[str], *, skip_last_pair: bool) -> None:
+        """Append pairwise id-inequality predicates for one path.
+
+        Parameters
+        ----------
+        aliases : Sequence[str]
+            Distinct table aliases in path order.
+        skip_last_pair : bool
+            Whether the first and last alias may be equal.
+        """
+        for left_index, left in enumerate(aliases):
+            for right_index in range(left_index + 1, len(aliases)):
+                if skip_last_pair and left_index == 0 and right_index == len(aliases) - 1:
+                    continue
+                right = aliases[right_index]
+                self._predicates.append(f"{left}.id <> {right}.id")
+
+    @staticmethod
+    def _unique_aliases(aliases: Sequence[str]) -> list[str]:
+        """Return aliases in first-appearance order without duplicates.
+
+        Parameters
+        ----------
+        aliases : Sequence[str]
+            Table aliases in path order.
+
+        Returns
+        -------
+        list[str]
+            Distinct aliases in path order.
+        """
+        unique: list[str] = []
+        for alias in aliases:
+            if alias not in unique:
+                unique.append(alias)
+        return unique
 
     def _build_paths(
         self,

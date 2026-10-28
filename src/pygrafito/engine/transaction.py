@@ -18,6 +18,7 @@ from pygrafito.engine.query.values import QueryValue
 from pygrafito.model import (
     LockTimeoutError,
     Node,
+    QueryBudget,
     Relationship,
     TransactionError,
     ValidationError,
@@ -483,6 +484,8 @@ class Transaction:
         self,
         text: str,
         parameters: Mapping[str, QueryValue] | None = None,
+        *,
+        budget: QueryBudget | None = None,
     ) -> QueryResult:
         """Execute one statement inside the active transaction.
 
@@ -497,6 +500,8 @@ class Transaction:
             Query source text.
         parameters : Mapping[str, QueryValue] | None, optional
             Query parameter values, by default none.
+        budget : QueryBudget | None, optional
+            Budget for this execution, by default the graph default.
 
         Returns
         -------
@@ -506,7 +511,7 @@ class Transaction:
         self._require_active()
         analysis = SemanticAnalyzer.analyze(Parser.parse_statement(text))
         values: Mapping[str, QueryValue] = {} if parameters is None else parameters
-        return self._query.execute_active(PlanBuilder.build(analysis), values)
+        return self._query.execute_active(PlanBuilder.build(analysis), values, budget)
 
     def _require_active(self) -> None:
         """Reject operations outside an active transaction.

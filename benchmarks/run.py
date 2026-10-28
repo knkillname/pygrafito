@@ -112,6 +112,20 @@ class Scenarios:
             "MATCH (a:Program {cycles: 36})-[:ALLIES_WITH*1..2]->(b) RETURN count(*) AS total"
         )
 
+    @staticmethod
+    def walk_path(graph: Graph) -> None:
+        """Follow a fixed two-hop path with no uniqueness predicate."""
+        graph.query(
+            "MATCH WALK (a:Program {cycles: 36})-[r]->(b)-[s]->(c) RETURN count(*) AS total"
+        )
+
+    @staticmethod
+    def trail_path(graph: Graph) -> None:
+        """Follow the same fixed path with relationship-uniqueness predicates."""
+        graph.query(
+            "MATCH TRAIL (a:Program {cycles: 36})-[r]->(b)-[s]->(c) RETURN count(*) AS total"
+        )
+
 
 class Runner:
     """Run the benchmark and print its tables.
@@ -134,6 +148,8 @@ class Runner:
             "direction filter": Scenarios.direction_filter,
             "node lookup": Scenarios.node_lookup,
             "quantified": Scenarios.quantified,
+            "walk path": Scenarios.walk_path,
+            "trail path": Scenarios.trail_path,
         }
 
     def run(self) -> None:

@@ -12,6 +12,7 @@ from pygrafito.engine.query.ast import (
     Binary,
     Create,
     Delete,
+    EdgeDirection,
     Expression,
     Filter,
     FunctionCall,
@@ -23,6 +24,7 @@ from pygrafito.engine.query.ast import (
     NodePattern,
     Operators,
     Parameter,
+    PathMode,
     PathPattern,
     Property,
     PropertyEntry,
@@ -46,7 +48,7 @@ from pygrafito.engine.query.values import (
     FunctionCatalog,
     FunctionSpec,
 )
-from pygrafito.model import Direction, QuerySemanticError
+from pygrafito.model import QuerySemanticError
 
 
 class VariableKind(Enum):
@@ -279,6 +281,7 @@ class SemanticAnalyzer:
     """
 
     AGGREGATE_NAMES: frozenset[str] = FunctionCatalog.AGGREGATES
+    DEFAULT_PATH_MODE: PathMode = PathMode.WALK
 
     def __init__(self, statement: Statement) -> None:
         self._statement = statement
@@ -319,10 +322,11 @@ class SemanticAnalyzer:
                     self._bind_pattern(pattern)
                 if clause.where is not None:
                     self._validate_expression(clause.where, aggregates_allowed=False)
+                patterns = self._resolve_path_modes(clause)
                 if clause.optional:
                     stages.append(
                         OptionalMatchStage(
-                            patterns=clause.patterns,
+                            patterns=patterns,
                             where=clause.where,
                             introduced=frozenset(set(self._kinds) - before),
                         )
@@ -330,7 +334,7 @@ class SemanticAnalyzer:
                 else:
                     stages.append(
                         MatchStage(
-                            patterns=clause.patterns,
+                            patterns=patterns,
                             where=clause.where,
                         )
                     )
@@ -534,7 +538,7 @@ class SemanticAnalyzer:
             if len(relationship.types) != 1:
                 message = "a merged relationship must have exactly one type"
                 raise QuerySemanticError(message)
-            if relationship.direction is not Direction.OUTGOING:
+            if relationship.direction is not EdgeDirection.OUTGOING:
                 message = "a merged relationship must use the '-->' direction"
                 raise QuerySemanticError(message)
         for node in pattern.nodes:
@@ -625,7 +629,7 @@ class SemanticAnalyzer:
             if len(relationship.types) > 1:
                 message = "a created relationship must have at most one label"
                 raise QuerySemanticError(message)
-            if relationship.direction is not Direction.OUTGOING:
+            if relationship.direction is not EdgeDirection.OUTGOING:
                 message = "a created relationship must use the '-->' direction"
                 raise QuerySemanticError(message)
             if relationship.variable is not None:
@@ -797,6 +801,75 @@ class SemanticAnalyzer:
         if lower > upper:
             message = "the variable-length lower bound cannot exceed the upper bound"
             raise QuerySemanticError(message)
+
+    @classmethod
+    def _resolve_path_modes(cls, clause: Match) -> tuple[PathPattern, ...]:
+        """Resolve the effective path mode of every pattern in a match clause.
+
+        Parameters
+        ----------
+        clause : Match
+            Match clause whose patterns are resolved.
+
+        Returns
+        -------
+        tuple[PathPattern, ...]
+            Patterns carrying their resolved mode.
+
+        Raises
+        ------
+        QuerySemanticError
+            If one path mixes a legacy and a canonical quantifier without an
+            explicit mode.
+        """
+        return tuple(
+            dataclasses.replace(pattern, mode=cls._resolve_path_mode(clause.mode, pattern))
+            for pattern in clause.patterns
+        )
+
+    @classmethod
+    def _resolve_path_mode(
+        cls,
+        clause_mode: PathMode | None,
+        pattern: PathPattern,
+    ) -> PathMode:
+        """Resolve one path's effective mode.
+
+        Parameters
+        ----------
+        clause_mode : PathMode | None
+            Mode named by the clause, or ``None``.
+        pattern : PathPattern
+            Pattern whose mode is resolved.
+
+        Returns
+        -------
+        PathMode
+            Explicit per-path mode, explicit clause mode, ``TRAIL`` for a
+            legacy quantifier, or the canonical default.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the path mixes both quantifier forms without an explicit mode.
+        """
+        if pattern.mode is not None:
+            return pattern.mode
+        if clause_mode is not None:
+            return clause_mode
+        legacy = any(
+            relationship.canonical_quantifier is False
+            and (relationship.min_hops is not None or relationship.max_hops is not None)
+            for relationship in pattern.relationships
+        )
+        canonical = any(relationship.canonical_quantifier for relationship in pattern.relationships)
+        if legacy and canonical:
+            message = (
+                "a path cannot mix a legacy and a canonical quantifier without an explicit "
+                "path mode"
+            )
+            raise QuerySemanticError(message)
+        return PathMode.TRAIL if legacy else cls.DEFAULT_PATH_MODE
 
     def _register(self, name: str, kind: VariableKind) -> None:
         """Register one variable, rejecting kind conflicts.

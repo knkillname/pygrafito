@@ -19,6 +19,7 @@ PygrafitoError
     |-- QuerySyntaxError
     |-- QuerySemanticError
     `-- QueryExecutionError
+        `-- QueryBudgetExceededError
 ```
 
 ## PygrafitoError
@@ -133,3 +134,13 @@ Retry later, or increase `busy_timeout` for a known long writer.
 ```{eval-rst}
 .. autoexception:: pygrafito.QueryExecutionError
 ```
+
+## QueryBudgetExceededError
+
+```{eval-rst}
+.. autoexception:: pygrafito.QueryBudgetExceededError
+```
+
+`counter` names the exhausted counter (`expansions`, `rows`, or `seconds`) and `limit` records the
+limit that was reached. The error is raised before any result is returned, and a write statement
+that raises it is rolled back entirely. See [Bound query work](../guides/querying.md#bound-query-work).

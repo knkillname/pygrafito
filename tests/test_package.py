@@ -119,6 +119,8 @@ class TestPackage:
             "Path",
             "PreparedQuery",
             "PygrafitoError",
+            "QueryBudget",
+            "QueryBudgetExceededError",
             "QueryError",
             "QueryExecutionError",
             "QueryResult",

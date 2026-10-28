@@ -801,18 +801,69 @@
       ]
     },
     {
-      "name": "arrow-extended-form-is-gated",
+      "name": "arrow-either-directed-direction",
       "feature": "edge-directions",
-      "fixture": "tron-undirected",
-      "query": "MATCH (a)<~(b) RETURN a",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})<-[r:TRUSTS]->(b) RETURN b.designation AS name ORDER BY name",
       "expect": {
-        "error": {
-          "type": "QuerySemanticError",
-          "contains": "add-gql-path-semantics"
-        }
+        "rows": [
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
       },
       "tags": [
-        "gated"
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-either-direction-excludes-undirected",
+      "feature": "edge-directions",
+      "fixture": "tron-undirected",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})<-[r]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-incoming-or-undirected",
+      "feature": "edge-directions",
+      "fixture": "tron-undirected",
+      "query": "MATCH (a {designation: 'Quorra'})<-[r]~(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "arrow-outgoing-or-undirected",
+      "feature": "edge-directions",
+      "fixture": "tron-undirected",
+      "query": "MATCH (a {designation: 'Quorra'})~[r]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
       ]
     },
     {
@@ -1297,6 +1348,192 @@
       },
       "tags": [
         "extension"
+      ]
+    },
+    {
+      "name": "walk-reuses-a-relationship",
+      "feature": "walk-path-mode",
+      "fixture": "tron-cycle",
+      "query": "MATCH WALK (a {designation: 'Kevin Flynn'})-[:TRUSTS*4]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "trail-rejects-a-reused-relationship",
+      "feature": "trail-path-mode",
+      "fixture": "tron-cycle",
+      "query": "MATCH TRAIL (a {designation: 'Kevin Flynn'})-[:TRUSTS*4]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "simple-allows-a-closed-path",
+      "feature": "simple-path-mode",
+      "fixture": "tron-cycle",
+      "query": "MATCH SIMPLE (a {designation: 'Kevin Flynn'})-[:TRUSTS*3]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "acyclic-rejects-a-closed-path",
+      "feature": "acyclic-path-mode",
+      "fixture": "tron-cycle",
+      "query": "MATCH ACYCLIC (a {designation: 'Kevin Flynn'})-[:TRUSTS*3]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": []
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "quantifier-bounded-range",
+      "feature": "quantifier",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS{1,3}]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "quantifier-exact-count",
+      "feature": "quantifier",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS{2}]->(b) RETURN b.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "quantifier-upper-bound-only",
+      "feature": "quantifier",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS{,2}]->(b) RETURN b.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Kevin Flynn"
+          },
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "budget-row-limit",
+      "feature": "query-budget",
+      "fixture": "tron-cycle",
+      "query": "FOR value IN [1, 2, 3] RETURN value",
+      "expect": {
+        "error": {
+          "type": "QueryBudgetExceededError",
+          "contains": "rows"
+        }
+      },
+      "tags": [
+        "extension"
+      ],
+      "budget": {
+        "max_rows": 2
+      }
+    },
+    {
+      "name": "budget-expansion-limit",
+      "feature": "query-budget",
+      "fixture": "tron-cycle",
+      "query": "MATCH (a {designation: 'Kevin Flynn'})-[:TRUSTS*1..3]->(b) RETURN b",
+      "expect": {
+        "error": {
+          "type": "QueryBudgetExceededError",
+          "contains": "expansions"
+        }
+      },
+      "tags": [
+        "extension"
+      ],
+      "budget": {
+        "max_expansions": 0
+      }
+    },
+    {
+      "name": "budget-time-limit",
+      "feature": "query-budget",
+      "fixture": "tron-cycle",
+      "query": "FOR value IN [1] RETURN value",
+      "expect": {
+        "error": {
+          "type": "QueryBudgetExceededError",
+          "contains": "seconds"
+        }
+      },
+      "tags": [
+        "extension"
+      ],
+      "budget": {
+        "max_seconds": 0
+      }
+    },
+    {
+      "name": "path-mode-default-is-walk",
+      "feature": "walk-path-mode",
+      "fixture": "tron-self-loop",
+      "query": "MATCH (a {designation: 'Tron'})-[r:MONITORS]->(b)-[s:MONITORS]->(c) RETURN c.designation AS name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Tron"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
       ]
     }
   ]

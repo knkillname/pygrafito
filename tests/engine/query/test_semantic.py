@@ -11,6 +11,7 @@ from pygrafito.engine.query.ast import (
     Match,
     NodePattern,
     Parameter,
+    PathMode,
     PathPattern,
     Return,
     ReturnItem,
@@ -18,6 +19,7 @@ from pygrafito.engine.query.ast import (
     Variable,
 )
 from pygrafito.engine.query.parser import Parser
+from pygrafito.engine.query.plan import PlanBuilder
 from pygrafito.engine.query.semantic import (
     Analysis,
     MatchStage,
@@ -412,12 +414,12 @@ class TestVariableLength:
     def test_bare_quantifier_requires_an_upper_bound(self) -> None:
         with pytest.raises(QuerySemanticError) as caught:
             self.analyze("MATCH (a)-[*]->(b) RETURN b")
-        assert "upper bound" in caught.value.message
+        assert "add-gql-unbounded-traversal" in caught.value.message
 
     def test_open_range_requires_an_upper_bound(self) -> None:
         with pytest.raises(QuerySemanticError) as caught:
             self.analyze("MATCH (a)-[*1..]->(b) RETURN b")
-        assert "upper bound" in caught.value.message
+        assert "add-gql-unbounded-traversal" in caught.value.message
 
     def test_negative_bounds_are_rejected(self) -> None:
         with pytest.raises(QuerySemanticError):
@@ -734,3 +736,75 @@ class TestUnwindAndMergeAnalysis:
     def test_merge_conditional_null_removal_is_accepted(self) -> None:
         analysis = self.analyze("MERGE (n:Program) ON MATCH SET n.cycles = null RETURN n")
         assert analysis.is_write
+
+
+class TestPathModeResolution:
+    """Verify the effective path mode and the quantifier mixing rule."""
+
+    def analyze(self, text: str) -> Analysis:
+        return SemanticAnalyzer.analyze(Parser.parse_statement(text))
+
+    def mode(self, text: str) -> PathMode | None:
+        analysis = self.analyze(text)
+        stage = analysis.stages[0]
+        if not isinstance(stage, MatchStage):
+            raise AssertionError("expected a match stage")
+        return stage.patterns[0].mode
+
+    def test_default_is_walk(self) -> None:
+        """Resolve a plain canonical path to WALK."""
+        assert self.mode("MATCH (a)-[:TRUSTS]->(b) RETURN b") is PathMode.WALK
+
+    def test_legacy_quantifier_implies_trail(self) -> None:
+        """Resolve a legacy quantifier to TRAIL."""
+        assert self.mode("MATCH (a)-[:TRUSTS*1..3]->(b) RETURN b") is PathMode.TRAIL
+
+    def test_clause_mode_wins_over_the_default(self) -> None:
+        """Resolve the clause mode before the quantifier default."""
+        assert self.mode("MATCH SIMPLE (a)-[:TRUSTS]->(b) RETURN b") is PathMode.SIMPLE
+
+    def test_explicit_path_mode_wins_over_the_clause(self) -> None:
+        """Resolve a per-path mode before the clause mode."""
+        analysis = self.analyze("MATCH WALK (a), ACYCLIC (b)-[:TRUSTS*1..2]->(c) RETURN c")
+        stage = analysis.stages[0]
+        if not isinstance(stage, MatchStage):
+            raise AssertionError("expected a match stage")
+        assert stage.patterns[0].mode is PathMode.WALK
+        assert stage.patterns[1].mode is PathMode.ACYCLIC
+
+    def test_canonical_quantifier_implies_walk(self) -> None:
+        """Resolve a canonical quantifier to WALK."""
+        assert self.mode("MATCH (a)-[:TRUSTS{1,3}]->(b) RETURN b") is PathMode.WALK
+
+    def test_explicit_clause_mode_wins_over_canonical(self) -> None:
+        """Keep an explicit clause mode over the canonical default."""
+        assert self.mode("MATCH TRAIL (a)-[:TRUSTS{1,3}]->(b) RETURN b") is PathMode.TRAIL
+
+    def test_mixed_quantifiers_are_rejected(self) -> None:
+        """Reject a path that mixes both quantifier forms without a mode."""
+        with pytest.raises(QuerySemanticError) as raised:
+            self.analyze("MATCH (a)-[:TRUSTS*1..2]->(b)-[:TRUSTS{1,2}]->(c) RETURN c")
+        assert "mix" in raised.value.message
+
+    def test_explicit_mode_resolves_mixed_quantifiers(self) -> None:
+        """Accept a mixed path when an explicit mode is named."""
+        analysis = self.analyze("MATCH TRAIL (a)-[:TRUSTS*1..2]->(b)-[:TRUSTS{1,2}]->(c) RETURN c")
+        stage = analysis.stages[0]
+        if not isinstance(stage, MatchStage):
+            raise AssertionError("expected a match stage")
+        assert stage.patterns[0].mode is PathMode.TRAIL
+
+
+class TestPlanCarriesPathModes:
+    """Verify the resolved mode survives into the execution plan."""
+
+    def test_plan_stage_carries_the_resolved_mode(self) -> None:
+        """Expose the resolved mode on the planned match stage."""
+        analysis = SemanticAnalyzer.analyze(
+            Parser.parse_statement("MATCH TRAIL (a)-[:TRUSTS*1..2]->(b) RETURN b")
+        )
+        plan = PlanBuilder.build(analysis)
+        stage = plan.stages[0].stage
+        if not isinstance(stage, MatchStage):
+            raise AssertionError("expected a match stage")
+        assert stage.patterns[0].mode is PathMode.TRAIL

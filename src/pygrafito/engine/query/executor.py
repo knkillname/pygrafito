@@ -28,6 +28,7 @@ from pygrafito.engine.query.ast import (
     Unary,
     Variable,
 )
+from pygrafito.engine.query.budget import BudgetTracker
 from pygrafito.engine.query.compiler import (
     CompiledMatch,
     Compiler,
@@ -65,6 +66,7 @@ from pygrafito.model import (
     Node,
     NotFoundError,
     Path,
+    QueryBudget,
     QueryError,
     QueryExecutionError,
     QuerySemanticError,
@@ -310,6 +312,8 @@ class QueryExecutor:
     database : Database | None, optional
         Database wrapper used for graph-level lifecycle checks, by default
         ``None`` for executors owned by active transactions.
+    budget : QueryBudget | None, optional
+        Graph-wide default budget, by default the documented defaults.
     """
 
     def __init__(
@@ -319,12 +323,14 @@ class QueryExecutor:
         relationships: RelationshipRepository,
         codec: PropertyCodec,
         database: Database | None = None,
+        budget: QueryBudget | None = None,
     ) -> None:
         self._connection = connection
         self._nodes = nodes
         self._relationships = relationships
         self._codec = codec
         self._database = database
+        self._budget = QueryBudget() if budget is None else budget
 
     def explain(
         self,
@@ -461,7 +467,12 @@ class QueryExecutor:
         lines.append(f"QUANTIFIED PATTERN max_hops={depth}")
         return tuple(lines)
 
-    def execute_graph(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
+    def execute_graph(
+        self,
+        plan: Plan,
+        parameters: Mapping[str, QueryValue],
+        budget: QueryBudget | None = None,
+    ) -> QueryResult:
         """Execute a statement inside its own short transaction.
 
         Read statements use a deferred transaction; write statements use
@@ -474,6 +485,8 @@ class QueryExecutor:
             Planned statement.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        budget : QueryBudget | None, optional
+            Budget for this execution, by default the graph default.
 
         Returns
         -------
@@ -487,6 +500,7 @@ class QueryExecutor:
         QueryExecutionError
             If storage fails while executing the statement.
         """
+        selected = self._budget if budget is None else budget
         if self._database is None:
             message = "the executor is not attached to a graph database"
             raise TransactionError(message)
@@ -503,7 +517,7 @@ class QueryExecutor:
             message = "could not start a query transaction"
             raise TransactionError(message) from error
         try:
-            result = self._execute(plan, parameters)
+            result = self._execute(plan, parameters, selected)
         except ConstraintViolationError as error:
             self._rollback()
             refreshed = self._refresh_violation(error)
@@ -531,7 +545,12 @@ class QueryExecutor:
             raise QueryExecutionError(message) from error
         return result
 
-    def execute_active(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
+    def execute_active(
+        self,
+        plan: Plan,
+        parameters: Mapping[str, QueryValue],
+        budget: QueryBudget | None = None,
+    ) -> QueryResult:
         """Execute a statement on the active transaction's connection.
 
         A write statement runs inside a savepoint, so a failure undoes only that
@@ -543,6 +562,8 @@ class QueryExecutor:
             Planned statement.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        budget : QueryBudget | None, optional
+            Budget for this execution, by default the graph default.
 
         Returns
         -------
@@ -554,11 +575,12 @@ class QueryExecutor:
         QueryExecutionError
             If storage fails while executing the statement.
         """
+        selected = self._budget if budget is None else budget
         savepoint = plan.analysis.is_write
         if savepoint:
             self._connection.execute("SAVEPOINT pygrafito_statement")
         try:
-            result = self._execute(plan, parameters)
+            result = self._execute(plan, parameters, selected)
         except ConstraintViolationError as error:
             self._release_savepoint(savepoint, rollback=True)
             refreshed = self._refresh_violation(error)
@@ -645,7 +667,12 @@ class QueryExecutor:
             with contextlib.suppress(sqlite3.Error):
                 self._connection.execute("RELEASE SAVEPOINT pygrafito_statement")
 
-    def _execute(self, plan: Plan, parameters: Mapping[str, QueryValue]) -> QueryResult:
+    def _execute(
+        self,
+        plan: Plan,
+        parameters: Mapping[str, QueryValue],
+        budget: QueryBudget,
+    ) -> QueryResult:
         """Execute one plan and materialize its result.
 
         Parameters
@@ -654,6 +681,8 @@ class QueryExecutor:
             Planned query.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        budget : QueryBudget
+            Budget selected for this execution.
 
         Returns
         -------
@@ -662,6 +691,8 @@ class QueryExecutor:
         """
         analysis = plan.analysis
         analysis.require_parameters(parameters)
+        tracker = BudgetTracker(budget)
+        tracker.check_time()
         return_clause = analysis.return_clause
         skip = self._page_value(
             None if return_clause is None else return_clause.skip,
@@ -678,13 +709,16 @@ class QueryExecutor:
         evaluator = ExpressionEvaluator(functions)
         bindings: list[dict[str, QueryValue]] = [{}]
         for plan_stage in plan.stages:
+            tracker.check_time()
             bindings = self._run_stage(
                 plan_stage.stage,
                 bindings,
                 evaluator,
                 functions,
                 parameters,
+                tracker,
             )
+            tracker.check_time()
         mutations = MutationExecutor(self._nodes, self._relationships)
         if analysis.is_write:
             matcher = functools.partial(
@@ -699,6 +733,7 @@ class QueryExecutor:
                 parameters,
                 matcher,
             )
+            tracker.consume_rows(len(bindings))
         if return_clause is None:
             return QueryResult(
                 columns=(),
@@ -732,6 +767,7 @@ class QueryExecutor:
         evaluator: ExpressionEvaluator,
         functions: ScalarFunctions,
         parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
     ) -> list[dict[str, QueryValue]]:
         """Run one read stage over the rows produced by earlier stages.
 
@@ -747,6 +783,8 @@ class QueryExecutor:
             Scalar function implementation.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
 
         Returns
         -------
@@ -754,15 +792,28 @@ class QueryExecutor:
             Output rows of the stage.
         """
         if isinstance(stage, MatchStage):
-            return self._run_match_stage(stage, bindings, evaluator, parameters)
+            return self._run_match_stage(stage, bindings, evaluator, parameters, tracker)
         if isinstance(stage, OptionalMatchStage):
-            return self._run_optional_match_stage(stage, bindings, evaluator, parameters)
+            return self._run_optional_match_stage(
+                stage,
+                bindings,
+                evaluator,
+                parameters,
+                tracker,
+            )
         if isinstance(stage, UnwindStage):
-            return self._run_unwind_stage(stage, bindings, evaluator, parameters)
+            return self._run_unwind_stage(stage, bindings, evaluator, parameters, tracker)
         if isinstance(stage, FilterStage):
-            return self._run_filter_stage(stage, bindings, evaluator, parameters)
+            return self._run_filter_stage(stage, bindings, evaluator, parameters, tracker)
         if isinstance(stage, WithStage):
-            return self._run_with_stage(stage, bindings, evaluator, functions, parameters)
+            return self._run_with_stage(
+                stage,
+                bindings,
+                evaluator,
+                functions,
+                parameters,
+                tracker,
+            )
         message = f"unsupported read stage: {type(stage).__name__}"
         raise QueryExecutionError(message)
 
@@ -772,6 +823,7 @@ class QueryExecutor:
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
     ) -> list[dict[str, QueryValue]]:
         """Expand one list value per input row into output rows.
 
@@ -785,6 +837,8 @@ class QueryExecutor:
             Scalar expression evaluator.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
 
         Returns
         -------
@@ -804,7 +858,9 @@ class QueryExecutor:
             if isinstance(value, str) or not isinstance(value, Sequence):
                 message = "UNWIND requires a list value"
                 raise QueryExecutionError(message)
-            results.extend({**binding, stage.variable: item} for item in value)
+            for item in value:
+                tracker.consume_rows()
+                results.append({**binding, stage.variable: item})
         return results
 
     def _run_match_stage(
@@ -813,6 +869,7 @@ class QueryExecutor:
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
     ) -> list[dict[str, QueryValue]]:
         """Run a mandatory match stage.
 
@@ -826,6 +883,8 @@ class QueryExecutor:
             Scalar expression evaluator.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
 
         Returns
         -------
@@ -841,6 +900,7 @@ class QueryExecutor:
                 bindings,
                 evaluator,
                 parameters,
+                tracker,
                 optional=False,
                 introduced=frozenset(),
             )
@@ -854,7 +914,9 @@ class QueryExecutor:
                 parameters,
                 binding,
             )
-            results.extend({**binding, **match} for match in matches)
+            for match in matches:
+                tracker.consume_rows()
+                results.append({**binding, **match})
         return results
 
     def _run_optional_match_stage(
@@ -863,6 +925,7 @@ class QueryExecutor:
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
     ) -> list[dict[str, QueryValue]]:
         """Run an optional match stage as a left join.
 
@@ -876,6 +939,8 @@ class QueryExecutor:
             Scalar expression evaluator.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
 
         Returns
         -------
@@ -892,11 +957,13 @@ class QueryExecutor:
                 bindings,
                 evaluator,
                 parameters,
+                tracker,
                 optional=True,
                 introduced=stage.introduced,
             )
         for binding in bindings:
             if self._has_null_binding(binding, names):
+                tracker.consume_rows()
                 results.append({**binding, **dict.fromkeys(sorted(stage.introduced))})
                 continue
             matches = self._match_rows(
@@ -907,9 +974,12 @@ class QueryExecutor:
                 binding,
             )
             if not matches:
+                tracker.consume_rows()
                 results.append({**binding, **dict.fromkeys(sorted(stage.introduced))})
                 continue
-            results.extend({**binding, **match} for match in matches)
+            for match in matches:
+                tracker.consume_rows()
+                results.append({**binding, **match})
         return results
 
     def _run_filter_stage(
@@ -918,6 +988,7 @@ class QueryExecutor:
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
     ) -> list[dict[str, QueryValue]]:
         """Keep only the rows whose predicate is true.
 
@@ -931,17 +1002,21 @@ class QueryExecutor:
             Scalar expression evaluator.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
 
         Returns
         -------
         list[dict[str, QueryValue]]
             Rows whose predicate evaluated to ``True``.
         """
-        return [
+        results = [
             dict(binding)
             for binding in bindings
             if evaluator.evaluate(stage.where, binding, parameters) is True
         ]
+        tracker.consume_rows(len(results))
+        return results
 
     def _run_with_stage(
         self,
@@ -950,6 +1025,7 @@ class QueryExecutor:
         evaluator: ExpressionEvaluator,
         functions: ScalarFunctions,
         parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
     ) -> list[dict[str, QueryValue]]:
         """Run a ``WITH`` stage as a row transformer.
 
@@ -965,6 +1041,8 @@ class QueryExecutor:
             Scalar function implementation.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
 
         Returns
         -------
@@ -1019,7 +1097,9 @@ class QueryExecutor:
         limit = self._page_value(stage.limit, parameters, "LIMIT")
         start = 0 if skip is None else skip
         end = None if limit is None else start + limit
-        return [dict(row.binding) for row in rows[start:end]]
+        selected = [dict(row.binding) for row in rows[start:end]]
+        tracker.consume_rows(len(selected))
+        return selected
 
     def _run_pattern_stage(
         self,
@@ -1028,6 +1108,7 @@ class QueryExecutor:
         bindings: Sequence[Mapping[str, QueryValue]],
         evaluator: ExpressionEvaluator,
         parameters: Mapping[str, QueryValue],
+        tracker: BudgetTracker,
         *,
         optional: bool,
         introduced: frozenset[str],
@@ -1046,6 +1127,8 @@ class QueryExecutor:
             Scalar expression evaluator.
         parameters : Mapping[str, QueryValue]
             Query parameter values.
+        tracker : BudgetTracker
+            Budget counters of this execution.
         optional : bool
             Whether the stage is ``OPTIONAL MATCH``.
         introduced : frozenset[str]
@@ -1063,16 +1146,19 @@ class QueryExecutor:
             self._select_start_nodes,
             parameters,
             evaluator,
+            tracker,
         )
         names = self._pattern_variables(patterns)
         results: list[dict[str, QueryValue]] = []
         for binding in bindings:
             if self._has_null_binding(binding, names):
                 if optional:
+                    tracker.consume_rows()
                     results.append({**binding, **dict.fromkeys(sorted(introduced))})
                 continue
             matches = engine.match(patterns, where, binding)
             if optional and not matches:
+                tracker.consume_rows()
                 results.append({**binding, **dict.fromkeys(sorted(introduced))})
                 continue
             results.extend({**binding, **match} for match in matches)

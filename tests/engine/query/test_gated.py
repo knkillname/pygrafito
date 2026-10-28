@@ -15,14 +15,6 @@ class TestGatedConstructs:
     CASES: pytest.MarkDecorator = pytest.mark.parametrize(
         ("query", "change"),
         [
-            ("MATCH (a)-[:TRUSTS{1,3}]->(b) RETURN b", "add-gql-path-semantics"),
-            ("MATCH WALK (a)-[:TRUSTS]->(b) RETURN b", "add-gql-path-semantics"),
-            ("MATCH TRAIL (a)-[:TRUSTS]->(b) RETURN b", "add-gql-path-semantics"),
-            ("MATCH SIMPLE (a)-[:TRUSTS]->(b) RETURN b", "add-gql-path-semantics"),
-            ("MATCH ACYCLIC (a)-[:TRUSTS]->(b) RETURN b", "add-gql-path-semantics"),
-            ("MATCH (a)<~(b) RETURN a", "add-gql-path-semantics"),
-            ("MATCH (a)~>(b) RETURN a", "add-gql-path-semantics"),
-            ("MATCH (a)<->(b) RETURN a", "add-gql-path-semantics"),
             ("UNWIND [1] AS x WITH ORDINALITY i RETURN i", "add-gql-composition"),
             ("UNWIND [1] AS x WITH OFFSET i RETURN i", "add-gql-composition"),
             ("MATCH (n) RETURN NO BINDINGS", "add-gql-composition"),

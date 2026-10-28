@@ -9,22 +9,18 @@ import typing
 class Gated:
     """Name each gated construct and the follow-up change that implements it."""
 
-    QUANTIFIER: str = "quantifier"
-    PATH_MODE: str = "path-mode"
-    DIRECTION: str = "direction"
+    OPEN_BOUND: str = "open-bound"
     ORDINALITY: str = "ordinality"
     NO_BINDINGS: str = "no-bindings"
     LET: str = "let"
     NEXT: str = "next"
     GROUP_BY: str = "group-by"
 
-    PATH_SEMANTICS: str = "add-gql-path-semantics"
+    UNBOUNDED: str = "add-gql-unbounded-traversal"
     COMPOSITION: str = "add-gql-composition"
 
     ENTRIES: typing.ClassVar[dict[str, tuple[str, str]]] = {
-        QUANTIFIER: ("the {n,m} quantifier", PATH_SEMANTICS),
-        PATH_MODE: ("an explicit path mode", PATH_SEMANTICS),
-        DIRECTION: ("the <~, ~>, and <-> direction forms", PATH_SEMANTICS),
+        OPEN_BOUND: ("an open-ended quantifier", UNBOUNDED),
         ORDINALITY: ("WITH ORDINALITY and WITH OFFSET", COMPOSITION),
         NO_BINDINGS: ("RETURN NO BINDINGS", COMPOSITION),
         LET: ("LET", COMPOSITION),

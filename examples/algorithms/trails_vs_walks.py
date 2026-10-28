@@ -33,9 +33,9 @@ class TrailsVersusWalks:
     """Contrast relationship-unique trails with unrestricted walks."""
 
     NOTE: typing.ClassVar[str] = (
-        "paths() enumerates relationship-unique trails. The GQL profile makes WALK the target "
-        "default for canonical path patterns, gated by the query budget; the current release "
-        "does not implement WALK, so the legacy quantifier keeps its TRAIL default."
+        "paths() enumerates relationship-unique trails. The query language defaults to WALK, so "
+        "use MATCH TRAIL when you want the same relationship-unique behavior; the legacy "
+        "quantifier keeps its TRAIL default."
     )
 
     @classmethod

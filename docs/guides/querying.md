@@ -199,6 +199,66 @@ with Graph.open(":memory:") as graph:
     print(prepared.execute({"minimum": 36}).rows[0]["total"])  # 2
 ```
 
+## Choose a path mode
+
+A path may repeat nodes or relationships depending on its mode. `WALK` permits both, `TRAIL`
+forbids reusing a relationship, `SIMPLE` forbids repeating a node except at the end, and `ACYCLIC`
+forbids repeating any node. A clause or a single path may name the mode.
+
+```python
+from pygrafito import Graph
+
+with Graph.open(":memory:") as graph:
+    flynn = graph.add_node("Program", designation="Flynn")
+    tron = graph.add_node("Program", designation="Tron")
+    clu = graph.add_node("Program", designation="Clu")
+    graph.add_relationship(flynn, "TRUSTS", tron)
+    graph.add_relationship(tron, "TRUSTS", clu)
+    graph.add_relationship(clu, "TRUSTS", flynn)
+
+    walk = graph.query(
+        "MATCH WALK (a:Program {designation: 'Flynn'})-[:TRUSTS*4]->(b) "
+        "RETURN count(*) AS routes"
+    )
+    trail = graph.query(
+        "MATCH TRAIL (a:Program {designation: 'Flynn'})-[:TRUSTS*4]->(b) "
+        "RETURN count(*) AS routes"
+    )
+    print(walk.rows[0]["routes"] > 0, trail.rows[0]["routes"])  # True 0
+```
+
+A canonical path without an explicit mode uses `WALK`; a path with a legacy `*n..m` quantifier
+keeps `TRAIL`. See [Path modes](../reference/query-language.md#path-modes) for the resolution order.
+
+## Bound query work
+
+Every execution runs under a query budget. Two counters bound the work — relationship expansions
+and intermediate rows — and an optional wall-clock limit bounds elapsed time. The defaults are
+1,000,000 expansions and 100,000 rows, with no time limit. Exceeding a counter raises
+`QueryBudgetExceededError` before any result is returned, and a write that exceeds the budget is
+rolled back entirely.
+
+```python
+from pygrafito import Graph, QueryBudget, QueryBudgetExceededError
+
+with Graph.open(":memory:") as graph:
+    graph.add_node("Program", designation="Quorra")
+    graph.add_node("Program", designation="Tron")
+
+    try:
+        graph.query(
+            "FOR value IN [1, 2, 3] RETURN value",
+            budget=QueryBudget(max_rows=1),
+        )
+    except QueryBudgetExceededError as error:
+        print(error.counter, error.limit)  # rows 1
+```
+
+Pass a budget to `Graph.open` to change the default for every statement, and to `Graph.query`,
+`Transaction.query`, or `PreparedQuery.execute` to override one execution without changing that
+default. A counter set to `None` is unlimited. The budget does not change the Python traversal API:
+`Graph.paths` remains a bounded, relationship-unique trail enumerator.
+
 ## Read the result
 
 `QueryResult.columns` is an ordered tuple. Each `Row` supports lookup by column name, iteration

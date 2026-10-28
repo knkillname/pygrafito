@@ -4,6 +4,7 @@
 """Frozen abstract syntax tree nodes for the query language."""
 
 import dataclasses
+from enum import Enum
 
 from pygrafito.engine.query.tokens import Span
 from pygrafito.model import Direction
@@ -269,6 +270,62 @@ class LabelWildcard:
 type LabelExpression = LabelName | LabelAnd | LabelOr | LabelNot | LabelWildcard
 
 
+class PathMode(Enum):
+    """Path repetition rule resolved for one path pattern."""
+
+    WALK = "walk"
+    TRAIL = "trail"
+    SIMPLE = "simple"
+    ACYCLIC = "acyclic"
+
+
+class EdgeDirection(Enum):
+    """Storage directions one relationship position admits."""
+
+    OUTGOING = "outgoing"
+    INCOMING = "incoming"
+    ANY = "any"
+    UNDIRECTED = "undirected"
+    DIRECTED_EITHER = "directed-either"
+    INCOMING_OR_UNDIRECTED = "incoming-or-undirected"
+    OUTGOING_OR_UNDIRECTED = "outgoing-or-undirected"
+
+    @property
+    def traversal(self) -> Direction:
+        """Return the traversal direction used to enumerate candidates.
+
+        Returns
+        -------
+        Direction
+            Outgoing, incoming, or both incident relationships.
+        """
+        if self is EdgeDirection.OUTGOING:
+            return Direction.OUTGOING
+        if self is EdgeDirection.INCOMING:
+            return Direction.INCOMING
+        if self is EdgeDirection.INCOMING_OR_UNDIRECTED:
+            return Direction.INCOMING
+        if self is EdgeDirection.OUTGOING_OR_UNDIRECTED:
+            return Direction.OUTGOING
+        return Direction.BOTH
+
+    @property
+    def directedness(self) -> bool | None:
+        """Return the admission rule for directed relationships.
+
+        Returns
+        -------
+        bool | None
+            ``True`` for directed relationships only, ``False`` for undirected
+            relationships only, and ``None`` when both kinds are admitted.
+        """
+        if self in {EdgeDirection.OUTGOING, EdgeDirection.INCOMING, EdgeDirection.DIRECTED_EITHER}:
+            return True
+        if self is EdgeDirection.UNDIRECTED:
+            return False
+        return None
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class NodePattern:
     """One node position inside a path pattern.
@@ -304,9 +361,8 @@ class RelationshipPattern:
         Bound variable, or ``None`` for an anonymous relationship.
     types : tuple[str, ...], optional
         Accepted relationship types, by default any type.
-    direction : Direction, optional
-        Traversal direction relative to the previous node, by default
-        outgoing.
+    direction : EdgeDirection, optional
+        Storage direction this position admits, by default outgoing.
     properties : tuple[PropertyEntry, ...], optional
         Property map every match must satisfy, by default none.
     min_hops : int | None, optional
@@ -315,9 +371,10 @@ class RelationshipPattern:
     max_hops : int | None, optional
         Maximum relationship count for a quantified pattern, by default
         ``None`` for an ordinary one-hop relationship.
-    undirected_only : bool, optional
-        Whether the pattern matches only relationships stored as undirected,
-        by default ``False``.
+    canonical_quantifier : bool, optional
+        Whether the quantifier uses the canonical ``{n,m}`` spelling, by
+        default ``False`` for the legacy ``*n..m`` spelling and ordinary
+        relationships.
     label_expression : LabelExpression | None, optional
         Parsed relationship label expression, or ``None`` when it names none.
     where : Expression | None, optional
@@ -326,11 +383,11 @@ class RelationshipPattern:
 
     variable: str | None = None
     types: tuple[str, ...] = ()
-    direction: Direction = Direction.OUTGOING
+    direction: EdgeDirection = EdgeDirection.OUTGOING
     properties: tuple[PropertyEntry, ...] = ()
     min_hops: int | None = None
     max_hops: int | None = None
-    undirected_only: bool = False
+    canonical_quantifier: bool = False
     label_expression: LabelExpression | None = None
     where: Expression | None = None
 
@@ -347,11 +404,17 @@ class PathPattern:
         Nodes from the start of the path to its end.
     relationships : tuple[RelationshipPattern, ...]
         Relationships in traversal order.
+    variable : str | None, optional
+        Path variable, or ``None`` when the path is not bound.
+    mode : PathMode | None, optional
+        Explicit per-path mode from the source, or the mode resolved by static
+        analysis, by default ``None``.
     """
 
     nodes: tuple[NodePattern, ...]
     relationships: tuple[RelationshipPattern, ...] = ()
     variable: str | None = None
+    mode: PathMode | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -402,11 +465,14 @@ class Match:
         Filter predicate, by default ``None``.
     optional : bool, optional
         Whether the clause is ``OPTIONAL MATCH``, by default ``False``.
+    mode : PathMode | None, optional
+        Explicit clause-wide path mode, by default ``None``.
     """
 
     patterns: tuple[PathPattern, ...]
     where: Expression | None = None
     optional: bool = False
+    mode: PathMode | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -672,6 +738,7 @@ __all__ = [
     "Clause",
     "Create",
     "Delete",
+    "EdgeDirection",
     "Expression",
     "Filter",
     "FunctionCall",
@@ -685,6 +752,7 @@ __all__ = [
     "NodePattern",
     "Operators",
     "Parameter",
+    "PathMode",
     "PathPattern",
     "Property",
     "PropertyAssignment",

@@ -487,9 +487,7 @@ class TestTours:
     def test_target_only_syntax_is_absent(self) -> None:
         """Reject syntax that the current release cannot execute."""
         forbidden = re.compile(
-            r"\b(?:LET|NEXT)\b|\bGROUP\s+BY\b|\bRETURN\s+NO\s+BINDINGS\b|"
-            r"\bMATCH\s+(?:WALK|TRAIL|SIMPLE|ACYCLIC)\b|"
-            r"\{\s*\d|<~|~>|<->",
+            r"\b(?:LET|NEXT)\b|\bGROUP\s+BY\b|\bRETURN\s+NO\s+BINDINGS\b",
             flags=re.MULTILINE,
         )
         for path in sorted(self.DIRECTORY.glob("*.gql")):
@@ -594,9 +592,8 @@ class TestAlgorithms:
             / "algorithms"
             / "trails_vs_walks.py"
         ).read_text(encoding="utf-8")
-        assert "target" in module
-        assert "gated" in module
-        assert "WALK is implemented" not in module
+        assert "MATCH TRAIL" in module
+        assert "defaults to WALK" in module
 
     def test_shortest_path_uses_bidirectional_bfs(self) -> None:
         """Find a shortest route through the places network."""

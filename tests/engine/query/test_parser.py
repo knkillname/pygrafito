@@ -9,6 +9,7 @@ from pygrafito.engine.query.ast import (
     Binary,
     Create,
     Delete,
+    EdgeDirection,
     FunctionCall,
     IsNull,
     LabelOr,
@@ -18,6 +19,7 @@ from pygrafito.engine.query.ast import (
     Merge,
     Operators,
     Parameter,
+    PathMode,
     Property,
     Remove,
     Return,
@@ -29,7 +31,7 @@ from pygrafito.engine.query.ast import (
     With,
 )
 from pygrafito.engine.query.parser import Parser
-from pygrafito.model import Direction, QuerySemanticError, QuerySyntaxError
+from pygrafito.model import QuerySemanticError, QuerySyntaxError
 
 
 class TestAcceptedSyntax:
@@ -143,14 +145,44 @@ class TestAcceptedSyntax:
             relationship = self.match(Parser.parse_statement(text)).patterns[0].relationships[0]
             assert (relationship.min_hops, relationship.max_hops) == expected
 
-    def test_bare_quantifier_has_no_upper_bound(self) -> None:
-        relationship = (
-            self.match(Parser.parse_statement("MATCH (a)-[*]->(b) RETURN b"))
+    def test_bare_quantifier_is_deferred(self) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            Parser.parse_statement("MATCH (a)-[*]->(b) RETURN b")
+        assert "add-gql-unbounded-traversal" in caught.value.message
+
+    def test_canonical_quantifier_forms(self) -> None:
+        forms = {
+            "MATCH (a)-[:ALLIES_WITH{2}]->(b) RETURN b": (2, 2),
+            "MATCH (a)-[:ALLIES_WITH{1,3}]->(b) RETURN b": (1, 3),
+            "MATCH (a)-[:ALLIES_WITH{,2}]->(b) RETURN b": (0, 2),
+            "MATCH (a)-[:ALLIES_WITH{0}]->(b) RETURN b": (0, 0),
+        }
+        for text, expected in forms.items():
+            relationship = self.match(Parser.parse_statement(text)).patterns[0].relationships[0]
+            assert (relationship.min_hops, relationship.max_hops) == expected
+            assert relationship.canonical_quantifier
+
+    def test_canonical_quantifier_is_marked_canonical(self) -> None:
+        legacy = (
+            self.match(Parser.parse_statement("MATCH (a)-[:ALLIES_WITH*1..2]->(b) RETURN b"))
             .patterns[0]
             .relationships[0]
         )
-        assert relationship.min_hops == 1
-        assert relationship.max_hops is None
+        assert not legacy.canonical_quantifier
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "MATCH (a)-[:ALLIES_WITH{1,}]->(b) RETURN b",
+            "MATCH (a)-[:ALLIES_WITH*1..]->(b) RETURN b",
+            "MATCH (a)-[:ALLIES_WITH*]->(b) RETURN b",
+            "MATCH (a)-[:ALLIES_WITH+]->(b) RETURN b",
+        ],
+    )
+    def test_open_ended_quantifier_is_deferred(self, text: str) -> None:
+        with pytest.raises(QuerySemanticError) as caught:
+            Parser.parse_statement(text)
+        assert "add-gql-unbounded-traversal" in caught.value.message
 
     def test_malformed_quantifier_is_a_syntax_error(self) -> None:
         with pytest.raises(QuerySyntaxError):
@@ -194,10 +226,10 @@ class TestAcceptedSyntax:
         incoming = Parser.parse_statement("MATCH (a)<--(b) RETURN b")
         both = Parser.parse_statement("MATCH (a)-(b) RETURN b")
         bracketed = Parser.parse_statement("MATCH (a)-[r]-(b) RETURN b")
-        assert self.match(outgoing).patterns[0].relationships[0].direction is Direction.OUTGOING
-        assert self.match(incoming).patterns[0].relationships[0].direction is Direction.INCOMING
-        assert self.match(both).patterns[0].relationships[0].direction is Direction.BOTH
-        assert self.match(bracketed).patterns[0].relationships[0].direction is Direction.BOTH
+        assert self.match(outgoing).patterns[0].relationships[0].direction is EdgeDirection.OUTGOING
+        assert self.match(incoming).patterns[0].relationships[0].direction is EdgeDirection.INCOMING
+        assert self.match(both).patterns[0].relationships[0].direction is EdgeDirection.ANY
+        assert self.match(bracketed).patterns[0].relationships[0].direction is EdgeDirection.ANY
 
     def test_double_dash_is_not_an_undirected_arrow(self) -> None:
         with pytest.raises(QuerySyntaxError, match="use '-' for an undirected relationship"):
@@ -211,7 +243,7 @@ class TestAcceptedSyntax:
         assert relationship.types == ()
         assert isinstance(relationship.label_expression, LabelOr)
         assert relationship.properties[0].key == "since_cycle"
-        assert relationship.direction is Direction.OUTGOING
+        assert relationship.direction is EdgeDirection.OUTGOING
 
     def test_multiple_segments(self) -> None:
         statement = Parser.parse_statement(
@@ -585,3 +617,67 @@ class TestWriteClauses:
     def test_write_then_return(self) -> None:
         statement = Parser.parse_statement("CREATE (n:Program) RETURN n.designation AS name")
         assert [type(clause) for clause in statement.clauses] == [Create, Return]
+
+
+class TestPathModes:
+    """Verify explicit path-mode keywords and their placement."""
+
+    @staticmethod
+    def match(statement: object) -> Match:
+        """Return the MATCH clause of a parsed statement.
+
+        Parameters
+        ----------
+        statement : object
+            Parsed statement.
+
+        Returns
+        -------
+        Match
+            First match clause.
+        """
+        if not hasattr(statement, "clauses"):
+            raise AssertionError("expected a parsed statement")
+        clauses = statement.clauses
+        if not isinstance(clauses[0], Match):
+            raise AssertionError("expected a match clause")
+        return clauses[0]
+
+    @pytest.mark.parametrize(
+        ("text", "mode"),
+        [
+            ("MATCH WALK (a) RETURN a", PathMode.WALK),
+            ("MATCH TRAIL (a) RETURN a", PathMode.TRAIL),
+            ("MATCH SIMPLE (a) RETURN a", PathMode.SIMPLE),
+            ("MATCH ACYCLIC (a) RETURN a", PathMode.ACYCLIC),
+        ],
+    )
+    def test_clause_mode(self, text: str, mode: PathMode) -> None:
+        """Parse a mode placed after MATCH."""
+        clause = self.match(Parser.parse_statement(text))
+        assert clause.mode is mode
+        assert clause.patterns[0].mode is None
+
+    def test_per_path_mode_overrides_the_clause(self) -> None:
+        """Parse a mode before a comma-separated path."""
+        clause = self.match(Parser.parse_statement("MATCH WALK (a), ACYCLIC (b) RETURN a"))
+        assert clause.mode is PathMode.WALK
+        assert clause.patterns[0].mode is None
+        assert clause.patterns[1].mode is PathMode.ACYCLIC
+
+    def test_optional_match_takes_a_mode(self) -> None:
+        """Parse a mode on OPTIONAL MATCH."""
+        clause = self.match(Parser.parse_statement("OPTIONAL MATCH TRAIL (a) RETURN a"))
+        assert clause.optional
+        assert clause.mode is PathMode.TRAIL
+
+    def test_mode_before_a_bare_relationship(self) -> None:
+        """Parse a mode with the bare anonymous relationship form."""
+        clause = self.match(Parser.parse_statement("MATCH SIMPLE (a)-(b) RETURN a"))
+        assert clause.mode is PathMode.SIMPLE
+        assert clause.patterns[0].relationships
+
+    def test_mode_is_rejected_on_create(self) -> None:
+        """Reject a path mode where a data pattern is expected."""
+        with pytest.raises(QuerySyntaxError):
+            Parser.parse_statement("CREATE WALK (n:Program)")

@@ -11,6 +11,7 @@ from pygrafito.engine.query.ast import (
     Clause,
     Create,
     Delete,
+    EdgeDirection,
     Expression,
     Filter,
     FunctionCall,
@@ -30,6 +31,7 @@ from pygrafito.engine.query.ast import (
     NodePattern,
     Operators,
     Parameter,
+    PathMode,
     PathPattern,
     Property,
     PropertyAssignment,
@@ -52,7 +54,7 @@ from pygrafito.engine.query.gated import Gated
 from pygrafito.engine.query.labels import LabelExpressions
 from pygrafito.engine.query.lexer import Lexer
 from pygrafito.engine.query.tokens import Keyword, Span, Token, TokenKind
-from pygrafito.model import Direction, QuerySemanticError, QuerySyntaxError
+from pygrafito.model import QuerySemanticError, QuerySyntaxError
 
 
 class Parser:
@@ -420,14 +422,14 @@ class Parser:
         Match
             Parsed match clause.
         """
-        self._reject_path_mode(self._current())
-        patterns = [self._path_pattern()]
+        mode = self._path_mode()
+        patterns = [self._path_pattern(allow_mode=True)]
         while self._match_punctuation(","):
-            patterns.append(self._path_pattern())
+            patterns.append(self._path_pattern(allow_mode=True))
         where: Expression | None = None
         if self._match_keyword(Keyword.WHERE):
             where = self._expression()
-        return Match(patterns=tuple(patterns), where=where, optional=optional)
+        return Match(patterns=tuple(patterns), where=where, optional=optional, mode=mode)
 
     def _clause_pattern(self) -> PathPattern:
         """Parse exactly one path pattern for a clause.
@@ -745,14 +747,21 @@ class Parser:
             self._fail_syntax(f"expected {description}", self._current())
         return tuple(labels)
 
-    def _path_pattern(self) -> PathPattern:
+    def _path_pattern(self, *, allow_mode: bool = False) -> PathPattern:
         """Parse one path pattern.
+
+        Parameters
+        ----------
+        allow_mode : bool, optional
+            Whether a per-path mode keyword may precede the pattern, by
+            default ``False``.
 
         Returns
         -------
         PathPattern
             Parsed path pattern.
         """
+        mode = self._path_mode() if allow_mode else None
         variable: str | None = None
         if self._is_identifier(self._current()) and self._peek_is_operator("="):
             variable = self._identifier_text(self._advance())
@@ -766,7 +775,31 @@ class Parser:
             nodes=tuple(nodes),
             relationships=tuple(relationships),
             variable=variable,
+            mode=mode,
         )
+
+    def _path_mode(self) -> PathMode | None:
+        """Consume an optional path-mode keyword.
+
+        Returns
+        -------
+        PathMode | None
+            Parsed mode, or ``None`` when the current token is not a mode.
+        """
+        token = self._current()
+        if token.kind is not TokenKind.KEYWORD:
+            return None
+        modes = {
+            Keyword.WALK: PathMode.WALK,
+            Keyword.TRAIL: PathMode.TRAIL,
+            Keyword.SIMPLE: PathMode.SIMPLE,
+            Keyword.ACYCLIC: PathMode.ACYCLIC,
+        }
+        mode = modes.get(Keyword(token.value))
+        if mode is None:
+            return None
+        self._advance()
+        return mode
 
     def _node_pattern(self) -> NodePattern:
         """Parse one parenthesized node pattern.
@@ -804,84 +837,107 @@ class Parser:
         -------
         RelationshipPattern
             Parsed relationship pattern.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the direction token or the closing marker is malformed.
         """
-        if self._current().kind is TokenKind.OPERATOR and self._current().value in {
-            "<->",
-            "~>",
-            "<~",
-        }:
-            self._reject_gated(Gated.DIRECTION, self._current())
         opening = self._current()
-        if opening.kind is TokenKind.OPERATOR and opening.value in {"-->", "->"}:
-            self._advance()
-            return RelationshipPattern(direction=Direction.OUTGOING)
-        if opening.kind is TokenKind.OPERATOR and opening.value == "<--":
-            self._advance()
-            return RelationshipPattern(direction=Direction.INCOMING)
-        if opening.kind is TokenKind.OPERATOR and opening.value == "~":
-            self._advance()
-            if not self._check_punctuation("["):
-                return RelationshipPattern(direction=Direction.BOTH, undirected_only=True)
-            variable, types, properties, min_hops, max_hops, label_expression, where = (
-                self._relationship_detail()
-            )
-            self._reject_gated_quantifier()
-            self._expect_operator("~", "expected '~' to close an undirected relationship")
-            return RelationshipPattern(
-                variable=variable,
-                types=types,
-                direction=Direction.BOTH,
-                properties=properties,
-                min_hops=min_hops,
-                max_hops=max_hops,
-                undirected_only=True,
-                label_expression=label_expression,
-                where=where,
-            )
-        if self._match_operator("<-"):
-            if not self._check_punctuation("["):
-                return RelationshipPattern(direction=Direction.INCOMING)
-            variable, types, properties, min_hops, max_hops, label_expression, where = (
-                self._relationship_detail()
-            )
-            self._reject_gated_quantifier()
-            self._expect_operator("-", "expected '-' to close an incoming relationship")
-            return RelationshipPattern(
-                variable=variable,
-                types=types,
-                direction=Direction.INCOMING,
-                properties=properties,
-                min_hops=min_hops,
-                max_hops=max_hops,
-                label_expression=label_expression,
-                where=where,
-            )
-        self._expect_operator("-", "expected '-' to start a relationship pattern")
+        if opening.kind is not TokenKind.OPERATOR or opening.value not in self._bare_directions():
+            self._fail_syntax("expected '-' to start a relationship pattern", opening)
+        self._advance()
         if not self._check_punctuation("["):
-            return RelationshipPattern(direction=Direction.BOTH)
-        variable, types, properties, min_hops, max_hops, label_expression, where = (
+            return RelationshipPattern(direction=self._bare_directions()[opening.value])
+        variable, types, properties, min_hops, max_hops, canonical, label_expression, where = (
             self._relationship_detail()
         )
-        self._reject_gated_quantifier()
-        if self._match_operator("->"):
-            direction = Direction.OUTGOING
-        elif self._match_operator("-"):
-            direction = Direction.BOTH
-        else:
+        closing = self._current()
+        if closing.kind is not TokenKind.OPERATOR or closing.value not in {
+            "-",
+            "->",
+            "-->",
+            "~",
+        }:
             self._fail_syntax(
-                "expected '->' or '-' to close a relationship pattern",
-                self._current(),
+                "expected '-', '->', or '~' to close a relationship pattern",
+                closing,
             )
+        self._advance()
         return RelationshipPattern(
             variable=variable,
             types=types,
-            direction=direction,
+            direction=self._combined_direction(opening, closing),
             properties=properties,
             min_hops=min_hops,
             max_hops=max_hops,
+            canonical_quantifier=canonical,
             label_expression=label_expression,
             where=where,
         )
+
+    @staticmethod
+    def _bare_directions() -> dict[str, EdgeDirection]:
+        """Return the direction token map for patterns without a detail.
+
+        Returns
+        -------
+        dict[str, EdgeDirection]
+            Operator spelling to admitted storage directions.
+        """
+        return {
+            "->": EdgeDirection.OUTGOING,
+            "-->": EdgeDirection.OUTGOING,
+            "<-": EdgeDirection.INCOMING,
+            "<--": EdgeDirection.INCOMING,
+            "-": EdgeDirection.ANY,
+            "~": EdgeDirection.UNDIRECTED,
+            "<~": EdgeDirection.INCOMING_OR_UNDIRECTED,
+            "~>": EdgeDirection.OUTGOING_OR_UNDIRECTED,
+            "<->": EdgeDirection.DIRECTED_EITHER,
+        }
+
+    @staticmethod
+    def _combined_direction(opening: Token, closing: Token) -> EdgeDirection:
+        """Resolve the direction from an opening and a closing marker.
+
+        Parameters
+        ----------
+        opening : Token
+            Operator that opened the relationship pattern.
+        closing : Token
+            Operator that closed it.
+
+        Returns
+        -------
+        EdgeDirection
+            Admitted storage directions.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the opening and closing markers do not form a direction.
+        """
+        aliases = {"-->": "->", "<--": "<-"}
+        first = aliases.get(str(opening.value), str(opening.value))
+        second = aliases.get(str(closing.value), str(closing.value))
+        directions = {
+            ("-", "->"): EdgeDirection.OUTGOING,
+            ("-", "-"): EdgeDirection.ANY,
+            ("<-", "-"): EdgeDirection.INCOMING,
+            ("<-", "->"): EdgeDirection.DIRECTED_EITHER,
+            ("<-", "~"): EdgeDirection.INCOMING_OR_UNDIRECTED,
+            ("~", "->"): EdgeDirection.OUTGOING_OR_UNDIRECTED,
+            ("~", "~"): EdgeDirection.UNDIRECTED,
+        }
+        direction = directions.get((first, second))
+        if direction is None:
+            raise QuerySyntaxError(
+                "unsupported relationship direction",
+                line=opening.span.line,
+                column=opening.span.column,
+            )
+        return direction
 
     def _is_relationship_start(self) -> bool:
         """Report whether the current token can start a relationship pattern.
@@ -904,16 +960,25 @@ class Parser:
             "<->",
         }
 
-    def _reject_gated_quantifier(self) -> None:
-        """Reject a ``{n,m}`` quantifier placed after the relationship detail.
+    def _reject_deferred(self, construct: str) -> typing.Never:
+        """Reject an open-ended quantifier with its follow-up change.
+
+        Parameters
+        ----------
+        construct : str
+            Name of the rejected form.
 
         Raises
         ------
         QuerySemanticError
-            If the current token starts a canonical quantifier.
+            Always.
         """
-        if self._check_punctuation("{") and self._starts_quantifier():
-            self._reject_gated(Gated.QUANTIFIER, self._current())
+        _, change = Gated.ENTRIES[Gated.OPEN_BOUND]
+        message = (
+            f"{construct} is part of the target GQL profile but is not implemented "
+            f"in this release; it lands with {change}"
+        )
+        self._reject_unsupported(self._current(), message)
 
     def _relationship_detail(
         self,
@@ -923,6 +988,7 @@ class Parser:
         tuple[PropertyEntry, ...],
         int | None,
         int | None,
+        bool,
         LabelExpression | None,
         Expression | None,
     ]:
@@ -931,12 +997,12 @@ class Parser:
         Returns
         -------
         tuple[str | None, tuple[str, ...], tuple[PropertyEntry, ...], int | None, int | None, \
-LabelExpression | None, Expression | None]
-            Variable, accepted types, property map, quantifier bounds, label
-            expression, and inline predicate.
+bool, LabelExpression | None, Expression | None]
+            Variable, accepted types, property map, quantifier bounds,
+            canonical-quantifier flag, label expression, and inline predicate.
         """
         if not self._match_punctuation("["):
-            return None, (), (), None, None, None, None
+            return None, (), (), None, None, False, None, None
         variable: str | None = None
         properties: tuple[PropertyEntry, ...] = ()
         where: Expression | None = None
@@ -944,33 +1010,61 @@ LabelExpression | None, Expression | None]
             variable = self._identifier_text(self._advance())
         label_expression = self._label_spec("a relationship type")
         types = LabelExpressions.conjunction(label_expression) or ()
-        min_hops, max_hops = self._quantifier()
-        if self._check_punctuation("{") and self._starts_quantifier():
-            self._reject_gated(Gated.QUANTIFIER, self._current())
+        min_hops, max_hops, canonical = self._quantifier()
         if self._check_punctuation("{"):
             properties = self._property_map()
         if self._match_keyword(Keyword.WHERE):
             where = self._expression()
         self._expect_punctuation("]", "expected ']' to close a relationship pattern")
-        return variable, types, properties, min_hops, max_hops, label_expression, where
+        return variable, types, properties, min_hops, max_hops, canonical, label_expression, where
 
-    def _quantifier(self) -> tuple[int | None, int | None]:
-        """Parse an optional ``*`` relationship quantifier.
+    def _quantifier(self) -> tuple[int | None, int | None, bool]:
+        """Parse an optional relationship quantifier.
 
         Returns
         -------
-        tuple[int | None, int | None]
-            Lower and upper hop bounds; both ``None`` for an ordinary
-            relationship and for a bare ``*``.
+        tuple[int | None, int | None, bool]
+            Lower and upper hop bounds and whether the canonical ``{n,m}``
+            spelling was used. Both bounds are ``None`` for an ordinary
+            relationship.
 
         Raises
         ------
         QuerySyntaxError
             If a bound is not an integer or the range separator is malformed.
+        QuerySemanticError
+            If an open-ended quantifier is written.
         """
-        if not self._match_operator("*"):
-            return None, None
+        if self._match_operator("*"):
+            return self._legacy_quantifier()
+        if self._match_operator("+"):
+            self._reject_deferred("the '+' quantifier")
+        if self._check_punctuation("{") and self._starts_quantifier():
+            return self._canonical_quantifier()
+        return None, None, False
+
+    def _legacy_quantifier(self) -> tuple[int | None, int | None, bool]:
+        """Parse the body of a legacy ``*`` quantifier.
+
+        Returns
+        -------
+        tuple[int | None, int | None, bool]
+            Lower and upper bounds, and ``False`` because the spelling is not
+            canonical.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If a bound is not an integer or the range separator is malformed.
+        QuerySemanticError
+            If the upper bound is missing.
+        """
         lower: int | None = None
+        if self._current().kind is TokenKind.FLOAT:
+            self._fail_syntax(
+                "expected an integer bound in a variable-length pattern",
+                self._current(),
+            )
         if self._match_operator("-"):
             lower = -self._integer_bound()
         elif self._current().kind is TokenKind.INTEGER:
@@ -982,10 +1076,46 @@ LabelExpression | None, Expression | None]
                 upper = -self._integer_bound()
             elif self._current().kind is TokenKind.INTEGER:
                 upper = self._integer_bound()
-            return (1 if lower is None else lower), upper
+            if upper is None:
+                self._reject_deferred("an open-ended quantifier")
+            return (1 if lower is None else lower), upper, False
         if lower is None:
-            return 1, None
-        return lower, lower
+            self._reject_deferred("an open-ended quantifier")
+        return lower, lower, False
+
+    def _canonical_quantifier(self) -> tuple[int | None, int | None, bool]:
+        """Parse the body of a canonical ``{n}``, ``{m,n}``, or ``{,n}`` form.
+
+        Returns
+        -------
+        tuple[int | None, int | None, bool]
+            Lower and upper bounds, and ``True`` because the spelling is
+            canonical.
+
+        Raises
+        ------
+        QuerySyntaxError
+            If the braces or hop counts are malformed.
+        QuerySemanticError
+            If the upper bound is missing.
+        """
+        opening = self._current()
+        self._expect_punctuation("{", "expected '{' to start a canonical quantifier")
+        lower: int | None = None
+        if self._current().kind is TokenKind.INTEGER:
+            lower = self._integer_bound()
+        if self._match_punctuation(","):
+            upper: int | None = None
+            if self._current().kind is TokenKind.INTEGER:
+                upper = self._integer_bound()
+            self._expect_punctuation("}", "expected '}' to close a canonical quantifier")
+            if upper is None:
+                self._reject_deferred("an open-ended quantifier")
+            return 0 if lower is None else lower, upper, True
+        if lower is None:
+            self._fail_syntax("expected a hop count in the canonical quantifier", opening)
+        self._expect_punctuation("}", "expected '}' to close a canonical quantifier")
+        return lower, lower, True
 
     def _integer_bound(self) -> int:
         """Consume one integer quantifier bound.
@@ -1765,29 +1895,6 @@ LabelExpression | None, Expression | None]
         return token.kind is TokenKind.INTEGER or (
             token.kind is TokenKind.PUNCTUATION and token.value == ","
         )
-
-    def _reject_path_mode(self, token: Token) -> None:
-        """Reject an explicit path-mode keyword as gated.
-
-        Parameters
-        ----------
-        token : Token
-            Token that starts the path mode.
-
-        Raises
-        ------
-        QuerySemanticError
-            If the token is a path-mode keyword.
-        """
-        if token.kind is not TokenKind.KEYWORD:
-            return
-        if Keyword(token.value) in {
-            Keyword.TRAIL,
-            Keyword.WALK,
-            Keyword.SIMPLE,
-            Keyword.ACYCLIC,
-        }:
-            self._reject_gated(Gated.PATH_MODE, token)
 
     def _reject_ordinality(self) -> None:
         """Reject ``WITH ORDINALITY`` and ``WITH OFFSET`` as gated.
