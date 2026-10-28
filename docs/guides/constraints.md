@@ -1,8 +1,20 @@
 # Enforce unique values
 
+:::{admonition} tl;dr
+:class: tldr
+
+Declare a uniqueness constraint to keep one property value distinct inside one label. The database
+enforces it on every write path, including writes made by an external SQLite client.
+:::
+
 Use a uniqueness constraint when one property value must stay distinct inside one label, whether
 the elements are nodes or relationships. The database enforces the rule on every write path,
 including writes made by an external SQLite client.
+
+:::{tip}
+Declare the constraint before loading data. Declaring it over data that already violates the rule
+fails without creating anything, so you would have to clean the duplicates first.
+:::
 
 This guide covers declaring, using, diagnosing, and removing a constraint. The API reference
 documents [`Constraint`](../api/admin.md#constraint) and
@@ -12,6 +24,12 @@ documents [`Constraint`](../api/admin.md#constraint) and
 
 A constraint is scoped to exactly one label and one property key. A relationship constraint
 applies to every relationship carrying that label, including a relationship with other labels.
+
+:::{warning}
+A relationship constraint applies to every relationship carrying the scoped label, even when the
+relationship also carries other labels. Check the label set before assuming a constraint is
+narrower than it is.
+:::
 
 ```python
 from pygrafito import ElementKind, Graph
@@ -50,6 +68,13 @@ A constraint compares the stored value and its JSON type. `true`, `1`, `1.0`, an
 different values, and lists compare by content and order. An element that does not carry the scope
 label, or does not have the property, is exempt.
 
+:::{admonition} Remember
+:class: important
+
+`true`, `1`, `1.0`, and `"1"` are four different values. Uniqueness compares the value and its JSON
+type, not just the printed text.
+:::
+
 ```python
 from pygrafito import ConstraintViolationError, Graph
 
@@ -82,6 +107,18 @@ The database enforces every declared constraint on element creation, property as
 removal, label acquisition, statement-driven writes, and batch imports. A write that would create
 a duplicate fails and changes nothing; deleting the holder releases the value.
 
+```{mermaid}
+:alt: A first Program node with designation Yori is stored; a second Program node with the same designation is rejected.
+
+flowchart TD
+  A["First INSERT<br/><code>Program {designation: 'Yori'}</code>"] --> C{"<code>UNIQUE</code><br/><code>Program.designation</code>"}
+  B["Second INSERT<br/><code>Program {designation: 'Yori'}</code>"] --> C
+  C -->|"value is free"| OK["Stored"]
+  C -->|"value already held"| FAIL["<code>ConstraintViolationError</code><br/>statement rolled back"]
+  accTitle: A uniqueness constraint rejects the second Yori
+  accDescr: The first Program node with designation Yori is stored. The second insert checks the same label and key, finds the value already held, and fails without changing the graph.
+```
+
 Enforcement is immediate. A violation fails the statement that causes it, not the transaction's
 commit, so a transaction never holds a transient duplicate. A failed statement undoes only its own
 changes and leaves the transaction usable.
@@ -110,6 +147,14 @@ through a duplicate. Use a temporary value or two statements instead.
 Constraints persist in the database file and are reported and enforced after a reopen without
 being declared again. They are implemented with standard indexes and triggers, not with a catalog
 table, so they do not change the recorded schema version.
+
+:::{admonition} In detail
+:class: detail
+
+A constraint owns a support index and one trigger for property updates plus one for label
+acquisition. The index and triggers are dropped with the constraint and never appear in
+`Graph.indexes()`.
+:::
 
 Both element kinds use a support index plus one trigger for property updates and one for label
 acquisition, because a label lives in a separate table. The support index and the triggers are not

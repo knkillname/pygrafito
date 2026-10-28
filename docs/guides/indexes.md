@@ -1,7 +1,21 @@
 # Speed up property filters
 
+:::{admonition} tl;dr
+:class: tldr
+
+Declare a property index when a `MATCH ... WHERE` filter reads many candidates and returns few.
+Check the plan with `Graph.explain`, and drop the index when its write cost stops paying off.
+:::
+
 Use a property index when a `MATCH ... WHERE` filter on one key reads many candidates and returns
 few. An index never changes the result; it only changes how much work the engine does.
+
+:::{admonition} Remember
+:class: important
+
+An index never changes what a query returns. It only changes how much work the engine does to find
+the rows.
+:::
 
 This guide covers declaring, checking, and removing an index. [Index
 behavior](../reference/index-behavior.md) owns the predicate table, planner rules, persistence, and
@@ -30,6 +44,11 @@ with Graph.open(":memory:") as graph:
     print([row["name"] for row in result])  # ['Yori']
 ```
 
+:::{tip}
+Add the index after you have a query worth optimizing. Start with the filter that selects the
+smallest start set; that is where a seek saves the most work.
+:::
+
 A relationship index works the same way:
 
 ```python
@@ -54,6 +73,20 @@ with Graph.open(":memory:") as graph:
 
 `Graph.explain` returns the access plan without running the statement. After an index is declared,
 equality, range, and `IN` filters on that key should show a `SEARCH ... USING INDEX` line.
+
+```{mermaid}
+:alt: A query on the cycles key either seeks the cycles index or scans candidate nodes, then filters the rows.
+
+flowchart LR
+  Q["<code>MATCH (n:Program)</code><br/><code>WHERE n.cycles = 37</code>"] --> P{"Planner"}
+  P -->|"<code>cycles</code> index"| S["Index seek<br/>matching ids"]
+  P -->|"no index or non-seekable"| C["Scan candidates"]
+  S --> F["Filter rows"]
+  C --> F
+  F --> O["<code>RETURN Yori</code>"]
+  accTitle: Index seek versus candidate scan
+  accDescr: The planner turns an equality filter into an index seek when the key is indexed, or scans candidate rows when it is not, then filters and returns the matching node.
+```
 
 ```python
 from pygrafito import Graph
@@ -88,11 +121,24 @@ Equality, range, and `IN` predicates can turn a scan into a seek. Negated filter
 `STARTS WITH`, and `ORDER BY` do not use the index by themselves. The [predicate
 table](../reference/index-behavior.md#what-an-index-accelerates) lists each form.
 
+:::{admonition} In detail
+:class: detail
+
+`=`, `>`, `>=`, `<`, `<=`, and `IN` are seekable. `<>`, `IS NULL`, `IS NOT NULL`, `STARTS WITH`, and
+a bare `ORDER BY` still read the candidate rows. The planner does not intersect two indexes, so a
+selective label may win even when a property index exists.
+:::
+
 ## Understand the cost
 
 Every index adds work to writes of that key and occupies space in the database file. Declare the
 keys your queries filter on, not every key you store. Transactions remain ACID: SQLite updates the
 index in the same transaction as the row, so a rolled-back write cannot leave a stale entry.
+
+:::{warning}
+Every declared index adds work to every write of that property key. Declare the keys your queries
+actually filter on; indexing every key makes writes slower without making reads faster.
+:::
 
 Declared indexes persist in the database file and are discovered on reopen. They do not change the
 schema version.

@@ -1,9 +1,32 @@
 # Embed a graph safely
 
+:::{admonition} tl;dr
+:class: tldr
+
+Open one file-backed graph handle per thread, use the context manager, bound lock waits, and back up
+with `backup_to`. The guide covers the lifecycle rules; the reference owns journal modes, snapshots,
+and foreign-file rules.
+:::
+
 Use a file-backed graph when the database should outlive the process, and keep one `Graph` handle
 per thread. This guide covers the lifecycle rules most applications need. The [embedding
 contract](../reference/embedding-contract.md) owns journal modes, lock waits, read snapshots, and
 the foreign-file rules.
+
+```{mermaid}
+:alt: A graph handle opens, runs reads or a transaction, commits or rolls back, and closes.
+
+flowchart LR
+  S["Start"] --> O["Open"]
+  O -->|"connection ready"| I["Idle"]
+  I -->|"<code>transaction()</code>"| T["Transaction"]
+  T -->|"<code>commit</code>"| I
+  T -->|"<code>rollback</code>"| I
+  I -->|"<code>close()</code>"| C["Closed"]
+  C --> E["End"]
+  accTitle: Connection and transaction lifecycle
+  accDescr: Opening a graph creates a handle, reads and writes run while it is idle, an explicit transaction commits or rolls back, and close returns to the closed state.
+```
 
 ## Open and close a file
 
@@ -27,6 +50,11 @@ with tempfile.TemporaryDirectory() as directory:
 ```
 
 The context manager closes the handle deterministically. Closing twice is a no-op.
+
+:::{tip}
+Keep `Graph.open` inside a `with` block. The context manager closes the connection even when the
+body raises, and a second close is harmless.
+:::
 
 ## Respect thread affinity
 
@@ -55,6 +83,13 @@ with Graph.open(":memory:") as graph:
 
 Open a handle in the thread that will use it. Several handles may open the same file in one process
 or several; they observe each other's committed writes, and at most one writer runs at a time.
+
+:::{admonition} Remember
+:class: important
+
+One `Graph` handle belongs to one thread. Open it in the thread that will use it; do not pass it
+between threads or share it through a pool.
+:::
 
 ## Bound lock waits
 
@@ -132,6 +167,11 @@ Do not copy a database file while a handle has it open; use `backup_to` instead.
 written to a temporary sibling and moved into place, so a process that dies during a backup leaves
 the source unchanged and the destination either absent or complete.
 
+:::{warning}
+Do not copy a live database file, and do not delete `-wal` or `-shm` sidecars. Use `backup_to` for a
+consistent copy and let SQLite recover the sidecars on the next open.
+:::
+
 ## Survive process termination
 
 A committed write survives an abrupt process termination. A transaction that was still open is
@@ -166,6 +206,14 @@ Each public read observes one committed state, even if another handle commits wh
 `traverse` and `paths` capture their reachable region before returning a lazy iterator, so no
 transaction outlives the iterator. A long `shortest_path` holds a read snapshot for the duration
 of the search.
+
+:::{admonition} In detail
+:class: detail
+
+`traverse` and `paths` capture the reachable region before returning their lazy iterator, so the
+iterator does not hold a transaction open. A long `shortest_path` does hold a read snapshot for the
+duration of the search, which is why a very large search can delay a writer.
+:::
 
 Opening a file never adopts an unrelated SQLite database. A file with no graph layout and at least
 one unrelated table is refused with `UnsupportedSqliteError` and left unchanged.

@@ -1,25 +1,32 @@
 # GQL profile
 
+:::{admonition} tl;dr
+:class: tldr
+
+The language contract for `pygrafito`: canonical GQL spellings, compatibility aliases and
+constructs, extensions, path and budget policy, and the conformance matrix. Use it to decide
+whether a spelling is portable GQL or a `pygrafito` extension.
+:::
+
 This page is the target language profile for `pygrafito`. It defines the canonical GQL surface,
 the compatibility aliases and constructs, the pygrafito extensions, the path-mode and query-budget
 policy, the 1.0 release gate, and how conformance is claimed. It is the contract for the
 query-language changes that lead to 1.0.
 
-:::{note}
+:::{admonition} Remember
+:class: important
+
 This page is both the language profile and its conformance status board. Status describes target
 membership and implementation state separately:
 
-- **supported** — implemented in the current release and covered by at least one conformance
-  corpus case.
-- **gated** — vocabulary for an in-scope construct that is not implemented yet. No row in this
-  release uses it.
+- **supported** — implemented in the current release and covered by at least one conformance corpus case.
+- **gated** — vocabulary for an in-scope construct that is not implemented yet. No row in this release uses it.
 - **deferred** — vocabulary for post-1.0 language direction. No row in this release uses it.
 - **out of profile** — a rejected non-goal.
 
-The current release contains only `supported` and `out of profile` rows. The `gated` and
-`deferred` statuses stay in the vocabulary so a future proposal cannot silently reintroduce an
-unimplemented target. The [query-language reference](query-language.md) describes the executable
-dialect only.
+The current release contains only `supported` and `out of profile` rows. The `gated` and `deferred`
+statuses stay in the vocabulary so a future proposal cannot silently reintroduce an unimplemented
+target. The [query-language reference](query-language.md) describes the executable dialect only.
 :::
 
 ## Current status
@@ -51,6 +58,23 @@ where the release supports them; compatibility aliases appear only in the migrat
 
 Every supported construct belongs to exactly one tier. Rejected forms are invalid
 combinations, not separate tiers.
+
+```{mermaid}
+:alt: A decision tree that classifies a construct as canonical GQL, a synthetic alias, a compatibility construct, a pygrafito extension, or out of profile.
+
+flowchart TD
+  Q["Construct"] --> C{"Canonical GQL?"}
+  C -->|yes| C1["Canonical GQL"]
+  C -->|no| A{"Identical alias?"}
+  A -->|yes| A1["Synthetic alias"]
+  A -->|no| K{"Legacy construct?"}
+  K -->|yes| K1["Compatibility construct"]
+  K -->|no| E{"pygrafito extension?"}
+  E -->|yes| E1["pygrafito extension"]
+  E -->|no| O["Out of profile<br/>rejected"]
+  accTitle: The five GQL profile tiers
+  accDescr: A construct is canonical GQL, a synthetic alias with identical semantics, a compatibility construct with a legacy default, a pygrafito extension, or out of profile and rejected.
+```
 
 | Tier | Meaning | Reader treatment |
 | --- | --- | --- |

@@ -1,7 +1,22 @@
 # Production checklist
 
+:::{admonition} tl;dr
+:class: tldr
+
+Walk this list before putting a graph in front of real users: one handle per thread, a bounded query
+budget, recoverable backups, and a pinned version. Each item is a check you can run or read.
+:::
+
 Use this list before putting a graph in front of real users. It assumes a file-backed graph on
 Linux with Python 3.13 or 3.14 and SQLite 3.38 or newer.
+
+:::{admonition} Remember
+:class: important
+
+One `Graph` handle belongs to one thread, and writes are single-writer. Several handles or processes
+may read and take turns writing, but they do not provide parallel writes.
+:::
+
 
 ## Before the first write
 
@@ -36,6 +51,17 @@ Linux with Python 3.13 or 3.14 and SQLite 3.38 or newer.
   file, and run `check_integrity`. Committed rows should remain; the open transaction should not.
 - [ ] Do not delete `-wal` or `-shm` files by hand. Reopen the graph and let SQLite recover.
 
+:::{tip}
+Test recovery once before launch. Kill a writer after a commit and after an uncommitted write,
+reopen the file, and run `check_integrity`; the first write should survive and the second should
+not.
+:::
+
+:::{warning}
+The default import is non-atomic. A failure or termination can leave the batches that already
+committed. Pass `atomic=True` when a partial load would be worse than a failed one.
+:::
+
 ## Formats and upgrades
 
 - [ ] Pin the pygrafito version in the deployment. Schema, snapshot, and view version 2 are frozen
@@ -45,6 +71,14 @@ Linux with Python 3.13 or 3.14 and SQLite 3.38 or newer.
 - [ ] Before a major upgrade, read the changelog for migration notes. Version 2 files open in 1.x;
   other versions are refused with an export path rather than migrated automatically.
 - [ ] Run `check_integrity` after a restore, a backup restore, or an unexpected shutdown.
+
+:::{admonition} In detail
+:class: detail
+
+A version 2 database, snapshot, or view written by 0.9 or 1.0 opens without conversion. Any other
+version is refused on both read-write and read-only opens and is left unchanged. Export with the
+release that wrote it, then load into a fresh version 2 graph.
+:::
 
 ## Observability
 

@@ -1,11 +1,35 @@
 # Use the shell
 
+:::{admonition} tl;dr
+:class: tldr
+
+Run `pygrafito` against one database file to inspect, query, or maintain it without writing Python.
+Use `-c` for one statement, `-f` for a script, and dot commands for formats, transactions, and
+maintenance.
+:::
+
 Use the `pygrafito` command when you want to inspect, query, or maintain a graph without writing
 Python. The shell operates on one database file at a time, or on a transient in-memory graph when
 no path is given.
 
 This guide covers the common session workflows. The [CLI
 reference](../reference/cli.md) owns every option, dot command, output rule, and exit code.
+
+```{mermaid}
+:alt: A shell session starts, runs a statement, prints rows or a summary, and accepts dot commands until the session ends.
+
+flowchart LR
+  S["<code>pygrafito grid.db</code>"] --> B["Banner and prompt"]
+  B --> Q["Statement ending in <code>;</code>"]
+  Q --> R["Rows or mutation summary"]
+  R --> D{"Dot command?"}
+  D -->|"yes"| C["<code>.mode</code>, <code>.schema</code>,<br/><code>.import</code>, <code>.begin</code>"]
+  D -->|"no"| Q
+  C --> Q
+  Q --> X["<code>.quit</code> or <code>.exit</code>"]
+  accTitle: One shell session
+  accDescr: Start the shell, run statements ending in a semicolon, read rows or a mutation summary, use dot commands for formats and maintenance, and leave with .quit or .exit.
+```
 
 ## Start a session
 
@@ -26,9 +50,28 @@ grid.db> MATCH (n:Program) RETURN n.designation AS name, n.cycles AS cycles;
 Statements end with a semicolon and may span lines. Use `.help` to list commands and `.quit` or
 `.exit` to leave.
 
+:::{admonition} Remember
+:class: important
+
+End every statement with a semicolon. Dot commands are recognized at the start of a statement, so a
+line that begins with `.` is not a query.
+:::
+
 ## Run one statement
 
 `-c` runs a statement and exits. Results go to standard output; diagnostics go to standard error.
+
+:::{tip}
+Use `-c` for one statement and `-f` for a script. Both skip the banner and prompts, so they fit in
+a pipeline without extra cleanup.
+:::
+
+:::{admonition} In detail
+:class: detail
+
+Interactive sessions write the banner and prompts to standard error. Scripts and `-c` write
+neither, which keeps standard output clean for `jq`, a file, or another process.
+:::
 
 ```console
 $ pygrafito grid.db -c "MATCH (n:Program) RETURN n.designation AS name;" --format json
@@ -51,6 +94,12 @@ $ cat query.txt | pygrafito grid.db --readonly
 
 A script stops at the first failing statement and reports its position. Dot commands are
 recognized at the start of a statement.
+
+:::{warning}
+A script stops at the first failing statement, but the statements before it already ran. Do not
+treat a failed script as an all-or-nothing transaction unless you wrapped it in `.begin` and
+`.commit`.
+:::
 
 ## Choose an output format
 

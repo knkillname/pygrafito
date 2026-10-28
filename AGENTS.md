@@ -14,7 +14,8 @@
 
 - `hatch check --fix` — Ruff lint/format plus Pyrefly, Hatch 1.18's built-in type checker. Do not use `hatch run check` or configure a separate type-checking environment.
 - `hatch test` — pytest in the Hatch test environment. Pytest arguments are forwarded: `hatch test tests/test_codec.py::test_name`.
-- `hatch run docs:build` — build the Sphinx site with warnings treated as errors.
+- `hatch run docs:build` — build the Sphinx site with warnings treated as errors. Requires
+  Node.js and the pinned Mermaid CLI; the first run downloads Chromium.
 - `hatch run docs:serve` — serve a live preview of the documentation site.
 - `python -m pygrafito <database> -c "<statement>"` — run the shell against a graph; see `docs/reference/cli.md`.
 - `hatch version <version>` — set the project version. Never edit `src/pygrafito/__about__.py` directly.
@@ -87,3 +88,28 @@ Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do n
   do not mark its tasks `- [x]`.
 - Keep `README.md` examples runnable as features land; verify the snippets.
 - Describe graph semantics directly; avoid product-name shorthand in specs and docs.
+
+### Documentation voice
+
+The full rulebook is `docs/contributing/documentation-style.md`; these are the non-negotiables.
+
+- **Three zones.** The landing page, quickstart, and guides teach in the second person and lead with
+  the outcome. The reference states rules and edge cases without instructional asides. Generated
+  API pages keep their generated structure.
+- **Five callouts only.** Use `tl;dr` for the page summary, `Tip` for an optional shortcut,
+  `Warning` for a data-loss or wrong-result risk, `Remember` for the one rule to carry away, and
+  `In detail` for optional technical depth. Keep the fixed titles; never nest callouts.
+- **A `tl;dr` on every reader-facing page** except `api/*.md`, immediately after the H1, in at most
+  three sentences.
+- **Emoji only in card titles and badges.** No emoji in headings, body prose, callout titles, or
+  diagrams. Within a grid or badge collection, all items get one or none do.
+- **Show the graph before the code.** Every example that introduces a graph shape gets one diagram
+  with the same names and relationship types as the snippet; later variations reuse it.
+- **Every diagram** uses the `{mermaid}` directive with `:alt:`, `accTitle:`, and `accDescr:`, and
+  renders to SVG at build time. `hatch run docs:build` needs Node.js and
+  `@mermaid-js/mermaid-cli@12.0.0`; the first run downloads Chromium.
+- **Diagram typography.** Keep entity names in Inter and wrap labels, relationship types, property
+  keys, values, and syntax in `<code>` so they render in JetBrains Mono. Both fonts are bundled
+  under the SIL Open Font License 1.1.
+- **Keep the structural checks green.** `tests/test_docs_style.py` enforces summaries, the callout
+  vocabulary, emoji consistency, and diagram metadata.

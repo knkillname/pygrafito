@@ -1,5 +1,13 @@
 # Query your graph
 
+:::{admonition} tl;dr
+:class: tldr
+
+Use one `MATCH ... RETURN` statement to read or change a graph. This guide covers matching,
+filtering, writing, composition, path modes, and result handling; the reference owns the full
+grammar.
+:::
+
 Use `Graph.query` when one pattern-matching statement should read or change the graph. It returns a
 materialized `QueryResult`, so you can inspect the columns, rows, and mutation counts after the
 statement finishes.
@@ -9,6 +17,16 @@ reference](../reference/query-language.md) owns the complete grammar, value rule
 error behavior.
 
 ## Run a statement
+
+```{mermaid}
+:alt: Yori, Dumont, and Ram form a three-node ALLIES_WITH chain.
+
+flowchart LR
+  Y["Yori<br/><code>Program</code><br/><code>cycles=37</code>"] -->|<code>ALLIES_WITH</code>| D["Dumont<br/><code>Program</code><br/><code>cycles=39</code>"]
+  D -->|<code>ALLIES_WITH</code>| R["Ram<br/><code>Program</code><br/><code>cycles=36</code>"]
+  accTitle: A three-node ALLIES_WITH chain
+  accDescr: Yori has an ALLIES_WITH relationship to Dumont, and Dumont has one to Ram.
+```
 
 ```python
 from pygrafito import Graph
@@ -33,12 +51,27 @@ with Graph.open(":memory:") as graph:
 `Graph.query` executes exactly one statement. Use a semicolon at the end if you like; multiple
 statements are rejected.
 
+:::{tip}
+Order rows explicitly with `ORDER BY` when order matters. Without it, the result order is not part
+of the contract.
+:::
+
 ## Match nodes and relationships
 
 A pattern can bind variables, require labels on nodes and relationships, filter with an inline
 property map, and follow a direction. The arrow determines direction: `->` follows a directed
 relationship forward, `<-` follows it backward, and `-` matches any incident relationship,
 including an undirected one. A relationship may carry several labels at once.
+
+```{mermaid}
+:alt: Alan Bradley has an ALLIES_WITH relationship to Tron and a TRUSTS relationship to Dumont.
+
+flowchart LR
+  A["Alan Bradley<br/><code>Program</code>"] -->|<code>ALLIES_WITH</code>| T["Tron<br/><code>Program</code>"]
+  A -->|<code>TRUSTS</code>| D["Dumont<br/><code>Program</code>"]
+  accTitle: Alan Bradley's two relationships
+  accDescr: Alan Bradley has a directed ALLIES_WITH relationship to Tron and a directed TRUSTS relationship to Dumont.
+```
 
 ```python
 from pygrafito import Graph
@@ -70,10 +103,20 @@ patterns, path variables, and repeated variables, see [Relationship
 patterns](../reference/query-language.md#relationship-patterns) and [Variable-length
 relationships](../reference/query-language.md#variable-length-relationships).
 
+The optional-match example uses the Alan Bradley fan-out shown above; Dumont has no outgoing
+`ALLIES_WITH` relationship, so the optional column stays `None`.
+
 ## Filter with parameters
 
 Use `$name` placeholders and pass a mapping. Values are bound, not interpolated, so a value that
 looks like query syntax stays a value.
+
+:::{admonition} Remember
+:class: important
+
+Never build statement text from user input. Pass the value in the parameter map and let the
+statement stay fixed.
+:::
 
 ```python
 from pygrafito import Graph
@@ -129,10 +172,25 @@ incident relationships should be removed first. See [Write
 clauses](../reference/query-language.md#write-clauses) and [Mutation
 cardinality](../reference/query-language.md#mutation-cardinality).
 
+:::{warning}
+`DETACH DELETE` removes the node and every incident relationship. Use plain `DELETE` when the
+statement should fail instead of removing edges you did not mean to touch.
+:::
+
 ## Compose stages
 
 `WITH` projects a new scope, so grouped results can be filtered, ordered, and paginated before the
 final projection. `FOR` expands a list into rows and can feed a write clause.
+
+```{mermaid}
+:alt: Yori has two outgoing ALLIES_WITH relationships, one to Dumont and one to Ram.
+
+flowchart LR
+  Y["Yori<br/><code>Program</code>"] -->|<code>ALLIES_WITH</code>| D["Dumont<br/><code>Program</code>"]
+  Y -->|<code>ALLIES_WITH</code>| R["Ram<br/><code>Program</code>"]
+  accTitle: Yori allies with Dumont and Ram
+  accDescr: Yori has two outgoing ALLIES_WITH relationships, one to Dumont and one to Ram.
+```
 
 ```python
 from pygrafito import Graph
@@ -304,6 +362,14 @@ with Graph.open(":memory:") as graph:
 
 A canonical path without an explicit mode uses `WALK`; a path with a legacy `*n..m` quantifier
 keeps `TRAIL`. See [Path modes](../reference/query-language.md#path-modes) for the resolution order.
+
+:::{admonition} In detail
+:class: detail
+
+`WALK` may repeat nodes and relationships, `TRAIL` forbids reusing a relationship, `SIMPLE` forbids
+repeating a node except at the end, and `ACYCLIC` forbids repeating any node. The effective mode is
+the per-path mode, then the clause mode, then the legacy-quantifier default.
+:::
 
 ## Share relationships across a clause
 

@@ -3,10 +3,71 @@
  * SPDX-License-Identifier: MIT
  */
 
+/* Inter and JetBrains Mono are bundled under the SIL Open Font License 1.1.
+ * See fonts/OFL-Inter.txt and fonts/OFL-JetBrainsMono.txt. */
+
+@font-face {
+  font-family: "Inter";
+  src: url("fonts/Inter-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("fonts/JetBrainsMono-latin.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  --font-stack: "Inter", "Source Sans 3", "Noto Sans", sans-serif;
+  --font-stack--monospace: "JetBrains Mono", "Source Code Pro", monospace;
+}
+
 .sd-card {
   border-radius: 0.6rem;
 }
 
 .sd-card .sd-card-title {
   font-weight: 600;
+}
+
+.admonition.tldr {
+  border-left-color: var(--color-admonition-title--seealso);
+}
+
+.admonition.tldr > .admonition-title {
+  background-color: var(--color-admonition-title-background--seealso);
+  color: var(--color-admonition-title--seealso);
+}
+
+.admonition.tldr > .admonition-title::before {
+  background-color: var(--color-admonition-title--seealso);
+  -webkit-mask-image: var(--icon-info);
+  mask-image: var(--icon-info);
+}
+
+.admonition.detail {
+  border-left-color: var(--color-foreground-muted);
+}
+
+.admonition.detail > .admonition-title {
+  background-color: var(--color-background-secondary);
+  color: var(--color-foreground-secondary);
+}
+
+.admonition.detail > .admonition-title::before {
+  background-color: var(--color-foreground-muted);
+  -webkit-mask-image: var(--icon-pencil);
+  mask-image: var(--icon-pencil);
+}
+
+article object[type="image/svg+xml"] {
+  display: block;
+  height: auto;
+  margin: 1rem auto;
+  max-width: 100%;
 }

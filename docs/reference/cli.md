@@ -1,5 +1,13 @@
 # CLI reference
 
+:::{admonition} tl;dr
+:class: tldr
+
+The complete reference for the `pygrafito` shell: invocation, input rules, output modes, session
+commands, transactions, introspection, maintenance, and exit codes. Start with the shell guide for
+tasks.
+:::
+
 This page is the complete reference for the `pygrafito` shell: invocation, input rules, output
 modes, session commands, transactions, introspection, maintenance, and exit codes. For a
 task-first introduction, start with [Use the shell](../guides/shell.md).

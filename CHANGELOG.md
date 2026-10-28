@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The documentation is friendlier: every page opens with a short summary, uses consistent tip,
+  warning, and optional-detail callouts, and shows a diagram of the graph before the code that
+  builds it. Diagrams and code use the open Inter and JetBrains Mono fonts. Contributors who build
+  the docs now need Node.js and the pinned diagram renderer; the first build downloads it
+  automatically.
 - Queries that use an unsupported form such as `CALL { ... }`, a procedure call, `SELECT`, a
   temporal literal, `exists(...)`, a regex predicate, `shortestPath(...)`, whole-map `SET`, or a
   catalog statement now fail with a clear message that names the construct and the supported

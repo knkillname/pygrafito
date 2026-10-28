@@ -45,6 +45,21 @@ jobs:
             ~/.local/share/hatch
           key: docs-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
 
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache Mermaid CLI
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/puppeteer
+          key: mermaid-${{ runner.os }}-${{ hashFiles('docs/conf.py') }}
+          restore-keys: |
+            mermaid-${{ runner.os }}-
+
       - name: Build documentation
         run: hatch run docs:build
 

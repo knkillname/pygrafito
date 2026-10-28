@@ -1,5 +1,12 @@
 # Snapshot format
 
+:::{admonition} tl;dr
+:class: tldr
+
+The version 2 JSONL snapshot format, restore guarantees, and read-only SQL views. Use it to read or
+write the file contract; start with the interop guide for the task.
+:::
+
 This page is the reference for the versioned JSONL snapshot format, restore guarantees, and the
 read-only SQL views. For a task-first introduction, start with
 [Move data in and out](../guides/interop.md).
@@ -8,12 +15,14 @@ A graph file is ordinary SQLite, and the snapshot and views make that file a sup
 in two ways: a portable JSONL snapshot and a set of read-only SQL views. This page documents the
 snapshot contract first; the export, restore, and view sections follow below.
 
-```{note}
+:::{admonition} Remember
+:class: important
+
 Snapshot version 2 is frozen for the 1.x series. A version 2 snapshot written by 0.9 or 1.0
 restores without conversion. A version 1 snapshot or a snapshot from a future version is refused
 with an error that names version 2; export the graph with the release that wrote it and load the
 data into a fresh version 2 graph. There is no automatic migration.
-```
+:::
 
 ## Export
 
@@ -52,6 +61,16 @@ export leaves an existing destination untouched and does not leave a partial fil
 A snapshot is UTF-8 JSONL: one JSON object per line, with `\n` line endings and no byte-order
 mark. The first non-blank line is a header, followed by node records and then relationship
 records.
+
+```{mermaid}
+:alt: A snapshot file starts with a header, continues with node records, and ends with relationship records.
+
+flowchart LR
+  H["Header<br/><code>kind</code>, <code>format</code>, <code>version</code>, <code>counts</code>"] --> N["Node records<br/><code>id</code>, <code>labels</code>, <code>properties</code>"]
+  N --> R["Relationship records<br/><code>id</code>, <code>labels</code>, <code>direction</code>, <code>endpoints</code>, <code>properties</code>"]
+  accTitle: The three parts of a snapshot
+  accDescr: A snapshot begins with a header carrying the format version and element counts, followed by node records and then relationship records in deterministic order.
+```
 
 ```text
 {"kind":"header","format":"pygrafito-jsonl","version":2,"nodes":3,"relationships":2}

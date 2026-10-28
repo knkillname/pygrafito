@@ -1,12 +1,38 @@
 # Import rows and files
 
+:::{admonition} tl;dr
+:class: tldr
+
+Map a batch of rows, a CSV file, or a JSONL file into the graph with one write statement. Each
+batch binds to `$rows`, and the importer reports rows, batches, and mutations.
+:::
+
 Use `Graph.import_rows` or `Graph.import_file` when a write statement should map many input rows.
 Each batch binds to `$rows`, so the statement is the mapping; there is no separate column
 configuration.
 
+:::{admonition} Remember
+:class: important
+
+The import statement must contain a write clause and reference `$rows`. Both are checked before any
+row is read.
+:::
+
 This guide covers in-memory rows, CSV, JSONL, batching, and failure reporting. The [CLI
 reference](../reference/cli.md#import) documents the shell's `.import` command, and
 [`ImportSummary`](../api/query.md#importsummary) documents the returned counts.
+
+```{mermaid}
+:alt: Rows from memory, CSV, or JSONL flow through a batch and a write statement into the graph.
+
+flowchart LR
+  S["Rows, <code>CSV</code>, or <code>JSONL</code>"] --> B["Batch of rows"]
+  B --> Q["<code>UNWIND $rows AS row</code><br/>write statement"]
+  Q --> G["Graph"]
+  Q -->|"first failing row"| E["Error with source,<br/>row, and batch"]
+  accTitle: The import pipeline
+  accDescr: Input rows are read in batches, each batch runs the write statement against the graph, and a failure stops at the first bad row with its source, row number, and batch number.
+```
 
 ## Import in-memory rows
 
@@ -27,6 +53,11 @@ with Graph.open(":memory:") as graph:
 The statement must contain a write clause and must reference `$rows`; both are checked before any
 row is read. A read-only handle raises `ReadOnlyError` without reading the file, and a closed
 handle raises `GraphClosedError`.
+
+:::{tip}
+Use `MERGE` for a restartable import. A duplicate row matches the element the earlier row created
+instead of adding a second copy.
+:::
 
 ## Import a JSONL file
 
@@ -167,6 +198,19 @@ does not. The graph is never corrupt, but a bulk load can be partially present. 
 failure or a termination leaves no imported row behind. An atomic import holds the write lock for
 the whole file and uses more memory for the transaction, so prefer the default for large,
 restartable loads.
+
+:::{warning}
+The default import is non-atomic. A failure or a termination can leave the batches that already
+committed. Pass `atomic=True` when a partial load would be worse than a failed one.
+:::
+
+:::{admonition} In detail
+:class: detail
+
+With `atomic=True`, the whole file runs in one transaction. A failure rolls back every batch, and a
+termination leaves no imported row behind. The cost is a longer write lock and memory proportional
+to the transaction.
+:::
 
 ## Read the summary and failures
 

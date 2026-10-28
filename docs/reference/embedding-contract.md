@@ -1,5 +1,13 @@
 # Embedding contract
 
+:::{admonition} tl;dr
+:class: tldr
+
+The guarantees a file-backed graph provides: journal mode, thread affinity, lock waits, read
+snapshots, and the rules for creating or refusing a database file. Use it when an application needs
+the exact contract.
+:::
+
 This page is the reference for the guarantees a file-backed graph provides: journal mode, thread
 affinity, lock waits, read snapshots, and the rules for creating or refusing a database file. For
 a task-first introduction, start with [Embed a graph safely](../guides/embedding.md).

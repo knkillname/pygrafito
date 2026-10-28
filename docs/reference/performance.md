@@ -1,5 +1,12 @@
 # Performance
 
+:::{admonition} tl;dr
+:class: tldr
+
+A one-machine baseline for query, index, traversal, import, and write costs, with the command that
+produced each row. Treat the numbers as a shape, not a guarantee.
+:::
+
 This page records what the engine costs on one machine, with the exact command that produced each
 row. It is a single-machine baseline, not a guarantee. For the task of making a filter faster, see
 [Speed up property filters](../guides/indexes.md).

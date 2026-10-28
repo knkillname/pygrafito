@@ -1,5 +1,12 @@
 # Platform support
 
+:::{admonition} tl;dr
+:class: tldr
+
+Linux with glibc is the supported 1.0 platform, and Python 3.13 and 3.14 are supported. macOS and
+Windows are nightly portability signals, not supported platforms yet.
+:::
+
 This page states what a 1.x user can rely on. The contract is deliberately narrow: Linux is the
 supported platform for 1.0, and the other operating systems are tested nightly without blocking a
 release.

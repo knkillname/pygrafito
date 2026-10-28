@@ -1,5 +1,13 @@
 # Known limitations
 
+:::{admonition} tl;dr
+:class: tldr
+
+The deliberate 1.x boundaries: materialized results, a single-writer SQLite connection,
+non-atomic imports, frozen version 2 formats, and no server or streaming API. Plan around them or
+open a change proposal.
+:::
+
 These are the deliberate 1.x boundaries. They are not bugs to work around; plan the
 application around them or open a change proposal for a future release.
 

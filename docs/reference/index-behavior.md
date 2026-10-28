@@ -1,5 +1,12 @@
 # Index behavior
 
+:::{admonition} tl;dr
+:class: tldr
+
+How property indexes scope keys, which predicates become seeks, how the planner chooses, and what an
+index costs. Use it to read an access plan; start with the indexes guide for the task.
+:::
+
 This page is the reference for property-index scope, accelerated predicates, planner behavior,
 cost, persistence, and interaction with uniqueness constraints. For a task-first introduction,
 start with [Speed up property filters](../guides/indexes.md).
@@ -63,6 +70,19 @@ index still covers every relationship that stores the key, whatever labels it ca
 whether it is directed or undirected.
 
 ## What an index accelerates
+
+```{mermaid}
+:alt: A seekable predicate uses the index; a non-seekable predicate scans candidates and filters rows.
+
+flowchart TD
+  P["Predicate"] --> S{"Seekable form?"}
+  S -->|"<code>=, &gt;, &gt;=, &lt;, &lt;=, IN</code>"| I["Index seek"]
+  S -->|"negation, null check, <code>STARTS WITH</code>, <code>ORDER BY</code>"| C["Candidate scan"]
+  I --> F["Row filter"]
+  C --> F
+  accTitle: Seekable and non-seekable predicates
+  accDescr: Equality, range, and IN predicates can use the index to seek matching rows. Negated filters, null checks, STARTS WITH, and a bare ORDER BY scan candidates and filter them.
+```
 
 | Predicate | Accelerated |
 | --- | --- |

@@ -1,7 +1,28 @@
 # Five-minute quickstart
 
+:::{admonition} tl;dr
+:class: tldr
+
+Open a graph, add nodes and a relationship, query them, traverse two hops, and reopen the file.
+Five complete snippets, no dependencies.
+:::
+
 This page gets you from an empty Python process to a persisted graph you can query, traverse, and
 reopen. Every Python block is a complete program, so you can copy one into a file and run it.
+
+```{mermaid}
+:alt: Seven steps from installing pygrafito to reopening a persisted graph.
+
+flowchart LR
+  I["1. Install"] --> O["2. Open a graph"]
+  O --> A["3. Add nodes and properties"]
+  A --> R["4. Add a relationship"]
+  R --> Q["5. Query"]
+  Q --> T["6. Traverse"]
+  T --> P["7. Persist and reopen"]
+  accTitle: The seven-step quickstart path
+  accDescr: Install, open a graph, add nodes and properties, add a relationship, query, traverse, and reopen a file.
+```
 
 ## 1. Install
 
@@ -45,8 +66,18 @@ with Graph.open(":memory:") as graph:
     print(graph.journal_mode)  # memory
 ```
 
+:::{tip}
+Use `:memory:` while you experiment. Switch to a filesystem path when the graph should outlive the
+process.
+:::
+
 A `Graph` owns one SQLite connection. Keep it in the thread that opened it, and use the context
 manager so the connection is closed deterministically.
+
+:::{warning}
+A `Graph` handle is not thread-safe. Using it from another thread raises an error instead of
+sharing the connection silently. Open one handle per thread.
+:::
 
 ## 3. Add nodes, labels, and properties
 
@@ -82,6 +113,15 @@ with Graph.open(":memory:") as graph:
 
 Relationships are directed and typed. They can carry properties of their own.
 
+```{mermaid}
+:alt: Kevin Flynn has an ALLIES_WITH relationship to Quorra, carrying since_cycle.
+
+flowchart LR
+  K["Kevin Flynn<br/><code>Program</code><br/><code>cycles=36</code>"] -->|"<code>ALLIES_WITH</code><br/><code>since_cycle=2020</code>"| Q["Quorra<br/><code>Program</code><br/><code>cycles=37</code>"]
+  accTitle: Kevin Flynn allies with Quorra
+  accDescr: A directed relationship from Kevin Flynn to Quorra with a since_cycle property.
+```
+
 ```python
 from pygrafito import Graph
 
@@ -101,6 +141,13 @@ with Graph.open(":memory:") as graph:
 
 `Graph.query` runs one pattern-matching statement. `$name` is a parameter, so values are never
 interpolated into the statement text.
+
+:::{admonition} Remember
+:class: important
+
+Pass values through the parameter map. Never build statement text from user input: the statement
+is parsed and planned once, and the values stay data.
+:::
 
 ```python
 from pygrafito import Graph
@@ -151,6 +198,13 @@ with Graph.open(":memory:") as graph:
 
 A file-backed graph survives close and reopen. File databases prefer write-ahead logging; check
 `graph.journal_mode` when that concurrency property matters.
+
+:::{admonition} In detail
+:class: detail
+
+Write-ahead logging uses `-wal` and `-shm` sidecars next to the database. Do not delete them while
+the graph is open; SQLite needs them to recover committed writes after a crash.
+:::
 
 ```python
 import pathlib

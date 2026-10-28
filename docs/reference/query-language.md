@@ -1,6 +1,15 @@
 # Query language reference
 
-:::{note}
+:::{admonition} tl;dr
+:class: tldr
+
+The complete reference for patterns, writes, values, functions, aggregation, parameters, and errors
+in the query dialect. Start with the querying guide for tasks; use this page for exact rules.
+:::
+
+:::{admonition} Remember
+:class: important
+
 This page describes the dialect the current release executes. GQL spellings are canonical; the
 compatibility aliases in the [GQL profile](gql-profile.md) are accepted with identical semantics.
 The profile is also the 1.0 contract: every in-scope construct is `supported`, and every
@@ -269,6 +278,17 @@ see [Comments](#comments).
 
 A relationship may carry a quantifier after its labels:
 
+```{mermaid}
+:alt: One ALLIES_WITH pattern expands to one, two, or three hops from the same start node.
+
+flowchart LR
+  S["Start"] -->|"<code>ALLIES_WITH {1,3}</code>"| H1["1 hop"]
+  H1 -->|<code>ALLIES_WITH</code>| H2["2 hops"]
+  H2 -->|<code>ALLIES_WITH</code>| H3["3 hops"]
+  accTitle: A variable-length relationship expands hop by hop
+  accDescr: A single quantified relationship pattern matches one, two, or three successive hops from the start node, applying the same direction, labels, and property map at each hop.
+```
+
 ```text
 (a)-[:ALLIES_WITH*2]->(b)          exactly two hops
 (a)-[:ALLIES_WITH*1..3]->(b)       between one and three hops
@@ -351,6 +371,17 @@ when the graph may be cyclic or dense.
 ## Path modes
 
 A match clause or an individual path may name how that path may repeat:
+
+```{mermaid}
+:alt: A directed cycle of three TRUSTS relationships, where a walk may repeat an edge and a trail may not.
+
+flowchart LR
+  F["Flynn"] -->|"<code>TRUSTS</code> 1"| T["Tron"]
+  T -->|"<code>TRUSTS</code> 2"| C["Clu"]
+  C -->|"<code>TRUSTS</code> 3"| F
+  accTitle: A directed cycle for path modes
+  accDescr: Flynn trusts Tron, Tron trusts Clu, and Clu trusts Flynn. A WALK may reuse one of these relationships, a TRAIL may not, SIMPLE forbids repeating a node except at the end, and ACYCLIC forbids repeating any node.
+```
 
 ```text
 MATCH WALK (a)-[:ALLIES_WITH*1..3]->(b)         nodes and relationships may repeat

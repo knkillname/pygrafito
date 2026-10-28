@@ -1,10 +1,28 @@
 # Move data in and out
 
+:::{admonition} tl;dr
+:class: tldr
+
+Export a consistent snapshot to JSONL, restore it into a graph, or read the database through the
+read-only SQL views. Export and restore are the portable path; views are for external readers.
+:::
+
 Use `Graph.export_jsonl` and `Graph.restore_jsonl` to move a whole graph through a portable file.
 Use the read-only SQL views when another process or tool should read the database directly.
 
 This guide covers the common paths. [Snapshot format](../reference/snapshot-format.md) owns the
 record grammar, value rules, strictness, restore guarantees, and view schema.
+
+```{mermaid}
+:alt: A graph exports to a JSONL snapshot, which restores into another graph; read-only SQL views expose the live database.
+
+flowchart LR
+  G["<code>Graph</code><br/><code>grid.db</code>"] -->|<code>export_jsonl</code>| J["<code>grid.jsonl</code><br/>version 2"]
+  J -->|<code>restore_jsonl</code>| R["<code>Graph</code><br/>new or replaced"]
+  G ---|"read-only views"| V["<code>graph_nodes</code><br/><code>graph_relationships</code>"]
+  accTitle: Snapshot round trip and read-only views
+  accDescr: A graph exports to a version 2 JSONL snapshot and restores into a new or replaced graph. Separately, read-only SQL views expose the live database to external readers.
+```
 
 ## Export a snapshot
 
@@ -30,6 +48,16 @@ with tempfile.TemporaryDirectory() as directory:
 The file starts with a header carrying the format version and counts, followed by tagged node and
 relationship records in deterministic order. The live database path and its journal sidecars are
 never valid destinations.
+
+:::{tip}
+Pass `overwrite=True` only when replacing an old snapshot is the intent. Without it, an existing
+destination is refused and left untouched.
+:::
+
+:::{warning}
+Never export to the live database path or its `-wal`, `-shm`, or `-journal` sidecars. The export
+refuses those destinations because replacing them would damage the live store.
+:::
 
 ## Restore a snapshot
 
@@ -58,6 +86,13 @@ with tempfile.TemporaryDirectory() as directory:
 
 Restore remaps node and relationship ids, verifies the header counts, and runs in one transaction.
 Indexes and uniqueness constraints stay with the target and are enforced during the load.
+
+:::{admonition} Remember
+:class: important
+
+Restore remaps ids. A node id from the source file is not a stable external key, so look elements up
+by a property you control instead of by id.
+:::
 
 ## Read through SQL views
 
@@ -93,6 +128,14 @@ with tempfile.TemporaryDirectory() as directory:
 Properties are canonical JSON text. Use `json_type` and `json_extract` together when a predicate
 must be type-sensitive, and quote JSON paths that contain dots or spaces. View row order is not
 part of the contract, so add `ORDER BY` when order matters.
+
+:::{admonition} In detail
+:class: detail
+
+The snapshot is a header record followed by node records and then relationship records. The header
+counts are part of the contract: restore rejects a truncated file, an extra record, or a header
+that claims elements the file does not contain.
+:::
 
 ```sql
 SELECT id,

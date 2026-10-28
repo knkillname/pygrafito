@@ -1,5 +1,12 @@
 # API stability
 
+:::{admonition} tl;dr
+:class: tldr
+
+The 1.x contract: exported names, public methods, data fields, and the exception hierarchy stay
+stable. Additions are minor releases; removals and incompatible changes are major releases.
+:::
+
 `pygrafito` follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The 1.x series keeps
 the exported Python surface stable: existing imports, calls, and default behavior keep working.
 

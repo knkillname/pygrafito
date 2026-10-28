@@ -1,5 +1,12 @@
 # Explore the sample graphs
 
+:::{admonition} tl;dr
+:class: tldr
+
+Build one of the runnable TRON datasets, open it in the shell, and follow a tour. The examples are
+developer artifacts: they live in the repository and are not installed with the package.
+:::
+
 `pygrafito` ships a runnable example layer in the repository's `examples/` tree: three linked
 datasets, shell tours, analysis recipes, and algorithm demonstrations. The examples are developer
 artifacts, not part of the installed package, so every command below runs from a repository
@@ -8,6 +15,11 @@ checkout.
 ```console
 python -m examples
 ```
+
+:::{tip}
+Start with `python -m examples` to list every dataset, lane, and command. The listing is the
+shortest path from a checkout to a working graph.
+:::
 
 That lists the datasets, lanes, and commands. If the project is not installed in the active
 environment, use `hatch run python -m examples` instead. The rest of this page follows the same
@@ -23,6 +35,28 @@ order.
 | `all` | The three datasets merged by shared handles |
 | `synthetic` | A seeded scale graph shared with the benchmark harness |
 
+```{mermaid}
+:alt: The grid, cast, and places datasets, and the all dataset that merges them by shared handles.
+
+flowchart LR
+  subgraph GRID["grid"]
+    K["Kevin Flynn"] -->|<code>APPEARS_IN</code>| F["TRON: Legacy"]
+    G["The Grid"] -->|<code>HAS_PART</code>| T["I/O Tower"]
+  end
+  subgraph CAST["cast"]
+    K2["Kevin Flynn"] ---|"<code>SHARES_SCENE</code><br/><code>weight=9</code>"| T2["Tron"]
+  end
+  subgraph PLACES["places"]
+    R["Real World"] -->|<code>HAS_PART</code>| A["Flynn's Arcade"]
+  end
+  ALL["<code>all</code><br/>merged by shared handles"]
+  K -.-> ALL
+  K2 -.-> ALL
+  R -.-> ALL
+  accTitle: The three sample datasets and the merged view
+  accDescr: Grid holds film, place, and character edges; cast holds weighted scene co-occurrence; places holds containment. The all dataset merges them by shared handles.
+```
+
 Build a database or a version 2 JSONL snapshot:
 
 ```console
@@ -30,6 +64,12 @@ python -m examples build grid --output grid.db
 python -m examples build all --output all.jsonl --format jsonl
 python -m examples build synthetic --nodes 5000 --relationships 15000
 ```
+
+:::{warning}
+Do not edit `examples/data/grid.jsonl` by hand. Rebuild it with `python -m examples build grid
+--output examples/data/grid.jsonl --format jsonl`; the test suite keeps the committed snapshot
+identical to a fresh build.
+:::
 
 A database build applies the dataset's indexes and uniqueness constraints. A snapshot carries
 elements only; see [Snapshot format](../reference/snapshot-format.md). The committed
@@ -57,6 +97,13 @@ The tours use the canonical GQL spellings the release supports. The
 [GQL profile](../reference/gql-profile.md) records every construct and its tier; each tour is
 catalogued with its tier in `examples/tours/README.md`. `MERGE`, `WITH`, implicit grouping, and
 `type()` are pygrafito extensions, not canonical GQL.
+
+:::{admonition} Remember
+:class: important
+
+The tours are the canonical examples. Copy their spelling into new queries, and treat `MERGE`,
+`WITH`, implicit grouping, and `type()` as pygrafito extensions rather than portable GQL.
+:::
 
 | Tour | Focus | Migrated by |
 | --- | --- | --- |
@@ -105,6 +152,14 @@ control, the extractor in `examples/extract/` is a local development tool, and i
 to names, counts, weights, and structural metadata. No dialogue or action text is committed or
 packaged. The `basis` property on derived edges records whether a weight came from a shared scene, a
 transcript page, a dialogue window, a dialogue turn, or a scene transition.
+
+:::{admonition} In detail
+:class: detail
+
+The `basis` property is the provenance handle. `shared_scene`, transcript pages, dialogue windows,
+dialogue turns, and scene transitions each produce a different value, so a query can separate
+co-occurrence from dialogue order without reading the source material.
+:::
 
 ### Local extraction
 
