@@ -92,9 +92,9 @@ python -m examples.algorithms.direction
 python -m examples.algorithms.scaling --nodes 2000
 ```
 
-`paths()` enumerates relationship-unique trails. The target GQL profile makes `WALK` the default
-path mode for canonical patterns, gated by the query budget; the trails demonstration states that
-difference rather than claiming the target behavior is available today. See the
+`paths()` enumerates relationship-unique trails. In the query language, `WALK` is the default path
+mode for canonical patterns and runs under the query budget; the trails demonstration states that
+difference. See the
 [GQL profile](../reference/gql-profile.md#path-modes) and the
 [graph API](../api/graph.md).
 

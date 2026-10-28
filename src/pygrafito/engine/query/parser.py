@@ -102,6 +102,32 @@ class Parser:
         ">=": Operators.GREATER_EQUAL,
     }
     UNSUPPORTED_CLAUSES: typing.ClassVar[frozenset[Keyword]] = frozenset()
+    STATEMENT_BOUNDARIES: typing.ClassVar[dict[str, tuple[str, str]]] = {
+        "SELECT": ("SELECT", "use MATCH ... RETURN"),
+        "START": (
+            "in-language transaction control",
+            "the Python API owns transaction boundaries",
+        ),
+        "COMMIT": (
+            "in-language transaction control",
+            "the Python API owns transaction boundaries",
+        ),
+        "ROLLBACK": (
+            "in-language transaction control",
+            "the Python API owns transaction boundaries",
+        ),
+    }
+    TEMPORAL_NAMES: typing.ClassVar[frozenset[str]] = frozenset(
+        {"DATE", "TIME", "TIMESTAMP", "DURATION"}
+    )
+    TEMPORAL_BOUNDARY: typing.ClassVar[tuple[str, str]] = (
+        "temporal literal",
+        "store an integer or string property",
+    )
+    CATALOG_BOUNDARY: typing.ClassVar[tuple[str, str]] = (
+        "catalog statement",
+        "pygrafito opens one embedded graph per handle",
+    )
 
     def __init__(self, tokens: Sequence[Token], source: str = "") -> None:
         self._tokens = tuple(tokens)
@@ -203,6 +229,7 @@ class Parser:
         """
         clauses: list[Clause] = []
         first = self._current()
+        self._reject_statement_boundary()
         segment_start = 0
         self._previous_segment_has_return = False
         self._segment_has_input = False
@@ -697,9 +724,45 @@ class Parser:
             If the token starts an unsupported construct.
         """
         if token.is_keyword(Keyword.CALL):
-            self._reject_unsupported(token, "subqueries are not supported")
+            self._reject_call(token)
         if token.kind is TokenKind.KEYWORD and Keyword(token.value) in self.UNSUPPORTED_CLAUSES:
             self._reject_unsupported(token, f"{token.value} is not supported")
+
+    def _reject_call(self, token: Token) -> typing.Never:
+        """Reject a ``CALL`` form with the construct that it names.
+
+        Parameters
+        ----------
+        token : Token
+            Token holding ``CALL``.
+
+        Raises
+        ------
+        QuerySemanticError
+            Always, with the subquery or procedure alternative.
+        """
+        following = self._peek(1)
+        if following.kind is TokenKind.PUNCTUATION and following.value == "{":
+            self._reject_boundary(
+                token,
+                "CALL { ... }",
+                "use EXISTS { ... }, COUNT { ... }, or separate statements",
+            )
+        if following.kind in {
+            TokenKind.IDENTIFIER,
+            TokenKind.QUOTED_IDENTIFIER,
+            TokenKind.KEYWORD,
+        }:
+            self._reject_boundary(
+                token,
+                "procedure call",
+                "pygrafito has no procedure catalog",
+            )
+        self._reject_boundary(
+            token,
+            "CALL",
+            "use EXISTS { ... }, COUNT { ... }, or separate statements",
+        )
 
     def _match_clause(self, *, optional: bool = False) -> Match:
         """Parse the patterns and optional filter of a ``MATCH`` clause.
@@ -880,6 +943,14 @@ class Parser:
         labels: list[LabelAssignment] = []
         while True:
             variable, span = self._variable_reference("SET")
+            if self._check_operator("=") or (
+                self._check_operator("+") and self._peek_is_operator("=")
+            ):
+                self._reject_boundary(
+                    self._current(),
+                    "whole-map assignment",
+                    "assign or remove properties individually",
+                )
             if self._match_punctuation("."):
                 key = self._property_key()
                 self._expect_operator("=", "expected '=' in a SET assignment")
@@ -1235,6 +1306,7 @@ class Parser:
         mode = self._path_mode() if allow_mode else None
         if variable is None and search is None and mode is not None:
             variable = self._pattern_variable()
+        self._reject_pattern_function()
         terms: list[SimplePathTerm | GroupedPathTerm] = [
             self._path_term() if allow_group else self._simple_term()
         ]
@@ -1899,6 +1971,12 @@ bool, LabelExpression | None, Expression | None]
         left = self._additive_expression()
         while True:
             current = self._current()
+            if current.kind is TokenKind.OPERATOR and str(current.value) == "=~":
+                self._reject_boundary(
+                    current,
+                    "regex predicate",
+                    "use STARTS WITH, ENDS WITH, or CONTAINS",
+                )
             if current.kind is TokenKind.OPERATOR and str(current.value) in self.COMPARISONS:
                 operator = self.COMPARISONS[str(current.value)]
                 self._advance()
@@ -2077,7 +2155,9 @@ bool, LabelExpression | None, Expression | None]
             self._advance()
             return self._case_expression()
         if token.is_keyword(Keyword.CALL):
-            self._reject_unsupported(token, "subqueries are not supported")
+            self._reject_call(token)
+        if self._is_temporal_literal():
+            self._reject_boundary(token, *self.TEMPORAL_BOUNDARY)
         if self._is_identifier(token) and self._peek_is_punctuation("("):
             return self._function_call()
         if token.kind is TokenKind.KEYWORD:
@@ -2243,6 +2323,7 @@ bool, LabelExpression | None, Expression | None]
         """
         name_token = self._advance()
         name = self._identifier_text(name_token)
+        self._reject_function_boundary(name_token, name)
         self._expect_punctuation("(", "expected '(' after a function name")
         distinct = self._match_keyword(Keyword.DISTINCT)
         if self._match_operator("*"):
@@ -2260,6 +2341,62 @@ bool, LabelExpression | None, Expression | None]
             arguments=arguments,
             distinct=distinct,
             span=name_token.span,
+        )
+
+    def _reject_function_boundary(self, token: Token, name: str) -> None:
+        """Reject a function call that names an out-of-profile form.
+
+        Parameters
+        ----------
+        token : Token
+            Token holding the function name.
+        name : str
+            Function name as written.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the function is a recognized out-of-profile form.
+        """
+        upper = name.upper()
+        if upper == "EXISTS":
+            self._reject_boundary(token, "exists(n.prop)", "use n.prop IS NOT NULL")
+        if upper in {"SHORTESTPATH", "ALLSHORTESTPATHS"}:
+            self._reject_path_function(token)
+
+    def _reject_pattern_function(self) -> None:
+        """Reject a Cypher path function where a pattern is expected.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the pattern starts with a recognized path function.
+        """
+        token = self._current()
+        if (
+            token.kind is TokenKind.IDENTIFIER
+            and str(token.value).upper() in {"SHORTESTPATH", "ALLSHORTESTPATHS"}
+            and self._peek_is_punctuation("(")
+        ):
+            self._reject_path_function(token)
+
+    def _reject_path_function(self, token: Token) -> typing.Never:
+        """Reject a Cypher path function by its written name.
+
+        Parameters
+        ----------
+        token : Token
+            Token holding the path function name.
+
+        Raises
+        ------
+        QuerySemanticError
+            Always.
+        """
+        self._reject_boundary(
+            token,
+            f"{token.text}()",
+            "use the ANY SHORTEST or SHORTEST k path-search prefixes",
         )
 
     def _list_literal(self) -> ListLiteral:
@@ -2452,6 +2589,22 @@ bool, LabelExpression | None, Expression | None]
             The upcoming token, clamped to the final token.
         """
         return self._tokens[min(self._position + distance, len(self._tokens) - 1)]
+
+    def _peek_text(self, distance: int) -> str:
+        """Return the uppercased source value of an upcoming token.
+
+        Parameters
+        ----------
+        distance : int
+            Positive offset from the current position.
+
+        Returns
+        -------
+        str
+            Uppercased token value, or an empty string for a non-text token.
+        """
+        value = self._peek(distance).value
+        return str(value).upper() if isinstance(value, str) else ""
 
     def _previous(self) -> Token:
         """Return the most recently consumed token.
@@ -2666,6 +2819,43 @@ bool, LabelExpression | None, Expression | None]
             token.kind is TokenKind.PUNCTUATION and token.value == ","
         )
 
+    def _reject_statement_boundary(self) -> None:
+        """Reject a recognized out-of-profile statement by name.
+
+        The check matches token text instead of reserving new keywords, so the
+        same words stay usable as variables, aliases, labels, and property
+        keys.
+
+        Raises
+        ------
+        QuerySemanticError
+            If the statement starts with a recognized out-of-profile construct.
+        """
+        token = self._current()
+        if token.kind is not TokenKind.IDENTIFIER:
+            return
+        text = str(token.value).upper()
+        boundary = self.STATEMENT_BOUNDARIES.get(text)
+        if boundary is not None:
+            self._reject_boundary(token, *boundary)
+        if text == "DROP" and self._peek_text(1) == "GRAPH":
+            self._reject_boundary(token, *self.CATALOG_BOUNDARY)
+
+    def _is_temporal_literal(self) -> bool:
+        """Report whether the current identifier starts a temporal literal.
+
+        Returns
+        -------
+        bool
+            ``True`` when a temporal name is followed by a string literal.
+        """
+        token = self._current()
+        return (
+            token.kind is TokenKind.IDENTIFIER
+            and str(token.value).upper() in self.TEMPORAL_NAMES
+            and self._peek(1).kind is TokenKind.STRING
+        )
+
     def _reject_catalog_graph(self) -> None:
         """Reject ``CREATE GRAPH`` and ``INSERT GRAPH`` as out of profile.
 
@@ -2676,7 +2866,31 @@ bool, LabelExpression | None, Expression | None]
         """
         token = self._current()
         if token.kind is TokenKind.IDENTIFIER and str(token.value).upper() == "GRAPH":
-            self._reject_unsupported(token, "catalog statements are out of profile")
+            self._reject_boundary(token, *self.CATALOG_BOUNDARY)
+
+    @staticmethod
+    def _reject_boundary(token: Token, construct: str, detail: str) -> typing.Never:
+        """Raise the standard out-of-profile rejection.
+
+        Parameters
+        ----------
+        token : Token
+            Token where the construct starts.
+        construct : str
+            Name of the rejected construct.
+        detail : str
+            Supported alternative or reason the construct has none.
+
+        Raises
+        ------
+        QuerySemanticError
+            Always.
+        """
+        raise QuerySemanticError(
+            f"{construct} is not supported: {detail}",
+            line=token.span.line,
+            column=token.span.column,
+        )
 
     def _peek_is_operator(self, text: str) -> bool:
         """Report whether the next token is an operator.

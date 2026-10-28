@@ -60,3 +60,60 @@ class TestConformanceCorpus:
         )
         with pytest.raises(AssertionError, match=r"match-program-designations \[match"):
             corpus.check(case)
+
+    def test_rejection_case_runs_against_the_boundary(self) -> None:
+        """Require a correctly shaped rejection case to pass."""
+        corpus = self.corpus()
+        case = dataclasses.replace(
+            corpus.cases[0],
+            query="SELECT 1",
+            tags=("rejection",),
+            expect={
+                "error": {
+                    "type": "QuerySemanticError",
+                    "contains": "SELECT is not supported: use MATCH ... RETURN",
+                }
+            },
+        )
+        corpus.check(case)
+
+    def test_rejection_case_must_expect_an_error(self) -> None:
+        """Require a rejection case to declare an expected error."""
+        corpus = self.corpus()
+        case = dataclasses.replace(
+            corpus.cases[0],
+            query="SELECT 1",
+            tags=("rejection",),
+            expect={"rows": []},
+        )
+        with pytest.raises(AssertionError, match="must expect an error"):
+            corpus.check(case)
+
+    def test_rejection_case_must_use_the_boundary_shape(self) -> None:
+        """Require a rejection case to assert the boundary message shape."""
+        corpus = self.corpus()
+        case = dataclasses.replace(
+            corpus.cases[0],
+            query="SELECT 1",
+            tags=("rejection",),
+            expect={"error": {"type": "QuerySemanticError", "contains": "SELECT"}},
+        )
+        with pytest.raises(AssertionError, match="is not supported"):
+            corpus.check(case)
+
+    def test_rejection_case_fails_when_the_statement_executes(self) -> None:
+        """Require a rejection case to fail if no boundary error is raised."""
+        corpus = self.corpus()
+        case = dataclasses.replace(
+            corpus.cases[0],
+            query="MATCH (n:Program) RETURN n.designation AS name ORDER BY name",
+            tags=("rejection",),
+            expect={
+                "error": {
+                    "type": "QuerySemanticError",
+                    "contains": "SELECT is not supported: use MATCH ... RETURN",
+                }
+            },
+        )
+        with pytest.raises(AssertionError, match="expected an error"):
+            corpus.check(case)

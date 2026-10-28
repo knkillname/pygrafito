@@ -552,7 +552,7 @@ class TestParserErrors:
     @pytest.mark.parametrize(
         ("text", "fragment"),
         [
-            ("MATCH (a) CALL { MATCH (b) RETURN b } RETURN a", "subqueries"),
+            ("MATCH (a) CALL { MATCH (b) RETURN b } RETURN a", "CALL { ... }"),
         ],
     )
     def test_unsupported_constructs_are_semantic_errors(

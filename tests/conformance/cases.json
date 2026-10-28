@@ -420,18 +420,18 @@
       ]
     },
     {
-      "name": "insert-graph-is-out-of-profile",
-      "feature": "insert",
+      "name": "catalog-insert-graph-is-rejected",
+      "feature": "catalog-statements",
       "fixture": "tron-labels",
       "query": "INSERT GRAPH (n)",
       "expect": {
         "error": {
           "type": "QuerySemanticError",
-          "contains": "out of profile"
+          "contains": "catalog statement is not supported: pygrafito opens one embedded graph per handle"
         }
       },
       "tags": [
-        "canonical"
+        "rejection"
       ]
     },
     {
@@ -3040,6 +3040,216 @@
       },
       "tags": [
         "canonical"
+      ]
+    },
+    {
+      "name": "call-subquery-is-rejected",
+      "feature": "call",
+      "fixture": "tron-labels",
+      "query": "CALL { MATCH (n:Program) RETURN n } RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "CALL { ... } is not supported: use EXISTS { ... }, COUNT { ... }, or separate statements"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "procedure-call-is-rejected",
+      "feature": "procedures",
+      "fixture": "tron-labels",
+      "query": "CALL tron.proc() YIELD value RETURN value",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "procedure call is not supported: pygrafito has no procedure catalog"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "select-statement-is-rejected",
+      "feature": "select",
+      "fixture": "tron-labels",
+      "query": "SELECT 1",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "SELECT is not supported: use MATCH ... RETURN"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "start-transaction-is-rejected",
+      "feature": "in-language-transactions",
+      "fixture": "tron-labels",
+      "query": "START TRANSACTION",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "in-language transaction control is not supported: the Python API owns transaction boundaries"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "commit-is-rejected",
+      "feature": "in-language-transactions",
+      "fixture": "tron-labels",
+      "query": "COMMIT",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "in-language transaction control is not supported: the Python API owns transaction boundaries"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "date-literal-is-rejected",
+      "feature": "full-temporal-values",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) RETURN DATE '2026-01-01' AS cycle",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "temporal literal is not supported: store an integer or string property"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "create-graph-is-rejected",
+      "feature": "catalog-statements",
+      "fixture": "tron-labels",
+      "query": "CREATE GRAPH grid",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "catalog statement is not supported: pygrafito opens one embedded graph per handle"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "drop-graph-is-rejected",
+      "feature": "catalog-statements",
+      "fixture": "tron-labels",
+      "query": "DROP GRAPH grid",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "catalog statement is not supported: pygrafito opens one embedded graph per handle"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "exists-function-is-rejected",
+      "feature": "exists-n-prop",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WHERE exists(n.designation) RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "exists(n.prop) is not supported: use n.prop IS NOT NULL"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "regex-predicate-is-rejected",
+      "feature": "regex-predicates",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) WHERE n.designation =~ 'Tr.*' RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "regex predicate is not supported: use STARTS WITH, ENDS WITH, or CONTAINS"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "shortest-path-is-rejected",
+      "feature": "shortestpath",
+      "fixture": "tron-labels",
+      "query": "MATCH p = shortestPath((a)-[*]->(b)) RETURN p",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "shortestPath() is not supported: use the ANY SHORTEST or SHORTEST k path-search prefixes"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "all-shortest-paths-is-rejected",
+      "feature": "shortestpath",
+      "fixture": "tron-labels",
+      "query": "MATCH p = allShortestPaths((a)-[*]->(b)) RETURN p",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "allShortestPaths() is not supported: use the ANY SHORTEST or SHORTEST k path-search prefixes"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "whole-map-assignment-is-rejected",
+      "feature": "whole-map-assignment",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) SET n = {designation: 'Tron'} RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "whole-map assignment is not supported: assign or remove properties individually"
+        }
+      },
+      "tags": [
+        "rejection"
+      ]
+    },
+    {
+      "name": "whole-map-addition-is-rejected",
+      "feature": "whole-map-assignment",
+      "fixture": "tron-labels",
+      "query": "MATCH (n:Program) SET n += {cycles: 36} RETURN n",
+      "expect": {
+        "error": {
+          "type": "QuerySemanticError",
+          "contains": "whole-map assignment is not supported: assign or remove properties individually"
+        }
+      },
+      "tags": [
+        "rejection"
       ]
     }
   ]

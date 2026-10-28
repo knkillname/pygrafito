@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Queries that use an unsupported form such as `CALL { ... }`, a procedure call, `SELECT`, a
+  temporal literal, `exists(...)`, a regex predicate, `shortestPath(...)`, whole-map `SET`, or a
+  catalog statement now fail with a clear message that names the construct and the supported
+  alternative. The words involved, such as `date` and `select`, remain usable as names in
+  supported statements.
+- The GQL profile is now the frozen 1.0 language contract: every listed construct works, every
+  unsupported form names the error it raises and the supported alternative, and nothing is left in
+  a planned state.
 - **BREAKING:** `WHEN`, `THEN`, `ELSE`, `END`, `UNION`, `INTERSECT`, and `EXCEPT` are now reserved
   keywords. If an existing query uses one of these words as a variable or alias, wrap it in
   backticks; for example, `when` becomes `` `when` ``.

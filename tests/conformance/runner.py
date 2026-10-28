@@ -117,6 +117,17 @@ class Case:
         """
         return "gated" in self.tags
 
+    @property
+    def rejection(self) -> bool:
+        """Report whether the case documents an out-of-profile rejection.
+
+        Returns
+        -------
+        bool
+            ``True`` when ``rejection`` is one of the tags.
+        """
+        return "rejection" in self.tags
+
 
 class Corpus:
     """Load and execute the conformance corpus.
@@ -166,6 +177,8 @@ class Corpus:
         AssertionError
             If the result or the error does not match the expectation.
         """
+        if case.rejection:
+            self._check_rejection_expectation(case)
         try:
             rows = self.run(case)
         except PygrafitoError as error:
@@ -221,6 +234,36 @@ class Corpus:
                 created[relationship.end],
                 directed=relationship.directed,
                 **relationship.properties,
+            )
+
+    @staticmethod
+    def _check_rejection_expectation(case: Case) -> None:
+        """Assert that a rejection case declares the documented error shape.
+
+        Parameters
+        ----------
+        case : Case
+            Case tagged as a rejection.
+
+        Raises
+        ------
+        AssertionError
+            If the case does not expect a semantic boundary error.
+        """
+        expected = case.expect.get("error")
+        if not isinstance(expected, dict):
+            raise AssertionError(
+                f"{case.name} [{case.feature}]: a rejection case must expect an error"
+            )
+        if "rows" in case.expect:
+            raise AssertionError(
+                f"{case.name} [{case.feature}]: a rejection case must not expect rows"
+            )
+        fragment = expected.get("contains")
+        if not isinstance(fragment, str) or " is not supported: " not in fragment:
+            raise AssertionError(
+                f"{case.name} [{case.feature}]: a rejection case must carry an "
+                "'<construct> is not supported:' fragment"
             )
 
     @staticmethod

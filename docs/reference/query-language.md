@@ -3,9 +3,9 @@
 :::{note}
 This page describes the dialect the current release executes. GQL spellings are canonical; the
 compatibility aliases in the [GQL profile](gql-profile.md) are accepted with identical semantics.
-The profile is also the 1.0 target contract: `supported` rows work today, `gated` rows do not
-execute in this release, and `out of profile` rows are rejected. See
-[Gated constructs](#gated-constructs) and [Unsupported constructs](#unsupported-constructs).
+The profile is also the 1.0 contract: every in-scope construct is `supported`, and every
+`out of profile` construct is rejected. See [Unsupported constructs](#unsupported-constructs) for
+the boundary.
 :::
 
 This page is the complete reference for the `pygrafito` query dialect: grammar, pattern
@@ -1231,11 +1231,11 @@ Write failures follow the same rule. A storage failure such as a protected
 deletion, a missing element, or an invalid stored value is raised as
 `QueryExecutionError` rather than as a storage or domain exception.
 
-A construct that the GQL profile marks `gated` is in the 1.0 target but cannot
-execute in this release. It is rejected with a positioned syntax or semantic query
-error, and the profile names the follow-up change. A gated construct stops the
-whole statement before execution, so a gated clause never writes data. Constructs
-the profile marks out of profile keep their existing explicit rejection.
+A recognized out-of-profile construct is rejected with a positioned semantic
+query error before the statement runs, so it never writes data. Text that does
+not fit the grammar stays a syntax error. The
+[GQL profile](gql-profile.md#out-of-profile) names the construct and the
+supported alternative for every boundary.
 
 ## Consistent execution snapshot
 
@@ -1378,29 +1378,31 @@ RETURN count(*) AS total
 
 Use `-` for an undirected relationship.
 
-## Gated constructs
+## No gated constructs
 
-A construct that the profile marks `gated` is in the 1.0 target but cannot execute
-in this release. It is rejected with a positioned query error before the statement
-runs. The [GQL profile](gql-profile.md#gated-for-10) is the authoritative list of
-statuses and follow-up changes, and its
-[path semantics](gql-profile.md#path-semantics) section defines the target behavior
-that the follow-up changes implement. This table mirrors the recognized forms.
-
-| Construct | Follow-up change | Target semantics |
-| --- | --- | --- |
-| Grouped quantified paths | `add-gql-grouped-quantified-paths` | [Grouped quantified paths](gql-profile.md#grouped-quantified-paths) |
-
-`define-gql-path-semantics` owns how the supported path, match, and search rules interact.
+Every construct in the profile executes in this release. The `gated` and `deferred`
+statuses stay in the profile vocabulary, but no row uses either one. A supported
+construct is documented as current behavior; an out-of-profile construct is
+rejected as described in [Unsupported constructs](#unsupported-constructs).
 
 ## Unsupported constructs
 
-The following are outside the 1.0 profile and are rejected with an explicit query
-error before execution. The [GQL profile](gql-profile.md#out-of-profile) records
-the reason and error contract for each entry.
+Two rules separate a deliberate profile boundary from a malformed query.
 
-- `CALL { ... }`; use `EXISTS { ... }` or `COUNT { ... }`, or separate
-  statements.
+A recognized out-of-profile construct is rejected before execution with a
+semantic query error that names the construct and either the supported
+alternative or the reason none exists:
+
+```text
+<construct> is not supported: <alternative or reason>
+```
+
+The boundary is contextual, so the words involved stay usable as variables,
+aliases, labels, and property keys in supported statements. `date`, `start`,
+`drop`, and `select` are examples.
+
+- `CALL { ... }`; use `EXISTS { ... }`, `COUNT { ... }`, or separate statements.
+- Procedure calls (`CALL name(...)`); there is no procedure catalog.
 - Whole-map assignment (`SET n = {...}`, `SET n += {...}`); assign or remove
   properties individually.
 - `exists(n.prop)`; use `n.prop IS NOT NULL`.
@@ -1408,17 +1410,33 @@ the reason and error contract for each entry.
   predicates.
 - `shortestPath()` and `allShortestPaths()`; use `Graph.shortest_path` or the
   target path-search prefixes.
-- `INSERT GRAPH` and `CREATE GRAPH`, and other catalog operations.
-- Non-language capabilities: graph types, sessions, procedures, in-language
-  transactions, `SELECT`, full temporal values, servers and drivers, clustering,
-  authentication, multi-tenancy, multi-graph storage, graph-algorithm APIs, full
-  Cypher compatibility, vector search, and full-text search.
+- `SELECT`; use `MATCH ... RETURN`.
+- In-language transaction control; the Python API owns transaction boundaries.
+- Temporal literals (`DATE`, `TIME`, `TIMESTAMP`, `DURATION`); store an integer
+  or string property.
+- `INSERT GRAPH`, `CREATE GRAPH`, `DROP GRAPH`, and other catalog operations;
+  one graph handle owns one database.
+- Non-language capabilities: graph types, sessions, servers and drivers,
+  clustering, authentication, multi-tenancy, multi-graph storage,
+  graph-algorithm APIs, full Cypher compatibility, vector search, and full-text
+  search.
+
+Function calls such as `exists(...)` and `shortestPath(...)`, the `=~`
+predicate, and whole-map `SET` targets are recognized at their own position and
+use the same message shape.
+
+Text that is not a recognized out-of-profile construct and does not fit the
+grammar stays a syntax error. It reports the offending line and column and does
+not claim that the construct is out of profile. For example, `RETURN 1 ^ 2`
+raises a syntax error.
+
+The [GQL profile](gql-profile.md#out-of-profile) records the reason and error
+contract for each entry.
 
 Invalid uses of supported features, such as `MERGE` over a quantified pattern, a
 path variable, more than one pattern, or an invalid relationship shape, are also
 rejected. The [rejected forms](gql-profile.md#rejected-forms) table and the
 query-language analysis document the exact restrictions.
 
-The remaining path constructs are gated for 1.0, not out of profile. Open-ended
-quantifiers and match modes are supported. Extending the dialect requires its own
-specification change rather than silently accepting partial behavior.
+Extending the dialect requires its own specification change rather than
+silently accepting partial behavior.

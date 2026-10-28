@@ -11,21 +11,23 @@ membership and implementation state separately:
 
 - **supported** — implemented in the current release and covered by at least one conformance
   corpus case.
-- **gated** — in the 1.0 target profile, not implemented yet. The profile names the follow-up
-  change that implements it.
-- **deferred** — post-1.0 language direction, not part of the 1.0 profile or promise.
+- **gated** — vocabulary for an in-scope construct that is not implemented yet. No row in this
+  release uses it.
+- **deferred** — vocabulary for post-1.0 language direction. No row in this release uses it.
 - **out of profile** — a rejected non-goal.
 
-The current release contains `supported`, `gated`, and `out of profile` rows. There are no
-`deferred` rows in the 1.0 target; the status is reserved for post-1.0 proposals. The
-[query-language reference](query-language.md) describes the executable dialect only.
+The current release contains only `supported` and `out of profile` rows. The `gated` and
+`deferred` statuses stay in the vocabulary so a future proposal cannot silently reintroduce an
+unimplemented target. The [query-language reference](query-language.md) describes the executable
+dialect only.
 :::
 
 ## Current status
 
 The current release implements every supported row below, including open-ended quantifiers, match
-modes, path search, and grouped quantified paths. No path-engine row is gated. Constructs outside
-the profile are rejected with a positioned query error, and the matrix records their status.
+modes, path search, and grouped quantified paths. Every path-engine row is supported. Constructs
+outside the profile are rejected with a positioned query error, and the matrix records their
+status.
 
 | Area | Current release | 1.0 target |
 | --- | --- | --- |
@@ -47,7 +49,7 @@ where the release supports them; compatibility aliases appear only in the migrat
 
 ## The five tiers
 
-Every supported or gated construct belongs to exactly one tier. Rejected forms are invalid
+Every supported construct belongs to exactly one tier. Rejected forms are invalid
 combinations, not separate tiers.
 
 | Tier | Meaning | Reader treatment |
@@ -191,13 +193,12 @@ when you want a trail in the query language.
 
 ## Path semantics
 
-This section publishes the 1.0 target for how path modes, match modes, quantifiers, and path search
+This section publishes how path modes, match modes, quantifiers, and path search
 combine. `define-gql-path-semantics` owns these decisions. `add-gql-unbounded-traversal`,
 `add-gql-match-modes`, `add-gql-path-search`, and `add-gql-grouped-quantified-paths` have landed.
 Each construct keeps a
-[conformance matrix](#conformance-matrix) row, and every table here repeats its current status. A
-construct marked `gated` does not execute in this release, and an example that uses one is a target
-example rather than current behavior.
+[conformance matrix](#conformance-matrix) row, and every table here repeats its current status.
+Every example on this page is current behavior.
 
 ### Path modes and match modes
 
@@ -234,19 +235,19 @@ relationship bound by an earlier `MATCH` stage may be bound again in a later sta
 
 ### Quantifiers
 
-| Form | Lower bound | Upper bound | Tier | Default path mode | Status | Follow-up change |
-| --- | --- | --- | --- | --- | --- | --- |
-| `{n}` | `n` | `n` | Canonical GQL | `WALK` | supported | — |
-| `{m,n}` | `m` | `n` | Canonical GQL | `WALK` | supported | — |
-| `{,n}` | `0` | `n` | Canonical GQL | `WALK` | supported | — |
-| `{m,}` | `m` | unbounded | Canonical GQL | `WALK` | supported | — |
-| `*` | `0` | unbounded | Canonical GQL | `WALK` | supported | — |
-| `+` | `1` | unbounded | Canonical GQL | `WALK` | supported | — |
-| `*n` | `n` | `n` | Compatibility construct | `TRAIL` | supported | — |
-| `*n..m` | `n` | `m` | Compatibility construct | `TRAIL` | supported | — |
-| `*0..m` | `0` | `m` | Compatibility construct | `TRAIL` | supported | — |
-| `*n..` | `n` | unbounded | Compatibility construct | `TRAIL` | supported | — |
-| Group `{...}` | as written | as written | Canonical GQL | `WALK` | supported | — |
+| Form | Lower bound | Upper bound | Tier | Default path mode | Status |
+| --- | --- | --- | --- | --- | --- |
+| `{n}` | `n` | `n` | Canonical GQL | `WALK` | supported |
+| `{m,n}` | `m` | `n` | Canonical GQL | `WALK` | supported |
+| `{,n}` | `0` | `n` | Canonical GQL | `WALK` | supported |
+| `{m,}` | `m` | unbounded | Canonical GQL | `WALK` | supported |
+| `*` | `0` | unbounded | Canonical GQL | `WALK` | supported |
+| `+` | `1` | unbounded | Canonical GQL | `WALK` | supported |
+| `*n` | `n` | `n` | Compatibility construct | `TRAIL` | supported |
+| `*n..m` | `n` | `m` | Compatibility construct | `TRAIL` | supported |
+| `*0..m` | `0` | `m` | Compatibility construct | `TRAIL` | supported |
+| `*n..` | `n` | unbounded | Compatibility construct | `TRAIL` | supported |
+| Group `{...}` | as written | as written | Canonical GQL | `WALK` | supported |
 
 The bare `*` and `+` are the canonical GQL forms, not legacy spellings. `*` is zero or more and
 `+` is one or more, so a query that wants at least one hop writes `+` or `{1,}`. A missing upper
@@ -406,17 +407,17 @@ prefix. The consolidated list is under [Rejected path combinations](#rejected-pa
 ### Rejected path combinations
 
 Each combination below is a semantic error. It is rejected with a positioned query error before
-any statement text executes, and the implementing change adds its focused rejection test.
+any statement text executes and has a focused test.
 
-| Combination | Why it is rejected | Follow-up change |
-| --- | --- | --- |
-| Mixing a legacy and a canonical quantifier in one path without an explicit mode | The two forms have different defaults, and the profile refuses to guess which one the author intended. | Already enforced |
-| A search prefix inside a group | Search applies to the whole path, not to one term. | Already enforced |
-| A group with no relationship position, a group that cannot progress, or a lone zero-lower-bound group | A path must not be empty, and every iteration must consume a relationship. | Already enforced |
-| A group path variable on a quantifier that admits zero iterations | A path contains at least one node, so it cannot represent an empty iteration. | Already enforced |
-| A variable introduced twice inside one group, or a group variable that shadows an outer variable | Group variables bind one ordered list, and shadowing would make the binding ambiguous. | Already enforced |
-| `SHORTEST k` with a non-literal, negative, or non-integer `k` | Selection counts have to be fixed before execution. | Already enforced |
-| More than one search prefix on one path pattern | A partition has one selection rule. | Already enforced |
+| Combination | Why it is rejected |
+| --- | --- |
+| Mixing a legacy and a canonical quantifier in one path without an explicit mode | The two forms have different defaults, and the profile refuses to guess which one the author intended. |
+| A search prefix inside a group | Search applies to the whole path, not to one term. |
+| A group with no relationship position, a group that cannot progress, or a lone zero-lower-bound group | A path must not be empty, and every iteration must consume a relationship. |
+| A group path variable on a quantifier that admits zero iterations | A path contains at least one node, so it cannot represent an empty iteration. |
+| A variable introduced twice inside one group, or a group variable that shadows an outer variable | Group variables bind one ordered list, and shadowing would make the binding ambiguous. |
+| `SHORTEST k` with a non-literal, negative, or non-integer `k` | Selection counts have to be fixed before execution. |
+| More than one search prefix on one path pattern | A partition has one selection rule. |
 
 The mixed-quantifier rejection already has a focused test and is also listed under
 [Rejected forms](#rejected-forms).
@@ -467,8 +468,8 @@ holds.
 
 ## Extensions
 
-These features have no GQL equivalent in the 2024 standard. The table records whether each is
-supported today or gated for 1.0. They are never claimed as GQL.
+These features have no GQL equivalent in the 2024 standard. The table records the current status of
+each extension. They are never claimed as GQL.
 
 | Extension | Status | Why it stays | Canonical alternative |
 | --- | --- | --- | --- |
@@ -481,15 +482,14 @@ supported today or gated for 1.0. They are never claimed as GQL.
 | Query budget | supported | Bounded execution for cyclic and dense graphs. | No GQL equivalent. |
 | `WITH *` | supported | A scope-preserving projection shorthand for the `WITH` extension. | `WITH` with explicit columns. |
 
-Supported extensions remain part of the compatibility surface. Gated extensions are part of the
-1.0 target but do not execute in the current release. They are documented on this page and labeled
-pygrafito-only wherever they appear.
+Supported extensions remain part of the compatibility surface. They are documented on this page
+and labeled pygrafito-only wherever they appear.
 
-## Out of profile, gated, and deferred
+## Out of profile and the reserved statuses
 
-`Out of profile` and `gated` are different. An out-of-profile construct is rejected and is not a
-1.0 promise. A gated construct is in the 1.0 target but is not implemented yet. `Deferred` is
-post-1.0 direction and is not used for any 1.0 target row.
+Out of profile means the construct is rejected and is not a 1.0 promise. `Gated` and `deferred`
+remain in the vocabulary, but no row uses either status: every in-scope construct is supported,
+and every other construct is rejected.
 
 ### Out of profile
 
@@ -505,7 +505,7 @@ Out of profile means the construct is rejected with an explicit query error. It 
 | In-language transactions (`START TRANSACTION`, `COMMIT`, `ROLLBACK`) | The Python `Graph` and `Transaction` APIs own transaction boundaries. | A positioned query error before execution. |
 | `SELECT` | The query surface is pattern-based, not the SQL/PGQ-style `SELECT` surface. | A positioned query error before execution. |
 | Full temporal values (`DATE`, `TIME`, `TIMESTAMP`, `DURATION`) | The stored value format does not have temporal types yet. | A positioned query error before execution. |
-| `CALL { ... }` | Cypher-only subquery form. Use read-only `EXISTS { ... }` or `COUNT { ... }` when they land, or separate statements. | A positioned query error before execution. |
+| `CALL { ... }` | Cypher-only subquery form. Use read-only `EXISTS { ... }`, `COUNT { ... }`, or separate statements. | A positioned query error before execution. |
 | Whole-map assignment (`SET n = {...}`, `SET n += {...}`) | Cypher-only convenience form. Assign or remove properties individually. | A positioned query error before execution. |
 | `exists(n.prop)` | Cypher-only function form. Use `n.prop IS NOT NULL`. | A positioned query error before execution. |
 | Regex predicates | Cypher-only regular-expression matching. Use `STARTS WITH`, `ENDS WITH`, and `CONTAINS` for literal predicates. | A positioned query error before execution. |
@@ -518,16 +518,11 @@ Out of profile means the construct is rejected with an explicit query error. It 
 | Vector search | No vector index or distance function is in the profile. | A positioned query error before execution. |
 | Full-text search | No full-text index or query syntax is in the profile. | A positioned query error before execution. |
 
-### Gated for 1.0
+### Gated and deferred
 
-No matrix surface is gated in the current release. The path-engine rows all execute, and the
-[conformance matrix](#conformance-matrix) records their implementing cases.
-
-### Deferred
-
-No matrix row is `deferred` in the 1.0 target. The status remains in the vocabulary for constructs
-that are outside 1.0 but may be reconsidered later. A deferred construct is not a 1.0 promise and
-does not appear in the gated table.
+No matrix row is `gated` or `deferred` in this release. The [conformance matrix](#conformance-matrix)
+records every row as supported or out of profile. The statuses remain in the vocabulary for a
+future proposal; reintroducing one requires its own change.
 
 ## Rejected forms
 
@@ -657,7 +652,6 @@ the previous table, not a matrix status.
 | Full-text search | Out of profile | out of profile | `Full-text search` | No full-text index or syntax. |
 | `MERGE` invalid combinations | Rejected form | rejected form | Rejected forms | Quantified patterns, path variables, multiple patterns, invalid relationship shape, and bound-element rewrites. |
 | Mixed legacy and canonical quantifiers without an explicit mode | Rejected form | rejected form | Rejected forms | Name a path mode explicitly. |
-| Catalog operations `INSERT GRAPH` and `CREATE GRAPH` | Out of profile | out of profile | `Catalog statements`; rejected forms | Also listed as a rejected operation. |
 
 ## Conformance matrix
 
@@ -665,96 +659,101 @@ The matrix is the profile's honest status board. The `status` column uses exactl
 
 - **supported**: in the 1.0 profile, implemented, and covered by at least one conformance corpus
   case.
-- **gated**: in the 1.0 profile, not implemented yet, with a named follow-up change.
-- **deferred**: post-1.0 language direction, not in the 1.0 profile. No row uses it in this target.
+- **gated**: reserved for an in-scope construct that is not implemented yet. No row uses it.
+- **deferred**: reserved for post-1.0 language direction. No row uses it.
 - **out of profile**: rejected.
 
-The `current` column records what the release does today. A `gated` row is not executable in the
-current release. The `follow-up` column names the change that implements a gated row or the
-prerequisite path. The `corpus` column is `pending` until the row becomes supported; out-of-profile
-rows have no query case.
+The `current` column records what the release does today. The `evidence` column resolves coverage:
+a supported row names its corpus cases, a recognized boundary names a `rejection:` case, a
+capability without query syntax names a focused `test:`, and an umbrella row points at the
+rejected-forms table.
 
-| Feature | Tier | Status | Current | Deviation | Follow-up | Corpus |
-| --- | --- | --- | --- | --- | --- | --- |
-| `MATCH` and `OPTIONAL MATCH` | Canonical GQL | supported | implemented | None | — | match-program-designations |
-| `INSERT` | Canonical GQL | supported | implemented | None | — | insert-creates-a-node |
-| `SET` | Canonical GQL | supported | implemented | None | — | set-assigns-a-property |
-| `REMOVE` | Canonical GQL | supported | implemented | None | — | remove-removes-a-property |
-| `DELETE`, `DETACH DELETE`, `NODETACH DELETE` | Canonical GQL | supported | implemented | None | — | nodetach-delete-removes-a-disconnected-node |
-| `FOR` with ordinality/offset | Canonical GQL | supported | implemented | None | — | for-ordinality-binds-one-based-position |
-| `FILTER` | Canonical GQL | supported | implemented | None | — | filter-stage-alias |
-| `LET` | Canonical GQL | supported | implemented | None | — | let-adds-a-binding |
-| `NEXT` | Canonical GQL | supported | implemented | `YIELD` supported; no-`YIELD` and write-only segments accepted for Cypher compatibility | — | next-carries-an-intermediate-return |
-| `FINISH` | Canonical GQL | supported | implemented | None | — | finish-ends-a-read-without-a-result |
-| `GROUP BY` | Canonical GQL | supported | implemented | Expression keys are a pygrafito extension; `RETURN DISTINCT` is accepted | — | group-by-groups-and-counts |
-| `RETURN` with `DISTINCT`/`ALL` or `*` | Canonical GQL | supported | implemented | `RETURN NO BINDINGS` is a pygrafito extension | — | return-all-is-the-default |
-| `RETURN NO BINDINGS` | pygrafito extension | supported | implemented | Zero columns, one empty row per input binding; final-only | — | return-no-bindings-projects-empty-rows |
-| `ORDER BY` with null ordering | Canonical GQL | supported | implemented | None | — | nulls-first-explicit |
-| `OFFSET` and `SKIP` | Canonical GQL | supported | implemented | Canonical synonyms, not aliases | — | offset-paginates |
-| `LIMIT` | Canonical GQL | supported | implemented | None | — | limit-bounds-the-result |
-| `{n,m}` quantifier | Canonical GQL | supported | implemented | Open upper bounds are covered by `Open-ended quantifiers` | — | quantifier-bounded-range |
-| Label expressions (and, or, not, wildcard) | Canonical GQL | supported | implemented | None | — | label-conjunction |
-| Edge directions `->`, `<-`, `-`, `~`, `<~`, `~>`, `<->` | Canonical GQL | supported | implemented | None | — | arrow-outgoing |
-| Comments `//`, `--`, `/* ... */` | Canonical GQL | supported | implemented | `--` is a comment, not an edge alias | — | dash-comment |
-| Inline element `WHERE` | Canonical GQL | supported | implemented | None | — | inline-node-predicate |
-| `IS` label syntax | Canonical GQL | supported | implemented | None | — | label-is-form |
-| Path variables | Canonical GQL | supported | implemented | None | — | diamond-finds-two-trails |
-| Parameters | Canonical GQL | supported | implemented | None | — | parameters-bind-data |
-| `WALK` path mode | Canonical GQL | supported | implemented | Default; bounded by the query budget | — | walk-reuses-a-relationship |
-| `TRAIL` path mode | Canonical GQL | supported | implemented | None | — | trail-rejects-a-reused-relationship |
-| `SIMPLE` path mode | Canonical GQL | supported | implemented | None | — | simple-allows-a-closed-path |
-| `ACYCLIC` path mode | Canonical GQL | supported | implemented | None | — | acyclic-rejects-a-closed-path |
-| `CREATE` for `INSERT` | Synthetic alias | supported | implemented | Data statements only | — | create-alias-returns-a-node |
-| `UNWIND` for `FOR` | Synthetic alias | supported | implemented | None | — | unwind-alias-iterates |
-| Stage `WHERE` for `FILTER` | Synthetic alias | supported | implemented | `MATCH ... WHERE` stays canonical | — | stage-where-alias-filters |
-| `-->`, `<--`, `--` for `->`, `<-`, `-` | Synthetic alias | supported | implemented | `-->` and `<--` are aliases; `--` is a comment, not an edge | — | arrow-double-dash-alias |
-| `:A:B` for `:A&B` | Synthetic alias | supported | implemented | None | — | label-colon-conjunction-alias |
-| Legacy `*n..m` quantifier | Compatibility construct | supported | implemented | Default `TRAIL` | — | legacy-quantifier-trails |
-| `MERGE` with conditional updates | pygrafito extension | supported | implemented | No GQL equivalent; invalid forms are rejected | — | merge-conditional-updates |
-| `WITH` projection and aggregation | pygrafito extension | supported | implemented | No GQL equivalent; `WITH *` is supported | — | with-aggregation |
-| Implicit grouping | pygrafito extension | supported | implemented | `GROUP BY` alternative | — | implicit-grouping |
-| `type()` | pygrafito extension | supported | implemented | `LABELS()` alternative | — | type-extension |
-| Query budget | pygrafito extension | supported | implemented | No GQL equivalent; expansion, row, and optional time counters | — | budget-row-limit |
-| `CASE` | Canonical GQL | supported | implemented | Simple and searched forms | — | case-searched-classifies-programs |
-| Map literals | Canonical GQL | supported | implemented | `{key: expression}` | — | map-literal-projects-fields |
-| List indexing and slicing | Canonical GQL | supported | implemented | Index and slice access | — | list-index-and-slice |
-| List comprehensions | Canonical GQL | supported | implemented | List-producing expression | — | list-comprehension-filters-and-doubles |
-| String concatenation | Canonical GQL | supported | implemented | Canonical double-pipe operator; `+` is a compatibility alias for string operands | — | string-concatenation-and-plus-alias |
-| Path functions | Canonical GQL | supported | implemented | `nodes`, `relationships`, `length` | — | path-functions-expose-a-path |
-| Extended scalar functions | Canonical GQL | supported | implemented | `range`, `head`, `last`, `tail`, `reverse`, `split`, `substring`, `replace`, `toBoolean`, `round`, `ceil`, `floor` | — | extended-scalar-functions |
-| `WITH *` | pygrafito extension | supported | implemented | Part of the `WITH` extension | — | with-star-preserves-scope |
-| `EXISTS { ... }` | Canonical GQL | supported | implemented | Read-only correlated and uncorrelated subquery | — | exists-correlated-programs |
-| `COUNT { ... }` | Canonical GQL | supported | implemented | Read-only correlated and uncorrelated subquery | — | count-correlated-trusts |
-| `UNION` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | — | union-deduplicates-program-and-user |
-| `UNION ALL` | Canonical GQL | supported | implemented | Set operation with duplicates | — | union-all-preserves-duplicates |
-| `INTERSECT` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | — | intersect-keeps-program-names |
-| `INTERSECT ALL` | Canonical GQL | supported | implemented | Multiset intersection keeping `min(left, right)` copies | — | intersect-all-keeps-the-smaller-count, intersect-all-uses-canonical-equality |
-| `EXCEPT` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | — | except-removes-program-names |
-| `EXCEPT ALL` | Canonical GQL | supported | implemented | Multiset difference keeping `max(left - right, 0)` copies | — | except-all-subtracts-counts, except-all-returns-nothing-when-right-is-larger, except-all-keeps-unmatched-duplicates, set-quantifiers-chain-left-to-right |
-| `DIFFERENT EDGES` | Canonical GQL | supported | implemented | Match mode; applies across every path of one clause | — | different-edges-shared-edge, different-edges-quantified, different-edges-two-patterns, different-edges-parallel |
-| `REPEATABLE ELEMENTS` | Canonical GQL | supported | implemented | Match mode; default and no extra constraint | — | repeatable-elements-shared-edge |
-| Grouped quantified paths | Canonical GQL | supported | implemented | Parenthesized path repetition with list bindings, nested flattening, zero iterations, and inner modes | — | grouped-fixed-repetition, grouped-bounded-diamond, grouped-list-bindings, grouped-zero-iterations, grouped-nested, grouped-inner-mode |
-| Path search prefixes | Canonical GQL | supported | implemented | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k`; partitioned by first and last node with the documented tie-break | — | any-per-partition, any-shortest-diamond, all-shortest-diamond, shortest-k-parallel, shortest-k-zero, shortest-self-loop |
-| Open-ended quantifiers | Canonical GQL | supported | implemented | Open forms `*`, `+`, `*n..`, `{m,}` with demand-driven limits; `Unbounded WALK` is not a separate row | — | open-star, open-plus, open-canonical-tail, open-legacy-tail, unbounded-walk-limit, unbounded-trail-cycle, unbounded-zero-hop |
-| Catalog statements | Out of profile | out of profile | rejected | Embedded single graph | — | n/a |
-| Graph types | Out of profile | out of profile | rejected | No schema layer | — | n/a |
-| Sessions | Out of profile | out of profile | rejected | No server state | — | n/a |
-| Procedures | Out of profile | out of profile | rejected | No catalog | — | n/a |
-| In-language transactions | Out of profile | out of profile | rejected | Python API owns transactions | — | n/a |
-| `SELECT` | Out of profile | out of profile | rejected | Pattern query surface only | — | n/a |
-| Full temporal values | Out of profile | out of profile | rejected | No temporal storage | — | n/a |
-| `CALL { ... }` | Out of profile | out of profile | rejected | Cypher-only subquery form | — | n/a |
-| Whole-map assignment | Out of profile | out of profile | rejected | Cypher-only convenience form | — | n/a |
-| `exists(n.prop)` | Out of profile | out of profile | rejected | Use `n.prop IS NOT NULL` | — | n/a |
-| Regex predicates | Out of profile | out of profile | rejected | Cypher-only regular-expression matching | — | n/a |
-| `shortestPath()` | Out of profile | out of profile | rejected | Cypher-only path function | — | n/a |
-| Servers and drivers | Out of profile | out of profile | rejected | Embedded library only | — | n/a |
-| Clustering, authentication, and multi-tenancy | Out of profile | out of profile | rejected | No server or account layer | — | n/a |
-| Multi-graph storage | Out of profile | out of profile | rejected | One database per handle | — | n/a |
-| Graph-algorithm APIs | Out of profile | out of profile | rejected | Python helpers only | — | n/a |
-| Full Cypher compatibility | Out of profile | out of profile | rejected | GQL-first profile | — | n/a |
-| Vector search | Out of profile | out of profile | rejected | No vector index or distance function | — | n/a |
-| Full-text search | Out of profile | out of profile | rejected | No full-text index or syntax | — | n/a |
+| Feature | Tier | Status | Current | Deviation | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| `MATCH` and `OPTIONAL MATCH` | Canonical GQL | supported | implemented | None | match-program-designations |
+| `INSERT` | Canonical GQL | supported | implemented | None | insert-creates-a-node |
+| `SET` | Canonical GQL | supported | implemented | None | set-assigns-a-property |
+| `REMOVE` | Canonical GQL | supported | implemented | None | remove-removes-a-property |
+| `DELETE`, `DETACH DELETE`, `NODETACH DELETE` | Canonical GQL | supported | implemented | None | nodetach-delete-removes-a-disconnected-node |
+| `FOR` with ordinality/offset | Canonical GQL | supported | implemented | None | for-ordinality-binds-one-based-position |
+| `FILTER` | Canonical GQL | supported | implemented | None | filter-stage-alias |
+| `LET` | Canonical GQL | supported | implemented | None | let-adds-a-binding |
+| `NEXT` | Canonical GQL | supported | implemented | `YIELD` supported; no-`YIELD` and write-only segments accepted for Cypher compatibility | next-carries-an-intermediate-return |
+| `FINISH` | Canonical GQL | supported | implemented | None | finish-ends-a-read-without-a-result |
+| `GROUP BY` | Canonical GQL | supported | implemented | Expression keys are a pygrafito extension; `RETURN DISTINCT` is accepted | group-by-groups-and-counts |
+| `RETURN` with `DISTINCT`/`ALL` or `*` | Canonical GQL | supported | implemented | `RETURN NO BINDINGS` is a pygrafito extension | return-all-is-the-default |
+| `RETURN NO BINDINGS` | pygrafito extension | supported | implemented | Zero columns, one empty row per input binding; final-only | return-no-bindings-projects-empty-rows |
+| `ORDER BY` with null ordering | Canonical GQL | supported | implemented | None | nulls-first-explicit |
+| `OFFSET` and `SKIP` | Canonical GQL | supported | implemented | Canonical synonyms, not aliases | offset-paginates |
+| `LIMIT` | Canonical GQL | supported | implemented | None | limit-bounds-the-result |
+| `{n,m}` quantifier | Canonical GQL | supported | implemented | Open upper bounds are covered by `Open-ended quantifiers` | quantifier-bounded-range |
+| Label expressions (and, or, not, wildcard) | Canonical GQL | supported | implemented | None | label-conjunction |
+| Edge directions `->`, `<-`, `-`, `~`, `<~`, `~>`, `<->` | Canonical GQL | supported | implemented | None | arrow-outgoing |
+| Comments `//`, `--`, `/* ... */` | Canonical GQL | supported | implemented | `--` is a comment, not an edge alias | dash-comment |
+| Inline element `WHERE` | Canonical GQL | supported | implemented | None | inline-node-predicate |
+| `IS` label syntax | Canonical GQL | supported | implemented | None | label-is-form |
+| Path variables | Canonical GQL | supported | implemented | None | diamond-finds-two-trails |
+| Parameters | Canonical GQL | supported | implemented | None | parameters-bind-data |
+| `WALK` path mode | Canonical GQL | supported | implemented | Default; bounded by the query budget | walk-reuses-a-relationship |
+| `TRAIL` path mode | Canonical GQL | supported | implemented | None | trail-rejects-a-reused-relationship |
+| `SIMPLE` path mode | Canonical GQL | supported | implemented | None | simple-allows-a-closed-path |
+| `ACYCLIC` path mode | Canonical GQL | supported | implemented | None | acyclic-rejects-a-closed-path |
+| `CREATE` for `INSERT` | Synthetic alias | supported | implemented | Data statements only | create-alias-returns-a-node |
+| `UNWIND` for `FOR` | Synthetic alias | supported | implemented | None | unwind-alias-iterates |
+| Stage `WHERE` for `FILTER` | Synthetic alias | supported | implemented | `MATCH ... WHERE` stays canonical | stage-where-alias-filters |
+| `-->`, `<--`, `--` for `->`, `<-`, `-` | Synthetic alias | supported | implemented | `-->` and `<--` are aliases; `--` is a comment, not an edge | arrow-double-dash-alias |
+| `:A:B` for `:A&B` | Synthetic alias | supported | implemented | None | label-colon-conjunction-alias |
+| Legacy `*n..m` quantifier | Compatibility construct | supported | implemented | Default `TRAIL` | legacy-quantifier-trails |
+| `MERGE` with conditional updates | pygrafito extension | supported | implemented | No GQL equivalent; invalid forms are rejected | merge-conditional-updates |
+| `WITH` projection and aggregation | pygrafito extension | supported | implemented | No GQL equivalent; `WITH *` is supported | with-aggregation |
+| Implicit grouping | pygrafito extension | supported | implemented | `GROUP BY` alternative | implicit-grouping |
+| `type()` | pygrafito extension | supported | implemented | `LABELS()` alternative | type-extension |
+| Query budget | pygrafito extension | supported | implemented | No GQL equivalent; expansion, row, and optional time counters | budget-row-limit |
+| `CASE` | Canonical GQL | supported | implemented | Simple and searched forms | case-searched-classifies-programs |
+| Map literals | Canonical GQL | supported | implemented | `{key: expression}` | map-literal-projects-fields |
+| List indexing and slicing | Canonical GQL | supported | implemented | Index and slice access | list-index-and-slice |
+| List comprehensions | Canonical GQL | supported | implemented | List-producing expression | list-comprehension-filters-and-doubles |
+| String concatenation | Canonical GQL | supported | implemented | Canonical double-pipe operator; `+` is a compatibility alias for string operands | string-concatenation-and-plus-alias |
+| Path functions | Canonical GQL | supported | implemented | `nodes`, `relationships`, `length` | path-functions-expose-a-path |
+| Extended scalar functions | Canonical GQL | supported | implemented | `range`, `head`, `last`, `tail`, `reverse`, `split`, `substring`, `replace`, `toBoolean`, `round`, `ceil`, `floor` | extended-scalar-functions |
+| `WITH *` | pygrafito extension | supported | implemented | Part of the `WITH` extension | with-star-preserves-scope |
+| `EXISTS { ... }` | Canonical GQL | supported | implemented | Read-only correlated and uncorrelated subquery | exists-correlated-programs |
+| `COUNT { ... }` | Canonical GQL | supported | implemented | Read-only correlated and uncorrelated subquery | count-correlated-trusts |
+| `UNION` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | union-deduplicates-program-and-user |
+| `UNION ALL` | Canonical GQL | supported | implemented | Set operation with duplicates | union-all-preserves-duplicates |
+| `INTERSECT` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | intersect-keeps-program-names |
+| `INTERSECT ALL` | Canonical GQL | supported | implemented | Multiset intersection keeping `min(left, right)` copies | intersect-all-keeps-the-smaller-count, intersect-all-uses-canonical-equality |
+| `EXCEPT` | Canonical GQL | supported | implemented | Set operation; `DISTINCT` is the explicit default | except-removes-program-names |
+| `EXCEPT ALL` | Canonical GQL | supported | implemented | Multiset difference keeping `max(left - right, 0)` copies | except-all-subtracts-counts, except-all-returns-nothing-when-right-is-larger, except-all-keeps-unmatched-duplicates, set-quantifiers-chain-left-to-right |
+| `DIFFERENT EDGES` | Canonical GQL | supported | implemented | Match mode; applies across every path of one clause | different-edges-shared-edge, different-edges-quantified, different-edges-two-patterns, different-edges-parallel |
+| `REPEATABLE ELEMENTS` | Canonical GQL | supported | implemented | Match mode; default and no extra constraint | repeatable-elements-shared-edge |
+| Grouped quantified paths | Canonical GQL | supported | implemented | Parenthesized path repetition with list bindings, nested flattening, zero iterations, and inner modes | grouped-fixed-repetition, grouped-bounded-diamond, grouped-list-bindings, grouped-zero-iterations, grouped-nested, grouped-inner-mode |
+| Path search prefixes | Canonical GQL | supported | implemented | `ANY`, `ANY SHORTEST`, `ALL SHORTEST`, `SHORTEST k`; partitioned by first and last node with the documented tie-break | any-per-partition, any-shortest-diamond, all-shortest-diamond, shortest-k-parallel, shortest-k-zero, shortest-self-loop |
+| Open-ended quantifiers | Canonical GQL | supported | implemented | Open forms `*`, `+`, `*n..`, `{m,}` with demand-driven limits; `Unbounded WALK` is not a separate row | open-star, open-plus, open-canonical-tail, open-legacy-tail, unbounded-walk-limit, unbounded-trail-cycle, unbounded-zero-hop |
+| Catalog statements | Out of profile | out of profile | rejected | Embedded single graph | rejection:catalog-insert-graph-is-rejected, rejection:create-graph-is-rejected, rejection:drop-graph-is-rejected |
+| Graph types | Out of profile | out of profile | rejected | No schema layer | test:TestOutOfProfileSurface::test_capability_is_absent |
+| Sessions | Out of profile | out of profile | rejected | No server state | test:TestOutOfProfileSurface::test_capability_is_absent |
+| Procedures | Out of profile | out of profile | rejected | No catalog | rejection:procedure-call-is-rejected |
+| In-language transactions | Out of profile | out of profile | rejected | Python API owns transactions | rejection:start-transaction-is-rejected, rejection:commit-is-rejected |
+| `SELECT` | Out of profile | out of profile | rejected | Pattern query surface only | rejection:select-statement-is-rejected |
+| Full temporal values | Out of profile | out of profile | rejected | No temporal storage | rejection:date-literal-is-rejected |
+| `CALL { ... }` | Out of profile | out of profile | rejected | Cypher-only subquery form | rejection:call-subquery-is-rejected |
+| Whole-map assignment | Out of profile | out of profile | rejected | Cypher-only convenience form | rejection:whole-map-assignment-is-rejected, rejection:whole-map-addition-is-rejected |
+| `exists(n.prop)` | Out of profile | out of profile | rejected | Use `n.prop IS NOT NULL` | rejection:exists-function-is-rejected |
+| Regex predicates | Out of profile | out of profile | rejected | Cypher-only regular-expression matching | rejection:regex-predicate-is-rejected |
+| `shortestPath()` | Out of profile | out of profile | rejected | Cypher-only path function | rejection:shortest-path-is-rejected, rejection:all-shortest-paths-is-rejected |
+| Servers and drivers | Out of profile | out of profile | rejected | Embedded library only | test:TestOutOfProfileSurface::test_capability_is_absent |
+| Clustering, authentication, and multi-tenancy | Out of profile | out of profile | rejected | No server or account layer | test:TestOutOfProfileSurface::test_capability_is_absent |
+| Multi-graph storage | Out of profile | out of profile | rejected | One database per handle | test:TestOutOfProfileSurface::test_capability_is_absent |
+| Graph-algorithm APIs | Out of profile | out of profile | rejected | Python helpers only | test:TestOutOfProfileSurface::test_capability_is_absent |
+| Full Cypher compatibility | Out of profile | out of profile | rejected | GQL-first profile | rejected forms |
+| Vector search | Out of profile | out of profile | rejected | No vector index or distance function | test:TestOutOfProfileSurface::test_capability_is_absent |
+| Full-text search | Out of profile | out of profile | rejected | No full-text index or syntax | test:TestOutOfProfileSurface::test_capability_is_absent |
+
+Evidence resolves to one of three owners. `rejection:<case>` is a recognized boundary with a
+rejection corpus case; `test:<Class>::<method>` is a capability with no query syntax, covered by
+a focused surface test; and `rejected forms` points at the rejected-forms table. A supported row
+names its corpus cases instead.
 
 A feature is `supported` only while at least one corpus case covers it and passes in CI. This page
 therefore claims a tested profile, not ISO conformance beyond the matrix.
@@ -772,14 +771,15 @@ fixture    name of a fixture declared in the same document
 query      statement text
 params     optional parameter mapping
 expect     projected rows, or an error type and message fragment
-tags       optional: canonical, alias, compatibility, extension, gated
+tags       optional: canonical, alias, compatibility, extension, rejection
 budget     optional: per-case query-budget overrides, such as {"max_rows": 2}
 ```
 
 The feature id is derived from the first matrix column: lower-case it and replace every run of
 non-alphanumeric characters with a hyphen. Four rows carry an explicit id because the derived one
 would be ambiguous: `edge-direction-aliases`, `label-conjunction-alias`, `quantifier`, and
-`legacy-quantifier`. A case tagged `gated` must name a gated row.
+`legacy-quantifier`. A case tagged `rejection` must name an out-of-profile row, expect an error,
+and assert a message fragment containing ` is not supported: `.
 
 Fixtures are small named graphs declared in the same file, not the example datasets, so a corpus
 run stays fast and the language contract never depends on `examples/`. Example case:
@@ -797,9 +797,24 @@ run stays fast and the language contract never depends on `examples/`. Example c
 
 A feature is marked `supported` only after at least one case covers it. A regression fails CI with
 the case name and feature id. The coverage rules are enforced in both directions: every
-`supported` row needs a case, every case needs a matrix row, and deferred or out-of-profile rows
-carry none. Gated rows carry no corpus case in this change; their cases land with the follow-up
-change.
+`supported` row needs a case, every case needs a matrix row, and every out-of-profile row needs a
+rejection case or a focused surface test. A rejection case states the boundary in the same way:
+
+```json
+{
+  "name": "select-statement-is-rejected",
+  "feature": "select",
+  "fixture": "tron-labels",
+  "query": "SELECT 1",
+  "expect": {
+    "error": {
+      "type": "QuerySemanticError",
+      "contains": "SELECT is not supported: use MATCH ... RETURN"
+    }
+  },
+  "tags": ["rejection"]
+}
+```
 
 ### Path corpus cases
 
@@ -814,17 +829,19 @@ Every case uses a TRON-themed fixture and tags `canonical` or `compatibility` as
 
 ## 1.0 release gate
 
-The 1.0 profile is a release gate. The gate blocks 1.0 until every item is checked:
+The 1.0 profile is a release gate. The gate blocks 1.0 until every item is checked. Tests in
+`tests/test_gql_profile.py` enforce the profile-side items automatically:
 
 1. **No gated or deferred rows.** Every matrix row is `supported` or `out of profile`. Checked by
-   reading the matrix and, after `complete-gql-profile`, by the automated consistency check.
+   `TestGqlProfile::test_release_gate`, which fails on either status.
 2. **Every supported row has a corpus case.** Checked by
-   `hatch test tests/test_gql_profile.py` and the data-driven corpus.
-3. **Every out-of-profile row and rejected form has an explicit rejection test.** Checked by the
-   profile audit and the focused tests named in the rejected-forms table; `complete-gql-profile`
-   adds any missing test.
+   `TestGqlProfile::test_every_supported_row_has_a_case` and the data-driven corpus.
+3. **Every out-of-profile row and rejected form has an explicit rejection test.** Checked by
+   `TestGqlProfile::test_release_gate`, which resolves each evidence cell to a `rejection` corpus
+   case, a focused surface test, or the rejected-forms table.
 4. **Matrix, inventory, prose, grammar summary, query-language reference, and tours agree.**
-   Checked by review and the `complete-gql-profile` consistency check.
+   Checked by the inventory and prose checks in `TestGqlProfile::test_release_gate` plus review of
+   the grammar summary and tours.
 5. **Quality checks pass.** `hatch check --fix`, `hatch test`, and `hatch run docs:build` pass;
    coverage is at least 80%.
 6. **The 1.0 hardening checklist is complete.** Owned by `harden-for-1.0`.
@@ -834,9 +851,8 @@ The 1.0 profile is a release gate. The gate blocks 1.0 until every item is check
    exist.
 9. **The version is set with `hatch version 1.0.0`.** Never edit the version file directly.
 
-This change documents the gate. The later `complete-gql-profile` change owns the automated
-consistency checks that enforce it; implementation changes own their feature cases and status
-updates.
+`complete-gql-profile` implemented the profile-side checks. Later feature changes update their own
+cases and status rows; the gate fails if they drift.
 
 ## Profile freeze policy
 
@@ -866,7 +882,7 @@ surface, so migration can be incremental.
 | Implicit grouping | `GROUP BY` | Implicit grouping remains an extension. |
 | `RETURN NO BINDINGS` | `FINISH` | `RETURN NO BINDINGS` remains a zero-column extension. |
 | `*1..3` | `{1,3}` | The legacy form keeps `TRAIL`; the canonical form uses `WALK`. |
-| `*` when at least one hop is intended | `+` or `{1,}` | `*` includes zero-hop matches once open quantifiers land. |
+| `*` when at least one hop is intended | `+` or `{1,}` | `*` includes zero-hop matches. |
 | An open `WALK` without `LIMIT` | `LIMIT`, a search prefix, or `TRAIL` | An unbounded walk fails on the budget instead of returning a truncated result. |
 | `-->`, `<--`, `--` | `->`, `<-`, `-` | `-->` and `<--` remain aliases; `--` is a comment. |
 | No path mode | `WALK` default | Use `MATCH TRAIL` for the old trail behavior. |
@@ -893,8 +909,8 @@ language default. It does not follow `WALK`.
 A change that adds, removes, or changes a query construct updates this page, the conformance
 matrix, the construct inventory, the query-language reference, the tours, and the conformance
 corpus in the same change. A construct added without a profile entry or a corpus case is not
-complete. A feature is marked `supported` only after its corpus case exists and passes in CI. A
-gated row without a follow-up owner is a profile defect.
+complete. A feature is marked `supported` only after its corpus case exists and passes in CI. An
+out-of-profile row without evidence is a profile defect.
 
 The project does not claim ISO conformance beyond this matrix. Use "GQL profile" or
 "GQL-first profile" in documentation and release notes, not "GQL compliant".

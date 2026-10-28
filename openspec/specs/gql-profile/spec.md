@@ -48,7 +48,7 @@ rather than ignored.
 
 ### Requirement: Exhaustive construct inventory
 
-The profile SHALL publish an inventory that classifies every in-scope GQL construct, every supported alias and extension, and every out-of-profile or rejected form. The inventory SHALL cover every matrix row and every construct named in the query-language reference's gated and unsupported sections.
+The profile SHALL publish an inventory that classifies every in-scope GQL construct, every supported alias and extension, and every out-of-profile or rejected form. The inventory SHALL cover every matrix row and every construct named in the query-language reference's unsupported and out-of-profile sections.
 
 #### Scenario: Matrix and inventory agree
 
@@ -65,9 +65,10 @@ The profile SHALL publish an inventory that classifies every in-scope GQL constr
 - **WHEN** a reader inspects the inventory
 - **THEN** every alias, compatibility construct, and pygrafito extension has exactly one tier and a canonical alternative or a stated reason for having none
 
+
 ### Requirement: Status vocabulary and gated semantics
 
-The profile SHALL use exactly four statuses: `supported`, `gated`, `deferred`, and `out of profile`. `gated` SHALL mean in the 1.0 target profile but not yet implemented; `deferred` SHALL mean post-1.0 language direction and not in the 1.0 profile. At the 1.0 release gate, no row SHALL be `gated` or `deferred`.
+The profile SHALL use exactly four statuses: `supported`, `gated`, `deferred`, and `out of profile`. `gated` SHALL mean in the 1.0 target profile but not yet implemented; `deferred` SHALL mean post-1.0 language direction and not in the 1.0 profile. At the 1.0 release gate, no row SHALL be `gated` or `deferred`. A supported row SHALL NOT retain gated prose or a follow-up owner.
 
 #### Scenario: In-scope work is gated
 
@@ -83,6 +84,12 @@ The profile SHALL use exactly four statuses: `supported`, `gated`, `deferred`, a
 
 - **WHEN** the 1.0 release gate is evaluated
 - **THEN** every matrix row is `supported` or `out of profile`
+
+#### Scenario: Supported rows lose their gated prose
+
+- **WHEN** a construct becomes supported
+- **THEN** the profile and the query-language reference describe it as current behavior and no longer list it under a gated heading, a follow-up change, or target-only wording
+
 
 ### Requirement: 1.0 target language scope
 
@@ -242,10 +249,7 @@ extensions are not claimed as GQL and remain part of the supported compatibility
 
 ### Requirement: Out-of-profile GQL
 
-The profile SHALL list catalog statements, graph types, sessions, procedures, in-language
-transactions, `SELECT`, and full temporal values as out of profile for 1.0. A statement that uses
-an out-of-profile construct SHALL be rejected with an explicit query error rather than ignored or
-partially executed.
+The profile SHALL list catalog statements, graph types, sessions, procedures, in-language transactions, `SELECT`, and full temporal values as out of profile for 1.0. A statement that uses an out-of-profile construct SHALL be rejected with an explicit query error rather than ignored or partially executed. The profile SHALL record, for each out-of-profile row, whether the rejection is a recognized semantic boundary or unrecognized syntax.
 
 #### Scenario: Catalog statement is out of profile
 
@@ -261,6 +265,12 @@ partially executed.
 
 - **WHEN** a caller submits a full temporal literal that the profile does not include
 - **THEN** the profile requires a query error rather than a coerced stored value
+
+#### Scenario: Rejection form is stated per row
+
+- **WHEN** a reader inspects an out-of-profile row
+- **THEN** the row states whether the construct is a recognized boundary with a semantic error or unrecognized text with a syntax error
+
 
 ### Requirement: Expanded out-of-profile boundary
 
@@ -297,7 +307,7 @@ The profile SHALL list rejected combinations and forms that are not separate mat
 
 ### Requirement: 1.0 release gate
 
-The 1.0 profile SHALL define a release gate that blocks 1.0 until the profile is complete and verified.
+The 1.0 profile SHALL define a release gate that blocks 1.0 until the profile is complete and verified. The gate SHALL be checked by automated tests rather than by prose inspection alone.
 
 #### Scenario: Profile is complete
 
@@ -314,6 +324,11 @@ The 1.0 profile SHALL define a release gate that blocks 1.0 until the profile is
 - **WHEN** the release gate is evaluated
 - **THEN** the matrix, prose, construct inventory, grammar summary, query-language reference, and tours describe the same status for every construct
 
+#### Scenario: Gate checks are automated
+
+- **WHEN** the release gate is evaluated
+- **THEN** a test suite checks for no `gated` or `deferred` rows, inventory status equal to matrix status, supported-row coverage, and rejection coverage for every out-of-profile row
+
 #### Scenario: Quality checks pass
 
 - **WHEN** the release gate is evaluated
@@ -323,6 +338,7 @@ The 1.0 profile SHALL define a release gate that blocks 1.0 until the profile is
 
 - **WHEN** the release gate is evaluated
 - **THEN** the 1.0 changelog section, migration notes, and out-of-profile list exist and the version is set with `hatch version 1.0.0`
+
 
 ### Requirement: Profile freeze policy
 
@@ -359,6 +375,8 @@ ISO GQL. The project SHALL NOT claim ISO conformance beyond that matrix.
 The profile SHALL define a conformance corpus contract with a query, a graph fixture, expected
 rows or an expected error, and the profile feature it covers. The corpus SHALL run in continuous
 integration, and a feature SHALL NOT be marked supported until at least one corpus case covers it.
+An out-of-profile rejection case SHALL carry a `rejection` tag and an expected error type and
+message fragment.
 
 #### Scenario: Corpus case shape
 
@@ -374,6 +392,12 @@ integration, and a feature SHALL NOT be marked supported until at least one corp
 
 - **WHEN** a corpus case's actual result differs from its expected result
 - **THEN** the CI run fails and names the case and feature
+
+#### Scenario: Rejection cases assert the boundary
+
+- **WHEN** a corpus case documents an out-of-profile construct
+- **THEN** it is tagged `rejection`, expects an error type and a message fragment, and fails if the statement executes
+
 
 ### Requirement: Migration guidance
 

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Verify the published GQL profile contract."""
 
+import importlib
 import re
 import typing
 from pathlib import Path
@@ -15,6 +16,7 @@ class TestGqlProfile:
 
     ROOT: typing.ClassVar[Path] = Path(__file__).resolve().parents[1]
     PROFILE: typing.ClassVar[Path] = ROOT / "docs" / "reference" / "gql-profile.md"
+    REFERENCE: typing.ClassVar[Path] = ROOT / "docs" / "reference" / "query-language.md"
     INDEX: typing.ClassVar[Path] = ROOT / "docs" / "index.md"
     CORPUS: typing.ClassVar[Path] = ROOT / "tests" / "conformance" / "cases.json"
     TIERS: typing.ClassVar[tuple[str, ...]] = (
@@ -28,11 +30,23 @@ class TestGqlProfile:
         {"supported", "gated", "deferred", "out of profile"}
     )
     MATRIX_HEADER: typing.ClassVar[str] = "| Feature | Tier | Status |"
+    INVENTORY_HEADER: typing.ClassVar[str] = "| Construct | Tier | Status |"
+    SURFACE_TESTS: typing.ClassVar[dict[str, str]] = {
+        "TestOutOfProfileSurface": "tests.engine.query.test_out_of_profile",
+    }
+    GATED_PROSE: typing.ClassVar[tuple[str, ...]] = (
+        "## gated constructs",
+        "gated for 1.0",
+        "when they land",
+        "once open quantifiers land",
+        "remains gated",
+        "remain gated",
+    )
     FEATURE_OVERRIDES: typing.ClassVar[dict[str, str]] = {
-        "`-->`, `<--`, `--` for `->`, `<-`, `-`": "edge-direction-aliases",
-        "`:A:B` for `:A&B`": "label-conjunction-alias",
-        "`{n,m}` quantifier": "quantifier",
-        "Legacy `*n..m` quantifier": "legacy-quantifier",
+        "-->, <--, -- for ->, <-, -": "edge-direction-aliases",
+        ":A:B for :A&B": "label-conjunction-alias",
+        "{n,m} quantifier": "quantifier",
+        "Legacy *n..m quantifier": "legacy-quantifier",
     }
 
     def test_profile_page_exists_and_is_in_reference_navigation(self) -> None:
@@ -75,21 +89,204 @@ class TestGqlProfile:
         } - covered
         assert not missing, f"supported rows without a case: {sorted(missing)}"
 
-    def test_gated_cases_expect_a_follow_up_change(self) -> None:
-        """Require a gated case to name the change that implements it."""
-        for case in Corpus(self.CORPUS).cases:
-            if not case.gated:
-                continue
-            expected = case.expect.get("error")
-            assert isinstance(expected, dict), case.name
-            fragment = str(expected.get("contains", ""))
-            assert "add-gql-" in fragment or "harden-for-1.0" in fragment, case.name
-
-    def test_deferred_rows_have_no_cases(self) -> None:
-        """Require deferred and out-of-profile rows to carry no corpus cases."""
+    def test_rejection_cases_name_out_of_profile_rows(self) -> None:
+        """Require every rejection case to document an out-of-profile row."""
         features = self._features()
         for case in Corpus(self.CORPUS).cases:
-            assert features[case.feature] not in {"deferred", "out of profile"}, case.name
+            if not case.rejection:
+                continue
+            assert features[case.feature] == "out of profile", case.name
+
+    def test_release_gate(self) -> None:
+        """Require the profile to satisfy every release-gate check."""
+        problems = self._gate_problems(
+            self.PROFILE.read_text(encoding="utf-8"),
+            self.REFERENCE.read_text(encoding="utf-8"),
+        )
+        assert not problems, problems
+
+    def test_gate_detects_a_gated_row(self) -> None:
+        """Require the gate to fail when a row becomes gated."""
+        text = self.PROFILE.read_text(encoding="utf-8")
+        broken = text.replace(
+            "| `MATCH` and `OPTIONAL MATCH` | Canonical GQL | supported |",
+            "| `MATCH` and `OPTIONAL MATCH` | Canonical GQL | gated |",
+            1,
+        )
+        problems = self._gate_problems(broken, self.REFERENCE.read_text(encoding="utf-8"))
+        assert any("gated" in problem for problem in problems)
+
+    def test_gate_detects_missing_evidence(self) -> None:
+        """Require the gate to fail when a row has no evidence."""
+        text = self.PROFILE.read_text(encoding="utf-8")
+        broken = text.replace(
+            "| None | match-program-designations |",
+            "| None | — |",
+            1,
+        )
+        problems = self._gate_problems(broken, self.REFERENCE.read_text(encoding="utf-8"))
+        assert any("evidence" in problem for problem in problems)
+
+    def test_gate_detects_unresolvable_evidence(self) -> None:
+        """Require the gate to fail when evidence names nothing."""
+        text = self.PROFILE.read_text(encoding="utf-8")
+        broken = text.replace(
+            "rejection:select-statement-is-rejected",
+            "rejection:select-that-does-not-exist",
+            1,
+        )
+        problems = self._gate_problems(broken, self.REFERENCE.read_text(encoding="utf-8"))
+        assert any("select-that-does-not-exist" in problem for problem in problems)
+
+    def test_gate_detects_inventory_drift(self) -> None:
+        """Require the gate to fail when inventory status disagrees."""
+        text = self.PROFILE.read_text(encoding="utf-8")
+        broken = text.replace(
+            "| `SELECT` | Out of profile | out of profile | `SELECT` |",
+            "| `SELECT` | Out of profile | supported | `SELECT` |",
+            1,
+        )
+        problems = self._gate_problems(broken, self.REFERENCE.read_text(encoding="utf-8"))
+        assert any("inventory" in problem for problem in problems)
+
+    def test_gate_detects_gated_prose(self) -> None:
+        """Require the gate to fail when the reference describes a gated surface."""
+        reference = self.REFERENCE.read_text(encoding="utf-8") + "\n## Gated constructs\n"
+        problems = self._gate_problems(
+            self.PROFILE.read_text(encoding="utf-8"),
+            reference,
+        )
+        assert any("gated" in problem for problem in problems)
+
+    @classmethod
+    def _gate_problems(cls, profile_text: str, reference_text: str) -> list[str]:
+        """Return the release-gate problems in a profile and reference pair.
+
+        Parameters
+        ----------
+        profile_text : str
+            Profile page contents.
+        reference_text : str
+            Query-language reference contents.
+
+        Returns
+        -------
+        list[str]
+            One description per failed gate check.
+        """
+        problems: list[str] = []
+        rows = cls._matrix_rows(profile_text)
+        features = {cls._feature_id(row[0]): row[2] for row in rows}
+        evidence = {cls._feature_id(row[0]): row[5] for row in rows}
+        corpus = Corpus(cls.CORPUS)
+        case_names = {case.name for case in corpus.cases}
+        rejection_names = {case.name for case in corpus.cases if case.rejection}
+
+        for feature, status in features.items():
+            if status in {"gated", "deferred"}:
+                problems.append(f"{feature} is {status}")
+            value = evidence.get(feature, "")
+            if not value:
+                problems.append(f"{feature} has no evidence")
+                continue
+            tokens = [token.strip() for token in value.split(",")]
+            if status == "supported":
+                missing = [token for token in tokens if token not in case_names]
+                if missing:
+                    problems.append(f"{feature} evidence is unresolved: {missing}")
+                continue
+            if status == "out of profile":
+                unresolved = [
+                    token
+                    for token in tokens
+                    if cls._resolve_evidence(token, rejection_names) is not None
+                ]
+                if unresolved:
+                    problems.append(f"{feature} evidence is unresolved: {unresolved}")
+
+        for problem in cls._inventory_problems(profile_text, features):
+            problems.append(problem)
+
+        lowered = reference_text.lower()
+        for phrase in cls.GATED_PROSE:
+            if phrase in lowered:
+                problems.append(f"the reference still says {phrase!r}")
+
+        return problems
+
+    @classmethod
+    def _inventory_problems(
+        cls,
+        profile_text: str,
+        features: dict[str, str],
+    ) -> list[str]:
+        """Return inventory rows whose status disagrees with the matrix.
+
+        Parameters
+        ----------
+        profile_text : str
+            Profile page contents.
+        features : dict[str, str]
+            Matrix feature id to status.
+
+        Returns
+        -------
+        list[str]
+            One description per drifted inventory row.
+        """
+        problems: list[str] = []
+        rows = cls._table_rows(profile_text, cls.INVENTORY_HEADER)
+        for row in rows:
+            status = row[2]
+            if status not in {"supported", "out of profile"}:
+                continue
+            owners = [
+                cls._feature_id(cls._normalize(part))
+                for part in row[3].split(";")
+                if cls._feature_id(cls._normalize(part)) in features
+            ]
+            if not owners:
+                problems.append(f"inventory row {row[0]!r} has no matrix owner")
+                continue
+            for owner in owners:
+                if features[owner] != status:
+                    problems.append(
+                        f"inventory says {status} for {owner}, matrix says {features[owner]}"
+                    )
+        return problems
+
+    @classmethod
+    def _resolve_evidence(cls, token: str, rejection_names: set[str]) -> str | None:
+        """Resolve one out-of-profile evidence token.
+
+        Parameters
+        ----------
+        token : str
+            Evidence token, such as ``rejection:<case>`` or ``test:<Class>::<method>``.
+        rejection_names : set[str]
+            Corpus case names tagged as rejections.
+
+        Returns
+        -------
+        str | None
+            The unresolved token, or ``None`` when it resolves.
+        """
+        if token == "rejected forms":
+            return None
+        if token.startswith("rejection:"):
+            return None if token.split(":", 1)[1] in rejection_names else token
+        if token.startswith("test:"):
+            parts = token.split(":", 1)[1].split("::")
+            module_name = cls.SURFACE_TESTS.get(parts[0]) if parts else None
+            if module_name is None:
+                return token
+            target: object = importlib.import_module(module_name)
+            for part in parts:
+                target = getattr(target, part, None)
+                if target is None:
+                    return token
+            return None
+        return token
 
     @classmethod
     def _features(cls) -> dict[str, str]:
@@ -121,10 +318,26 @@ class TestGqlProfile:
         str
             Kebab-case feature id.
         """
-        override = cls.FEATURE_OVERRIDES.get(label)
+        override = cls.FEATURE_OVERRIDES.get(label.replace("`", "").strip())
         if override is not None:
             return override
         return re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+
+    @classmethod
+    def _normalize(cls, name: str) -> str:
+        """Strip table formatting from a matrix or inventory label.
+
+        Parameters
+        ----------
+        name : str
+            Cell contents.
+
+        Returns
+        -------
+        str
+            Label without surrounding backticks or whitespace.
+        """
+        return name.replace("`", "").strip()
 
     @classmethod
     def _matrix_rows(cls, text: str) -> list[list[str]]:
@@ -140,12 +353,30 @@ class TestGqlProfile:
         list[list[str]]
             Cell values for each matrix row, excluding the header and separator.
         """
+        return cls._table_rows(text, cls.MATRIX_HEADER)
+
+    @classmethod
+    def _table_rows(cls, text: str, header: str) -> list[list[str]]:
+        """Return the rows of one profile table.
+
+        Parameters
+        ----------
+        text : str
+            Profile page contents.
+        header : str
+            Opening text of the table header.
+
+        Returns
+        -------
+        list[list[str]]
+            Cell values for each row, excluding the header and separator.
+        """
         lines = text.splitlines()
         start = next(
-            (index for index, line in enumerate(lines) if line.startswith(cls.MATRIX_HEADER)),
+            (index for index, line in enumerate(lines) if line.startswith(header)),
             None,
         )
-        assert start is not None, "conformance matrix header is missing"
+        assert start is not None, f"table header is missing: {header}"
         rows: list[list[str]] = []
         for line in lines[start + 1 :]:
             if not line.startswith("|"):

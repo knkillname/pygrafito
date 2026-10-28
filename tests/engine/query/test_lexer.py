@@ -100,10 +100,11 @@ class TestLexer:
         assert tokens[1].value == "under_score"
 
     def test_operators_and_punctuation(self) -> None:
-        tokens = Lexer.tokenize("|| <> != <= >= = < > + - * / % ( ) [ ] { } : , . | ;")
+        tokens = Lexer.tokenize("|| =~ <> != <= >= = < > + - * / % ( ) [ ] { } : , . | ;")
         values = [str(token.value) for token in tokens[:-1]]
-        assert values[:13] == [
+        assert values[:14] == [
             "||",
+            "=~",
             "<>",
             "!=",
             "<=",
@@ -117,10 +118,14 @@ class TestLexer:
             "/",
             "%",
         ]
-        assert values[13:] == ["(", ")", "[", "]", "{", "}", ":", ",", ".", "|", ";"]
-        assert all(token.kind is TokenKind.OPERATOR for token in tokens[:13])
-        assert all(token.kind is TokenKind.PUNCTUATION for token in tokens[13:-1])
+        assert values[14:] == ["(", ")", "[", "]", "{", "}", ":", ",", ".", "|", ";"]
+        assert all(token.kind is TokenKind.OPERATOR for token in tokens[:14])
+        assert all(token.kind is TokenKind.PUNCTUATION for token in tokens[14:-1])
         assert tokens[-1].kind is TokenKind.EOF
+
+    def test_regex_and_direction_operators(self) -> None:
+        tokens = Lexer.tokenize("=~ = ~ <~ ~>")
+        assert [str(token.value) for token in tokens[:-1]] == ["=~", "=", "~", "<~", "~>"]
 
     def test_line_and_block_comments_are_ignored(self) -> None:
         tokens = Lexer.tokenize("MATCH // comment\n/* block\n comment */ (n)")
