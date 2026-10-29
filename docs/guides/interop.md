@@ -102,6 +102,7 @@ A write-capable open publishes four read-only views: `graph_nodes`, `graph_node_
 the external reader.
 
 ```python
+import contextlib
 import pathlib
 import sqlite3
 import tempfile
@@ -114,7 +115,9 @@ with tempfile.TemporaryDirectory() as directory:
         graph.add_node("Program", designation="Athena", cycles=59)
         print(graph.view_version)  # 2
 
-    with sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True) as reader:
+    with contextlib.closing(
+        sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
+    ) as reader:
         rows = reader.execute(
             "SELECT id, labels, properties FROM graph_nodes ORDER BY id"
         ).fetchall()

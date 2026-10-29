@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for node persistence, labels, properties, and lookups."""
 
+import math
 import typing
 from collections.abc import Iterator
 
@@ -220,6 +221,17 @@ class TestFind(_NodeTestCase):
         repository.create(properties={"a.b": 2})
         found = list(repository.find(properties={"a.b": 1}))
         assert [item.id for item in found] == [node.id]
+
+    def test_real_values_match_exactly(self, repository: NodeRepository) -> None:
+        value = 2.7710821668887726e-173
+        neighbor = math.nextafter(value, math.inf)
+        node = repository.create(("Program",), {"ratio": value})
+        repository.create(("Program",), {"ratio": neighbor})
+        found = list(repository.find(("Program",), {"ratio": value}))
+        neighbor_found = list(repository.find(("Program",), {"ratio": neighbor}))
+        assert [item.id for item in found] == [node.id]
+        assert len(neighbor_found) == 1
+        assert neighbor_found[0].id != node.id
 
     def test_invalid_filter_rejected(self, repository: NodeRepository) -> None:
         mixed = typing.cast(Value, [1, 2.0])

@@ -315,6 +315,16 @@ class PredicateCompiler:
                 json_type,
                 int(validated),
             )
+        if isinstance(validated, float) and not self._codec.needs_property_scan(key):
+            exact_expression = self._codec.exact_value_expression(f"{table}.props", key)
+            candidates = self._codec.numeric_match_values(validated)
+            placeholders = ", ".join("?" for _ in candidates)
+            values = [self._codec.exact_comparison_value(key, item) for item in candidates]
+            return self._add(
+                f"{type_expression} IN ('integer', 'real') AND "
+                f"{exact_expression} IN ({placeholders})",
+                *values,
+            )
         if isinstance(validated, (int, float)):
             return self._add(
                 f"{type_expression} IN ('integer', 'real') AND {value_expression} = ?",

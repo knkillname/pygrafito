@@ -376,6 +376,11 @@ class NodeRepository:
         if properties:
             for key, value in properties.items():
                 type_expression = self._codec.property_type_expression("nodes.props", key)
+                if isinstance(value, float) and not self._codec.needs_property_scan(key):
+                    clauses.append(f"{type_expression} = 'real'")
+                    clauses.append(f"{self._codec.exact_value_expression('nodes.props', key)} = ?")
+                    parameters.append(self._codec.exact_comparison_value(key, value))
+                    continue
                 value_expression = self._codec.property_value_expression("nodes.props", key)
                 clauses.append(f"{type_expression} = ?")
                 parameters.append(self._codec.json_type(value))

@@ -278,11 +278,28 @@ class ConstraintRegistry:
         columns = self._codec.portable_index_columns(key)
         new_type = self._codec.property_type_expression("NEW.props", key)
         new_value = self._codec.property_value_expression("NEW.props", key)
+        new_exact = self._codec.exact_value_expression("NEW.props", key)
         other_type = self._codec.property_type_expression("other.props", key)
         other_value = self._codec.property_value_expression("other.props", key)
+        other_exact = self._codec.exact_value_expression("other.props", key)
         current = "(SELECT props FROM relationships WHERE id = NEW.relationship_id)"
         current_type = self._codec.property_type_expression(current, key)
         current_value = self._codec.property_value_expression(current, key)
+        current_exact = self._codec.exact_value_expression(current, key)
+        props_match = self._value_match(
+            other_type,
+            other_value,
+            other_exact,
+            new_value,
+            new_exact,
+        )
+        labels_match = self._value_match(
+            other_type,
+            other_value,
+            other_exact,
+            current_value,
+            current_exact,
+        )
         props = (
             f"CREATE TRIGGER IF NOT EXISTS {stem}_props "
             f"BEFORE UPDATE OF props ON relationships "
@@ -295,8 +312,8 @@ class ConstraintRegistry:
             f"JOIN relationship_labels other_label ON other_label.relationship_id = other.id "
             f"WHERE other.id != NEW.id AND other_label.label = {label} "
             f"AND {other_type} IS NOT NULL "
-            f"AND {other_value} = {new_value} "
-            f"AND {other_type} = {new_type}); "
+            f"AND {other_type} = {new_type} "
+            f"AND {props_match}); "
             f"END"
         )
         labels = (
@@ -310,8 +327,8 @@ class ConstraintRegistry:
             f"JOIN relationship_labels other_label ON other_label.relationship_id = other.id "
             f"WHERE other.id != NEW.relationship_id AND other_label.label = {label} "
             f"AND {other_type} IS NOT NULL "
-            f"AND {other_value} = {current_value} "
-            f"AND {other_type} = {current_type}); "
+            f"AND {other_type} = {current_type} "
+            f"AND {labels_match}); "
             f"END"
         )
         if columns is None:
@@ -340,11 +357,28 @@ class ConstraintRegistry:
         columns = self._codec.portable_index_columns(key)
         new_type = self._codec.property_type_expression("NEW.props", key)
         new_value = self._codec.property_value_expression("NEW.props", key)
+        new_exact = self._codec.exact_value_expression("NEW.props", key)
         other_type = self._codec.property_type_expression("other.props", key)
         other_value = self._codec.property_value_expression("other.props", key)
+        other_exact = self._codec.exact_value_expression("other.props", key)
         current = "(SELECT props FROM nodes WHERE id = NEW.node_id)"
         current_type = self._codec.property_type_expression(current, key)
         current_value = self._codec.property_value_expression(current, key)
+        current_exact = self._codec.exact_value_expression(current, key)
+        props_match = self._value_match(
+            other_type,
+            other_value,
+            other_exact,
+            new_value,
+            new_exact,
+        )
+        labels_match = self._value_match(
+            other_type,
+            other_value,
+            other_exact,
+            current_value,
+            current_exact,
+        )
         props = (
             f"CREATE TRIGGER IF NOT EXISTS {stem}_props "
             f"BEFORE UPDATE OF props ON nodes "
@@ -356,8 +390,8 @@ class ConstraintRegistry:
             f"JOIN node_labels other_label ON other_label.node_id = other.id "
             f"WHERE other.id != NEW.id AND other_label.label = {label} "
             f"AND {other_type} IS NOT NULL "
-            f"AND {other_value} = {new_value} "
-            f"AND {other_type} = {new_type}); "
+            f"AND {other_type} = {new_type} "
+            f"AND {props_match}); "
             f"END"
         )
         labels = (
@@ -371,8 +405,8 @@ class ConstraintRegistry:
             f"JOIN node_labels other_label ON other_label.node_id = other.id "
             f"WHERE other.id != NEW.node_id AND other_label.label = {label} "
             f"AND {other_type} IS NOT NULL "
-            f"AND {other_value} = {current_value} "
-            f"AND {other_type} = {current_type}); "
+            f"AND {other_type} = {current_type} "
+            f"AND {labels_match}); "
             f"END"
         )
         if columns is None:
@@ -421,15 +455,33 @@ class ConstraintRegistry:
             Identifier of a holder, or ``None`` when the value is free.
         """
         json_type = self._codec.json_type(value)
-        comparison = self._codec.comparison_value(value)
+        if isinstance(value, float):
+            value_expression = self._codec.exact_value_expression(
+                "nodes.props" if constraint.kind is ElementKind.NODE else "relationships.props",
+                constraint.key,
+            )
+            comparison = self._codec.exact_comparison_value(constraint.key, value)
+        else:
+            value_expression = self._codec.property_value_expression(
+                "nodes.props" if constraint.kind is ElementKind.NODE else "relationships.props",
+                constraint.key,
+            )
+            comparison = self._codec.comparison_value(value)
         if constraint.kind is ElementKind.RELATIONSHIP:
-            return self._relationship_holder(constraint, json_type, comparison, exclude_id)
-        return self._node_holder(constraint, json_type, comparison, exclude_id)
+            return self._relationship_holder(
+                constraint,
+                json_type,
+                value_expression,
+                comparison,
+                exclude_id,
+            )
+        return self._node_holder(constraint, json_type, value_expression, comparison, exclude_id)
 
     def _node_holder(
         self,
         constraint: Constraint,
         json_type: str,
+        value_expression: str,
         comparison: int | float | str,
         exclude_id: int | None,
     ) -> int | None:
@@ -441,6 +493,8 @@ class ConstraintRegistry:
             Node constraint whose scope is searched.
         json_type : str
             JSON type of the attempted value.
+        value_expression : str
+            SQL expression that yields the stored value.
         comparison : int | float | str
             Value compared by SQLite.
         exclude_id : int | None
@@ -454,7 +508,6 @@ class ConstraintRegistry:
         clause = ""
         parameters: list[object] = [constraint.scope, json_type, comparison]
         type_expression = self._codec.property_type_expression("nodes.props", constraint.key)
-        value_expression = self._codec.property_value_expression("nodes.props", constraint.key)
         if exclude_id is not None:
             clause = "AND nodes.id != ? "
             parameters.append(exclude_id)
@@ -474,6 +527,7 @@ class ConstraintRegistry:
         self,
         constraint: Constraint,
         json_type: str,
+        value_expression: str,
         comparison: int | float | str,
         exclude_id: int | None,
     ) -> int | None:
@@ -485,6 +539,8 @@ class ConstraintRegistry:
             Relationship constraint whose scope is searched.
         json_type : str
             JSON type of the attempted value.
+        value_expression : str
+            SQL expression that yields the stored value.
         comparison : int | float | str
             Value compared by SQLite.
         exclude_id : int | None
@@ -498,9 +554,6 @@ class ConstraintRegistry:
         clause = ""
         parameters: list[object] = [constraint.scope, json_type, comparison]
         type_expression = self._codec.property_type_expression(
-            "relationships.props", constraint.key
-        )
-        value_expression = self._codec.property_value_expression(
             "relationships.props", constraint.key
         )
         if exclude_id is not None:
@@ -534,10 +587,19 @@ class ConstraintRegistry:
         label = self._quote(constraint.scope)
         later_type = self._codec.property_type_expression("later.props", constraint.key)
         later_value = self._codec.property_value_expression("later.props", constraint.key)
+        later_exact = self._codec.exact_value_expression("later.props", constraint.key)
         earlier_type = self._codec.property_type_expression("earlier.props", constraint.key)
         earlier_value = self._codec.property_value_expression("earlier.props", constraint.key)
+        earlier_exact = self._codec.exact_value_expression("earlier.props", constraint.key)
+        match = self._value_match(
+            earlier_type,
+            earlier_value,
+            earlier_exact,
+            later_value,
+            later_exact,
+        )
         row = self._connection.execute(
-            f"SELECT later.id, {later_value}, {later_type} "
+            f"SELECT later.id, {later_exact}, {later_type} "
             f"FROM nodes later "
             f"JOIN node_labels later_label ON later_label.node_id = later.id "
             f"WHERE later_label.label = {label} "
@@ -546,11 +608,11 @@ class ConstraintRegistry:
             f"SELECT 1 FROM nodes earlier "
             f"JOIN node_labels earlier_label ON earlier_label.node_id = earlier.id "
             f"WHERE earlier.id < later.id AND earlier_label.label = {label} "
-            f"AND {earlier_value} = {later_value} "
-            f"AND {earlier_type} = {later_type}) "
+            f"AND {earlier_type} = {later_type} "
+            f"AND {match}) "
             f"ORDER BY later.id LIMIT 1"
         ).fetchone()
-        return self._conflict_from_row(row)
+        return self._conflict_from_row(row, constraint.key)
 
     def _find_relationship_conflict(
         self,
@@ -571,10 +633,19 @@ class ConstraintRegistry:
         label = self._quote(constraint.scope)
         later_type = self._codec.property_type_expression("later.props", constraint.key)
         later_value = self._codec.property_value_expression("later.props", constraint.key)
+        later_exact = self._codec.exact_value_expression("later.props", constraint.key)
         earlier_type = self._codec.property_type_expression("earlier.props", constraint.key)
         earlier_value = self._codec.property_value_expression("earlier.props", constraint.key)
+        earlier_exact = self._codec.exact_value_expression("earlier.props", constraint.key)
+        match = self._value_match(
+            earlier_type,
+            earlier_value,
+            earlier_exact,
+            later_value,
+            later_exact,
+        )
         row = self._connection.execute(
-            f"SELECT later.id, {later_value}, {later_type} "
+            f"SELECT later.id, {later_exact}, {later_type} "
             f"FROM relationships later "
             f"JOIN relationship_labels later_label "
             f"ON later_label.relationship_id = later.id "
@@ -585,19 +656,25 @@ class ConstraintRegistry:
             f"JOIN relationship_labels earlier_label "
             f"ON earlier_label.relationship_id = earlier.id "
             f"WHERE earlier.id < later.id AND earlier_label.label = {label} "
-            f"AND {earlier_value} = {later_value} "
-            f"AND {earlier_type} = {later_type}) "
+            f"AND {earlier_type} = {later_type} "
+            f"AND {match}) "
             f"ORDER BY later.id LIMIT 1"
         ).fetchone()
-        return self._conflict_from_row(row)
+        return self._conflict_from_row(row, constraint.key)
 
-    def _conflict_from_row(self, row: tuple[object, ...] | None) -> tuple[int, Value] | None:
+    def _conflict_from_row(
+        self,
+        row: tuple[object, ...] | None,
+        key: str,
+    ) -> tuple[int, Value] | None:
         """Decode one duplicate row into an id and a property value.
 
         Parameters
         ----------
         row : tuple[object, ...] | None
-            Row with id, extracted value, and JSON type.
+            Row with id, exact value text or scanned value, and JSON type.
+        key : str
+            Property key whose conflict was scanned.
 
         Returns
         -------
@@ -606,7 +683,9 @@ class ConstraintRegistry:
         """
         if row is None:
             return None
-        return (int(typing.cast(int, row[0])), self.decode_value(row[1], str(row[2])))
+        if self._codec.needs_property_scan(key):
+            return (int(typing.cast(int, row[0])), self.decode_value(row[1], str(row[2])))
+        return (int(typing.cast(int, row[0])), self._codec.decode_exact_value(str(row[1])))
 
     def decode_value(self, raw: object, json_type: str) -> Value:
         """Rebuild a property value from SQLite's extracted value and type.
@@ -675,6 +754,45 @@ class ConstraintRegistry:
         field = "label"
         self._codec.validate_identifier(constraint.scope, field)
         self._codec.validate_identifier(constraint.key, "property key")
+
+    @classmethod
+    def _value_match(
+        cls,
+        left_type: str,
+        left_value: str,
+        left_exact: str,
+        right_value: str,
+        right_exact: str,
+    ) -> str:
+        """Render a type-matched equality over two stored properties.
+
+        Real values compare the exact stored number text so a JSON parser
+        rounding cannot conflate neighboring floats. Other types keep the
+        scalar comparison used for booleans, integers, strings, and lists.
+
+        Parameters
+        ----------
+        left_type : str
+            SQL expression that yields the left property's JSON type.
+        left_value : str
+            SQL expression that yields the left property's scalar value.
+        left_exact : str
+            SQL expression that yields the left property's exact text.
+        right_value : str
+            SQL expression that yields the right property's scalar value.
+        right_exact : str
+            SQL expression that yields the right property's exact text.
+
+        Returns
+        -------
+        str
+            A SQL predicate that is true when both properties hold equal
+            values of the same type.
+        """
+        return (
+            f"(({left_type} = 'real' AND {left_exact} = {right_exact}) "
+            f"OR ({left_type} <> 'real' AND {left_value} = {right_value}))"
+        )
 
     def _rollback(self) -> None:
         """Roll back the current declaration transaction, ignoring failures."""

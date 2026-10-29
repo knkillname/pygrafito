@@ -17,6 +17,7 @@ from pygrafito import (
     TransactionError,
     ValidationError,
 )
+from pygrafito.model import Value
 
 
 class _IndexTestCase:
@@ -89,6 +90,22 @@ class TestDeclaration(_IndexTestCase):
         assert [node.id for node in graph.find_nodes("Program", **{key: "Tron"})] == [tron.id]
         graph.drop_index(index)
         assert graph.indexes() == ()
+
+    def test_indexed_equality_returns_only_the_stored_type(self, graph: Graph) -> None:
+        graph.add_node("Program", designation="Tron", state=True)
+        graph.add_node("Program", designation="Quorra", state=1)
+        graph.add_node("Program", designation="Rinzler", state="true")
+        graph.add_node("Program", designation="Yori", state=["true"])
+        graph.create_node_index("state")
+        cases: list[tuple[Value, str]] = [
+            (True, "Tron"),
+            (1, "Quorra"),
+            ("true", "Rinzler"),
+            (["true"], "Yori"),
+        ]
+        for value, expected in cases:
+            found = [node["designation"] for node in graph.find_nodes("Program", state=value)]
+            assert found == [expected]
 
 
 class TestTransactionGuard(_IndexTestCase):

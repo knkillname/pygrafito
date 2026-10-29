@@ -185,6 +185,9 @@ pinned SQLite container. The project supports Python 3.13 and 3.14 and keeps its
 library only. Documentation dependencies are optional and installed by the `docs` Hatch
 environment.
 
+`scripts/verify` and the Git hook are POSIX shell programs. On Windows, run them through Git
+Bash; `hatch check` and `hatch test` run natively.
+
 ## License
 
 `pygrafito` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html)

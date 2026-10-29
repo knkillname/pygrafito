@@ -4,7 +4,6 @@
 """Dot-commands for the graph shell."""
 
 import json
-import shlex
 import typing
 from pathlib import Path
 
@@ -18,6 +17,7 @@ from pygrafito import (
     TransactionError,
     ValidationError,
 )
+from pygrafito.cli.arguments import CommandArguments
 from pygrafito.cli.formatting import OutputMode, ValueFormatter
 from pygrafito.cli.session import ParameterDecoder, Session
 
@@ -257,7 +257,7 @@ class Commands:
             message = f"usage: {cls.IMPORT_USAGE}"
             raise ValidationError(message)
         try:
-            return shlex.split(argument)
+            return CommandArguments.split(argument)
         except ValueError as error:
             message = f"could not parse .import arguments: {error}"
             raise ValidationError(message) from error
@@ -466,7 +466,7 @@ class Commands:
             message = f"usage: {usage}"
             raise ValidationError(message)
         try:
-            return shlex.split(argument)
+            return CommandArguments.split(argument)
         except ValueError as error:
             message = f"could not parse arguments: {error}"
             raise ValidationError(message) from error
@@ -578,7 +578,15 @@ class Commands:
         if argument.lower() in {"off", "stdout"}:
             self._session.set_output(None)
             return True
-        self._session.set_output(argument)
+        try:
+            path = CommandArguments.path(argument)
+        except ValueError as error:
+            message = "usage: .output PATH|off"
+            raise ValidationError(message) from error
+        if not path:
+            message = "usage: .output PATH|off"
+            raise ValidationError(message)
+        self._session.set_output(path)
         return True
 
     def _command_once(self, argument: str) -> bool:
@@ -909,12 +917,17 @@ class Commands:
         )
         return "{" + items + "}"
 
-    @staticmethod
-    def _required(argument: str, usage: str) -> str:
-        if not argument:
+    @classmethod
+    def _required(cls, argument: str, usage: str) -> str:
+        try:
+            value = CommandArguments.path(argument)
+        except ValueError as error:
+            message = f"usage: {usage}"
+            raise ValidationError(message) from error
+        if not value:
             message = f"usage: {usage}"
             raise ValidationError(message)
-        return argument
+        return value
 
     @classmethod
     def _required_id(cls, argument: str, usage: str) -> int:

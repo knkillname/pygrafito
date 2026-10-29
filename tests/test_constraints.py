@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: MIT
 """Tests for declared uniqueness constraints and violation reporting."""
 
+import math
 import sqlite3
+import typing
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -446,6 +448,99 @@ class TestViolationPayload(_ConstraintTestCase):
             translator = ConstraintTranslator(graph._database.connection, PropertyCodec())
             failure = sqlite3.IntegrityError("UNIQUE constraint failed: index 'some_other_index'")
             assert translator.translate(failure) is None
+
+
+class TestExactRealUniqueness(_ConstraintTestCase):
+    """Verify uniqueness compares real values by their exact stored text."""
+
+    REGRESSION_VALUES: typing.ClassVar[tuple[float, ...]] = (
+        2.7710821668887726e-173,
+        3.277095539246836e-284,
+        1.6287812207021506e-109,
+    )
+
+    def test_duplicate_real_is_rejected_with_the_exact_value(self, graph: Graph) -> None:
+        value = self.REGRESSION_VALUES[0]
+        graph.create_node_uniqueness_constraint("Program", "state")
+        holder = graph.add_node("Program", state=value)
+        with pytest.raises(ConstraintViolationError) as raised:
+            graph.add_node("Program", state=value)
+        error = raised.value
+        assert error.value == value
+        assert error.existing == holder.id
+        assert [node["state"] for node in graph.find_nodes("Program")] == [value]
+
+    @pytest.mark.parametrize("value", REGRESSION_VALUES)
+    def test_neighboring_reals_are_both_stored(self, graph: Graph, value: float) -> None:
+        neighbor = math.nextafter(value, math.inf)
+        graph.create_node_uniqueness_constraint("Program", "state")
+        first = graph.add_node("Program", state=value)
+        second = graph.add_node("Program", state=neighbor)
+        assert graph.node(first.id)["state"] == value
+        assert graph.node(second.id)["state"] == neighbor
+
+    def test_relationship_duplicate_real_is_rejected(self, graph: Graph) -> None:
+        value = self.REGRESSION_VALUES[1]
+        graph.create_relationship_uniqueness_constraint("ALLIES_WITH", "weight")
+        tron = graph.add_node("Program", designation="Tron")
+        quorra = graph.add_node("Program", designation="Quorra")
+        graph.add_relationship(tron, "ALLIES_WITH", quorra, weight=value)
+        with pytest.raises(ConstraintViolationError) as raised:
+            graph.add_relationship(quorra, "ALLIES_WITH", tron, weight=value)
+        assert raised.value.value == value
+        graph.add_relationship(
+            quorra,
+            "ALLIES_WITH",
+            tron,
+            weight=math.nextafter(value, math.inf),
+        )
+        assert len(list(graph.find_relationships("ALLIES_WITH"))) == 2
+
+    def test_existing_real_duplicate_refuses_node_declaration(self, graph: Graph) -> None:
+        value = self.REGRESSION_VALUES[2]
+        first = graph.add_node("Program", state=value)
+        second = graph.add_node("Program", state=value)
+        with pytest.raises(ConstraintViolationError) as raised:
+            graph.create_node_uniqueness_constraint("Program", "state")
+        assert raised.value.value == value
+        assert raised.value.existing == second.id
+        assert graph.constraints() == ()
+        assert [node.id for node in graph.find_nodes("Program")] == [first.id, second.id]
+
+    def test_existing_real_duplicate_refuses_relationship_declaration(self, graph: Graph) -> None:
+        value = self.REGRESSION_VALUES[0]
+        tron = graph.add_node("Program", designation="Tron")
+        quorra = graph.add_node("Program", designation="Quorra")
+        graph.add_relationship(tron, "ALLIES_WITH", quorra, weight=value)
+        second = graph.add_relationship(quorra, "ALLIES_WITH", tron, weight=value)
+        with pytest.raises(ConstraintViolationError) as raised:
+            graph.create_relationship_uniqueness_constraint("ALLIES_WITH", "weight")
+        assert raised.value.value == value
+        assert raised.value.existing == second.id
+        assert graph.constraints() == ()
+
+    def test_merge_matches_the_exact_real(self, graph: Graph) -> None:
+        value = self.REGRESSION_VALUES[0]
+        graph.create_node_uniqueness_constraint("Program", "state")
+        holder = graph.add_node("Program", designation="Quorra", state=value)
+        graph.query(
+            "MERGE (n:Program {state: $value}) SET n.designation = 'Quorra'",
+            {"value": value},
+        )
+        assert graph.query("MATCH (n:Program) RETURN count(*) AS total").rows[0]["total"] == 1
+        assert graph.node(holder.id)["designation"] == "Quorra"
+
+    def test_import_reports_the_exact_real_duplicate(self, graph: Graph) -> None:
+        value = self.REGRESSION_VALUES[1]
+        graph.create_node_uniqueness_constraint("Program", "state")
+        with pytest.raises(ConstraintViolationError) as raised:
+            graph.import_rows(
+                "UNWIND $rows AS row CREATE (n:Program {state: row.state})",
+                [{"state": value}, {"state": value}],
+            )
+        assert raised.value.value == value
+        assert "row 2" in "\n".join(raised.value.__notes__)
+        assert list(graph.find_nodes("Program")) == []
 
 
 class TestWrapperGeneric:

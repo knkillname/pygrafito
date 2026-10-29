@@ -143,6 +143,27 @@ class TestPlanSelection(_ExplainTestCase):
         plan = graph.explain("MATCH (n:Program) WHERE n.cycles > 36 RETURN n")
         assert any("pygrafito_idx_node_" in line for line in plan)
 
+    @pytest.mark.parametrize(
+        ("key", "literal"),
+        [
+            ("cycles", "36"),
+            ("active", "true"),
+            ("designation", "'Tron'"),
+            ("tags", "['ISO']"),
+        ],
+    )
+    def test_non_real_equality_uses_the_declared_index(
+        self,
+        graph: Graph,
+        key: str,
+        literal: str,
+    ) -> None:
+        graph.create_node_index(key)
+        plan = graph.explain(f"MATCH (n:Program) WHERE n.{key} = {literal} RETURN n")
+        details = " ".join(plan)
+        assert "pygrafito_idx_node_" in details
+        assert "SCAN n0" not in details
+
     def test_invalid_statement_raises(self, graph: Graph) -> None:
         with pytest.raises(QuerySyntaxError):
             graph.explain("MATCH (n:Program WHERE")

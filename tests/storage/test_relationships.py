@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for relationship persistence, properties, and lookups."""
 
+import math
 from collections.abc import Iterator
 
 import pytest
@@ -220,6 +221,27 @@ class TestFind(_RelationshipTestCase):
             first_relationship.id,
             second_relationship.id,
         ]
+
+    def test_real_values_match_exactly(self, repositories: Repositories) -> None:
+        node_repository, relationship_repository = repositories
+        first = node_repository.create()
+        second = node_repository.create()
+        value = 1.6287812207021506e-109
+        neighbor = math.nextafter(value, math.inf)
+        matching = relationship_repository.create(
+            first.id,
+            "ALLIES_WITH",
+            second.id,
+            {"weight": value},
+        )
+        relationship_repository.create(
+            first.id,
+            "ALLIES_WITH",
+            second.id,
+            {"weight": neighbor},
+        )
+        found = list(relationship_repository.find("ALLIES_WITH", {"weight": value}))
+        assert [item.id for item in found] == [matching.id]
 
     @pytest.mark.parametrize(
         ("stored", "queried"),

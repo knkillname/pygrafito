@@ -9,6 +9,55 @@ import shutil
 import subprocess
 import typing
 
+import pytest
+
+
+class _PosixShell:
+    """Locate a POSIX shell that can run the verification scripts."""
+
+    CANDIDATES: typing.ClassVar[tuple[str, ...]] = ("sh", "bash")
+    WINDOWS_PATHS: typing.ClassVar[tuple[str, ...]] = (
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\bin\sh.exe",
+        r"C:\Program Files\Git\usr\bin\sh.exe",
+    )
+
+    @classmethod
+    def find(cls) -> str | None:
+        """Return the first available POSIX shell.
+
+        Returns
+        -------
+        str | None
+            Shell executable, or ``None`` when no shell is available.
+        """
+        for name in cls.CANDIDATES:
+            target = shutil.which(name)
+            if target is not None:
+                return target
+        for candidate in cls.WINDOWS_PATHS:
+            path = pathlib.Path(candidate)
+            if path.exists():
+                return str(path)
+        return None
+
+    @classmethod
+    def require(cls) -> str:
+        """Return a POSIX shell or skip the current test.
+
+        Returns
+        -------
+        str
+            Shell executable.
+        """
+        shell = cls.find()
+        if shell is None:
+            pytest.skip(
+                "a POSIX shell (Git Bash on Windows) is required for scripts/verify "
+                "and the pre-push hook"
+            )
+        return shell
+
 
 class _ScratchRepository:
     """Provide a temporary repository wired to a local bare remote."""
@@ -36,6 +85,7 @@ class _ScratchRepository:
         _ScratchRepository
             Initialized repository.
         """
+        _PosixShell.require()
         repository = cls(root)
         repository._initialize()
         return repository
@@ -276,7 +326,11 @@ class TestVerifyScript:
         for name in ("cat", "date", "dirname"):
             target = shutil.which(name)
             assert target is not None
-            (system_bin / name).symlink_to(target)
+            link = system_bin / name
+            try:
+                link.symlink_to(target)
+            except OSError:
+                shutil.copy2(target, link)
         call_log = tmp_path / "calls.log"
         call_log.write_text("", encoding="utf-8")
         if hatch:
@@ -335,7 +389,7 @@ class TestVerifyScript:
             Completed command.
         """
         return subprocess.run(
-            [str(self.SCRIPT), *args],
+            [_PosixShell.require(), str(self.SCRIPT), *args],
             cwd=self.ROOT,
             env=environment,
             check=False,

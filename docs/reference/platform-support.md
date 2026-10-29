@@ -38,6 +38,10 @@ supported until the nightly signal is green. musl-based Linux distributions are 
 The package is pure Python. Installation does not require a compiler, a system SQLite development
 package, or a platform-specific wheel.
 
+Developer tooling is the exception: `scripts/verify` and the Git pre-push hook are POSIX shell
+programs. Run them through Git Bash on Windows, or run `hatch check` and `hatch test` directly.
+The test suite skips only those developer-tooling tests when no POSIX shell is available.
+
 ## Google Colab
 
 Google Colab currently runs Python 3.13, which is supported. Install the package in a notebook cell

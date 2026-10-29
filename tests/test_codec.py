@@ -5,6 +5,7 @@
 
 import math
 import sqlite3
+import typing
 
 import pytest
 
@@ -351,3 +352,141 @@ class TestTypeMetadata(_CodecTestCase):
         with pytest.raises(ValidationError):
             property_codec.validate_identifier(3, "label")
         assert property_codec.validate_identifier("Person", "label") == "Person"
+
+
+class TestExactEquality(_CodecTestCase):
+    """Verify exact real matching through canonical stored JSON text."""
+
+    REGRESSION_VALUES: typing.ClassVar[tuple[float, ...]] = (
+        2.7710821668887726e-173,
+        3.277095539246836e-284,
+        1.6287812207021506e-109,
+    )
+
+    def test_exact_expression_asks_for_the_path_twice(
+        self,
+        property_codec: PropertyCodec,
+    ) -> None:
+        expression = property_codec.exact_value_expression("nodes.props", "cycles")
+        assert expression == "json_extract(nodes.props, '$.\"cycles\"', '$.\"cycles\"')"
+
+    def test_exact_expression_falls_back_to_a_scanned_key(
+        self,
+        property_codec: PropertyCodec,
+    ) -> None:
+        key = 'a"b'
+        expression = property_codec.exact_value_expression("nodes.props", key)
+        fallback = property_codec.property_value_expression("nodes.props", key)
+        assert expression == fallback
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (1.5, "[1.5,1.5]"),
+            (-0.0, "[-0.0,-0.0]"),
+            (0.0, "[0.0,0.0]"),
+            (True, "[true,true]"),
+            (2, "[2,2]"),
+            ("2", '["2","2"]'),
+            ([1, 2], "[[1,2],[1,2]]"),
+        ],
+    )
+    def test_exact_comparison_value(
+        self,
+        property_codec: PropertyCodec,
+        value: Value,
+        expected: str,
+    ) -> None:
+        assert property_codec.exact_comparison_value("cycles", value) == expected
+
+    def test_exact_comparison_value_falls_back_to_a_scanned_key(
+        self,
+        property_codec: PropertyCodec,
+    ) -> None:
+        key = 'a"b'
+        assert property_codec.exact_comparison_value(key, 2.5) == 2.5
+        assert property_codec.exact_comparison_value(key, [1, 2]) == "[1,2]"
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            (36.0, (36.0, 36)),
+            (36, (36, 36.0)),
+            (0.0, (-0.0, 0.0, 0)),
+            (-0.0, (-0.0, 0.0, 0)),
+            (1e300, (1e300,)),
+            (2.5, (2.5,)),
+        ],
+    )
+    def test_numeric_match_values(
+        self,
+        property_codec: PropertyCodec,
+        value: int | float,
+        expected: tuple[int | float, ...],
+    ) -> None:
+        matched = property_codec.numeric_match_values(value)
+        assert len(matched) == len(expected)
+        assert [property_codec.encode_value(item) for item in matched] == [
+            property_codec.encode_value(item) for item in expected
+        ]
+
+    def test_numeric_match_values_require_a_number(
+        self,
+        property_codec: PropertyCodec,
+    ) -> None:
+        with pytest.raises(ValidationError):
+            property_codec.numeric_match_values(typing.cast(int, True))
+        with pytest.raises(ValidationError):
+            property_codec.numeric_match_values(typing.cast(float, "36"))
+
+    @pytest.mark.parametrize(
+        "value",
+        [2.5, -0.0, 0.0, True, False, 2, "", "Tron", [1, 2], ["ISO", "Grid"]],
+    )
+    def test_decode_exact_value_round_trips(
+        self,
+        property_codec: PropertyCodec,
+        value: Value,
+    ) -> None:
+        exact = property_codec.exact_comparison_value("cycles", value)
+        decoded = property_codec.decode_exact_value(typing.cast(str, exact))
+        assert decoded == value
+        assert type(decoded) is type(value)
+
+    @pytest.mark.parametrize("payload", ["{", "1", '["a","b"]', "[]"])
+    def test_decode_exact_value_rejects_malformed_text(
+        self,
+        property_codec: PropertyCodec,
+        payload: str,
+    ) -> None:
+        with pytest.raises(ValidationError):
+            property_codec.decode_exact_value(payload)
+
+    def test_regression_values_survive_exact_text(self, property_codec: PropertyCodec) -> None:
+        connection = sqlite3.connect(":memory:")
+        try:
+            connection.execute("CREATE TABLE probes (id INTEGER PRIMARY KEY, props TEXT)")
+            values = [
+                value
+                for item in self.REGRESSION_VALUES
+                for value in (item, math.nextafter(item, math.inf))
+            ]
+            for index, value in enumerate(values, start=1):
+                connection.execute(
+                    "INSERT INTO probes (id, props) VALUES (?, ?)",
+                    (index, property_codec.encode_properties({"value": value})),
+                )
+            expression = property_codec.exact_value_expression("probes.props", "value")
+            for index, value in enumerate(values, start=1):
+                rows = connection.execute(
+                    f"SELECT id FROM probes WHERE {expression} = ?",
+                    (property_codec.exact_comparison_value("value", value),),
+                ).fetchall()
+                assert rows == [(index,)]
+
+            stored = connection.execute(f"SELECT {expression} FROM probes WHERE id = 1").fetchone()
+            assert stored is not None
+            decoded = property_codec.decode_exact_value(str(stored[0]))
+            assert decoded == self.REGRESSION_VALUES[0]
+        finally:
+            connection.close()

@@ -135,6 +135,17 @@ with Graph.open(":memory:") as graph:
 functions. See [Filtering expressions](../reference/query-language.md#filtering-expressions) for
 the supported set.
 
+## Match real values exactly
+
+`find_nodes`, `find_relationships`, `WHERE`, and `IN` compare a real property by the exact number
+text that was stored. A value such as `2.7710821668887726e-173` matches itself on every supported
+SQLite runtime, and the next representable float stays a different value. Integer and float remain
+one numeric family in a GQL predicate; the object API's exact-match filters keep the stored type.
+
+A declared index still seeks for integer, boolean, string, and list equality. Real equality may
+read candidate rows when the exact-text form cannot use the declared index; declaring or removing
+an index never changes which real values match.
+
 ## Write from a query
 
 A statement can create elements, set or remove properties and labels, and delete elements. The

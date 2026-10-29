@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Windows developers now get consistent guidance for the local checks: `scripts/verify` and the
+  pre-push hook require Git Bash or another POSIX shell, while `hatch check` and `hatch test` run
+  natively.
+
+### Fixed
+
+- Property filters, GQL equality and `IN`, and uniqueness constraints now find very small and very
+  large floating-point values exactly, even when SQLite's JSON parser would round them. Neighboring
+  floats stay distinct, and an index no longer changes which real values match.
+- Shell commands now keep native Windows paths intact, and redirected output always uses `\n` line
+  endings. Quote a path that contains spaces.
+- Opening a database that is locked, recovering, or failing at the I/O layer now reports that
+  problem instead of claiming that SQLite lacks JSON support.
+
 ## [1.0.0] - 2026-10-28
 
 ### Added

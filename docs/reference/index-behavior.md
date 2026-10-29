@@ -93,9 +93,17 @@ flowchart TD
 | `n.cycles IS NULL` / `IS NOT NULL` | no |
 | `n.designation STARTS WITH 'K'` | no |
 | `ORDER BY n.cycles` | no |
+| `n.ratio = 2.7710821668887726e-173` | may read candidates; results are unchanged |
 
 The first three forms are the ones that turn a scan into a seek. The rest fall back to
 reading the candidate rows, which is correct but not faster.
+
+Real equality is exact: it compares the stored JSON number text, so a real value that
+SQLite's JSON parser would round still matches only itself and not its neighbors. The
+declared index stores the parsed `json_extract` value rather than the exact number text,
+so a real equality filter can read candidate rows instead of seeking. Integer, boolean,
+string, and list equality keep the seek shown above. Declaring or removing an index never
+changes which real values match.
 
 ## Cost
 

@@ -115,7 +115,12 @@ Tron,40
 ```
 
 Use `.output PATH` to redirect results until `.output off`, or `.once PATH` to redirect only the
-next result. `.timer on` adds statement timing, and `.param NAME=JSON` binds a parameter.
+next result. Redirected files use `\n` line endings on every platform. `.timer on` adds statement
+timing, and `.param NAME=JSON` binds a parameter.
+
+Path arguments keep the host platform's separators. On Windows, backslashes and drive letters in
+`.import`, `.export`, `.restore`, and `.backup` are literal; quote a path that contains spaces.
+The same quoting rule applies to `.open`, `.read`, `.output`, and `.once`.
 
 ## Inspect the graph
 

@@ -176,6 +176,14 @@ media.
 Copying a file while a handle has it open is outside the contract. Use `Graph.backup_to`, which
 writes a consistent copy through SQLite's backup operation and atomically moves it into place.
 
+## Startup failures
+
+Only a runtime that actually lacks the JSON functions raises `UnsupportedSqliteError` with the
+missing-JSON1 message. A locked database, an I/O failure, or a file that needs recovery reports
+its own SQLite error instead, so a transient Windows handle or a recovering write-ahead log is
+not mistaken for a missing SQLite feature. Retry a lock after the other handle closes, or raise
+`busy_timeout` for a known long writer.
+
 ## Errors
 
 | Error | Remedy |

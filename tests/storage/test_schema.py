@@ -105,6 +105,26 @@ class _BrokenJsonConnection:
         raise OperationalError(message)
 
 
+class _FailingJsonConnection:
+    """Connection stand-in that raises one selected SQLite failure.
+
+    Parameters
+    ----------
+    message : str
+        Failure text.
+    """
+
+    def __init__(self, message: str) -> None:
+        self._message = message
+
+    def execute(
+        self,
+        statement: str,
+        parameters: Sequence[object] = (),
+    ) -> object:
+        raise OperationalError(self._message)
+
+
 class _WrongJsonCursor:
     """Cursor stand-in returning unexpected JSON metadata."""
 
@@ -344,6 +364,19 @@ class TestJsonSupport:
         broken = typing.cast(Connection, _BrokenJsonConnection())
         with pytest.raises(UnsupportedSqliteError):
             Schema.verify_json_support(broken, (3, 45, 0))
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            "database is locked",
+            "disk I/O error",
+            "database disk image is malformed",
+        ],
+    )
+    def test_other_sqlite_failures_are_preserved(self, message: str) -> None:
+        failing = typing.cast(Connection, _FailingJsonConnection(message))
+        with pytest.raises(OperationalError, match=message):
+            Schema.verify_json_support(failing, (3, 45, 0))
 
     def test_unexpected_json_metadata_rejected(self) -> None:
         wrong = typing.cast(Connection, _WrongJsonConnection())

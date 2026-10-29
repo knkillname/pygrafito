@@ -834,6 +834,10 @@ null | bool | int | float | str | list | map | Node | Relationship | Path
 ```
 
 - Integers and floats form one numeric family for equality and ordering.
+- Equality and `IN` compare a stored real by the exact JSON number text that was
+  written, so very small and very large values match on every supported SQLite
+  runtime. Neighboring reals remain distinct, and both signed-zero spellings
+  compare equal.
 - Booleans are not numbers: `true` never equals `1`.
 - Strings compare by Unicode code point and are case-sensitive.
 - Lists compare element-wise with order significant.

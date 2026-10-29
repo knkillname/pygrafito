@@ -3,8 +3,10 @@
 # SPDX-License-Identifier: MIT
 """Crash and recovery tests driven by real terminated subprocesses."""
 
+import contextlib
 import os
 import pathlib
+import sqlite3
 import subprocess
 import sys
 import time
@@ -12,13 +14,68 @@ import typing
 
 import pytest
 
-from pygrafito import Graph
+from pygrafito import Graph, LockTimeoutError
 
 
 class CrashHarness:
     """Start the crash worker, wait for its signal, and terminate it."""
 
     WORKER: typing.ClassVar[pathlib.Path] = pathlib.Path(__file__).with_name("crash_worker.py")
+    RETRY_ON_LOCK: typing.ClassVar[bool] = sys.platform == "win32"
+    RETRY_ATTEMPTS: typing.ClassVar[int] = 20
+    RETRY_DELAY: typing.ClassVar[float] = 0.05
+
+    @classmethod
+    @contextlib.contextmanager
+    def reopen(cls, database: pathlib.Path) -> typing.Iterator[Graph]:
+        """Open a graph after a crash and close it after the test block.
+
+        Parameters
+        ----------
+        database : pathlib.Path
+            Database to open.
+
+        Yields
+        ------
+        Graph
+            Open graph handle.
+        """
+        graph = cls._open_after_crash(database)
+        try:
+            yield graph
+        finally:
+            graph.close()
+
+    @classmethod
+    def _open_after_crash(cls, database: pathlib.Path) -> Graph:
+        """Open a graph, retrying a transient handle lock on Windows.
+
+        Parameters
+        ----------
+        database : pathlib.Path
+            Database to open.
+
+        Returns
+        -------
+        Graph
+            Open graph handle.
+
+        Raises
+        ------
+        sqlite3.OperationalError
+            If the database still reports a lock after every retry.
+        LockTimeoutError
+            If the configured busy timeout still expires after every retry.
+        """
+        attempt = 0
+        while True:
+            try:
+                return Graph.open(database)
+            except (sqlite3.OperationalError, LockTimeoutError):
+                attempt += 1
+                if not cls.RETRY_ON_LOCK or attempt >= cls.RETRY_ATTEMPTS:
+                    raise
+                time.sleep(cls.RETRY_DELAY)
 
     @classmethod
     def start(
@@ -166,6 +223,80 @@ class CrashHarness:
                 cls.kill(process)
 
 
+class _FlakyOpen:
+    """Fail a fixed number of graph opens before delegating.
+
+    Parameters
+    ----------
+    failures : int
+        Number of initial calls that raise a lock error.
+    message : str
+        Lock error text.
+    """
+
+    def __init__(self, failures: int, message: str) -> None:
+        self._failures = failures
+        self._message = message
+        self._real = Graph.open
+        self.attempts = 0
+
+    def __call__(self, path: pathlib.Path) -> Graph:
+        """Open a graph, raising a lock error for the first calls.
+
+        Parameters
+        ----------
+        path : pathlib.Path
+            Database to open.
+
+        Returns
+        -------
+        Graph
+            Open graph handle.
+
+        Raises
+        ------
+        sqlite3.OperationalError
+            While the configured failure count remains.
+        """
+        self.attempts += 1
+        if self.attempts <= self._failures:
+            raise sqlite3.OperationalError(self._message)
+        return self._real(path)
+
+
+class TestCrashHarness:
+    """Verify crash reopen retries are bounded and preserve the failure."""
+
+    def test_reopen_retries_a_transient_lock(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        monkeypatch.setattr(CrashHarness, "RETRY_ON_LOCK", True)
+        flaky = _FlakyOpen(1, "database is locked")
+        monkeypatch.setattr(Graph, "open", flaky)
+        with CrashHarness.reopen(tmp_path / "grid.db") as graph:
+            assert graph.check_integrity() == ()
+        assert flaky.attempts == 2
+
+    def test_reopen_reports_a_persistent_lock(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        monkeypatch.setattr(CrashHarness, "RETRY_ON_LOCK", True)
+        monkeypatch.setattr(CrashHarness, "RETRY_ATTEMPTS", 2)
+        monkeypatch.setattr(CrashHarness, "RETRY_DELAY", 0.0)
+        flaky = _FlakyOpen(3, "database is locked")
+        monkeypatch.setattr(Graph, "open", flaky)
+        with (
+            pytest.raises(sqlite3.OperationalError, match="locked"),
+            CrashHarness.reopen(tmp_path / "grid.db"),
+        ):
+            pass
+        assert flaky.attempts == 2
+
+
 class TestCommitDurability:
     """Verify committed and uncommitted work across a hard termination."""
 
@@ -173,14 +304,14 @@ class TestCommitDurability:
         """Reopen a database after a committed process is killed."""
         database = tmp_path / "grid.db"
         CrashHarness.run("commit", database, tmp_path / "ready")
-        with Graph.open(database) as graph:
+        with CrashHarness.reopen(database) as graph:
             assert [node["designation"] for node in graph.find_nodes("Program")] == ["Tron"]
 
     def test_uncommitted_transaction_is_absent(self, tmp_path: pathlib.Path) -> None:
         """Discard a transaction that was open when the process was killed."""
         database = tmp_path / "grid.db"
         CrashHarness.run("transaction", database, tmp_path / "ready")
-        with Graph.open(database) as graph:
+        with CrashHarness.reopen(database) as graph:
             assert list(graph.find_nodes("Program")) == []
             assert graph.check_integrity() == ()
 
@@ -188,14 +319,14 @@ class TestCommitDurability:
         """Reopen a database after a committed convenience write is killed."""
         database = tmp_path / "grid.db"
         CrashHarness.run("convenience", database, tmp_path / "ready")
-        with Graph.open(database) as graph:
+        with CrashHarness.reopen(database) as graph:
             assert [node["designation"] for node in graph.find_nodes("Program")] == ["Tron"]
 
     def test_wal_recovery_and_integrity(self, tmp_path: pathlib.Path) -> None:
         """Recover the write-ahead log and pass the integrity check."""
         database = tmp_path / "grid.db"
         CrashHarness.run("commit", database, tmp_path / "ready")
-        with Graph.open(database) as graph:
+        with CrashHarness.reopen(database) as graph:
             assert graph.journal_mode == "wal"
             assert graph.check_integrity() == ()
             assert [node["designation"] for node in graph.find_nodes("Program")] == ["Tron"]
@@ -215,7 +346,7 @@ class TestBackupCrash:
     @classmethod
     def assert_source(cls, path: pathlib.Path) -> None:
         """Check the source content and integrity."""
-        with Graph.open(path) as graph:
+        with CrashHarness.reopen(path) as graph:
             assert graph.check_integrity() == ()
             assert {node["designation"] for node in graph.find_nodes("Program")} == {
                 "Tron",
@@ -227,7 +358,7 @@ class TestBackupCrash:
         """Check a destination if the backup reached it."""
         if not path.exists():
             return False
-        with Graph.open(path) as graph:
+        with CrashHarness.reopen(path) as graph:
             assert graph.check_integrity() == ()
             assert {node["designation"] for node in graph.find_nodes("Program")} == {
                 "Tron",
@@ -295,7 +426,7 @@ class TestRestoreCrash:
     @classmethod
     def assert_empty(cls, path: pathlib.Path) -> None:
         """Check that a restored target has no graph content."""
-        with Graph.open(path) as graph:
+        with CrashHarness.reopen(path) as graph:
             assert list(graph.find_nodes()) == []
             assert graph.check_integrity() == ()
 
@@ -327,7 +458,7 @@ class TestRestoreCrash:
             self.HEADER,
             "1",
         )
-        with Graph.open(target) as graph:
+        with CrashHarness.reopen(target) as graph:
             assert [node["designation"] for node in graph.find_nodes("Program")] == ["Rinzler"]
             assert graph.check_integrity() == ()
 
@@ -343,7 +474,7 @@ class TestRestoreCrash:
             self.HEADER,
             "0",
         )
-        with Graph.open(target) as graph:
+        with CrashHarness.reopen(target) as graph:
             assert graph.query("MATCH (n:Program) RETURN n").rows == ()
             assert graph.check_integrity() == ()
 
@@ -375,7 +506,7 @@ class TestImportCrash:
             self.ROW,
             "1",
         )
-        with Graph.open(target) as graph:
+        with CrashHarness.reopen(target) as graph:
             assert list(graph.find_nodes("Program")) == []
             assert graph.check_integrity() == ()
 
@@ -391,6 +522,6 @@ class TestImportCrash:
             self.ROW,
             "0",
         )
-        with Graph.open(target) as graph:
+        with CrashHarness.reopen(target) as graph:
             assert [node["designation"] for node in graph.find_nodes("Program")] == ["Tron"]
             assert graph.check_integrity() == ()

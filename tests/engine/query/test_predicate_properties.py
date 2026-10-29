@@ -3,10 +3,12 @@
 # SPDX-License-Identifier: MIT
 """Property tests for quoted property predicates and type guards."""
 
+import math
 import typing
 
 import hypothesis
 import hypothesis.strategies
+import pytest
 
 from pygrafito import Graph
 from pygrafito.engine.query.ast import Match
@@ -107,3 +109,131 @@ class TestPredicateProperties:
             assert len(list(graph.find_nodes("Program", **{key: True}))) == 1
             assert len(list(graph.find_nodes("Program", **{key: 1}))) == 1
             assert len(list(graph.find_nodes("Program", **{key: 1.0}))) == 1
+
+
+class TestExactNumericPredicates:
+    """Verify numeric equality and membership use the exact stored value."""
+
+    REGRESSION_VALUES: typing.ClassVar[tuple[float, ...]] = (
+        2.7710821668887726e-173,
+        3.277095539246836e-284,
+        1.6287812207021506e-109,
+    )
+
+    @staticmethod
+    def names(graph: Graph, statement: str, parameters: dict[str, QueryValue]) -> list[str]:
+        """Run one statement and collect its projected names.
+
+        Parameters
+        ----------
+        graph : Graph
+            Graph under test.
+        statement : str
+            Query text.
+        parameters : dict[str, QueryValue]
+            Query parameters.
+
+        Returns
+        -------
+        list[str]
+            Projected names in result order.
+        """
+        result = graph.query(statement, parameters)
+        return [typing.cast(str, row["name"]) for row in result]
+
+    @pytest.mark.parametrize("value", REGRESSION_VALUES)
+    def test_regression_value_matches_where(self, value: float) -> None:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", designation="Quorra", ratio=value)
+            graph.add_node(
+                "Program",
+                designation="Rinzler",
+                ratio=math.nextafter(value, math.inf),
+            )
+            names = self.names(
+                graph,
+                "MATCH (n:Program) WHERE n.ratio = $value RETURN n.designation AS name",
+                {"value": value},
+            )
+        assert names == ["Quorra"]
+
+    def test_regression_values_match_through_in(self) -> None:
+        with Graph.open(":memory:") as graph:
+            names = ("Quorra", "Tron", "Yori")
+            neighbors = ("Rinzler", "Sark", "Dumont")
+            for name, neighbor, value in zip(
+                names,
+                neighbors,
+                self.REGRESSION_VALUES,
+                strict=True,
+            ):
+                graph.add_node("Program", designation=name, ratio=value)
+                graph.add_node(
+                    "Program",
+                    designation=neighbor,
+                    ratio=math.nextafter(value, math.inf),
+                )
+            literals = ", ".join(repr(value) for value in self.REGRESSION_VALUES)
+            found = self.names(
+                graph,
+                f"MATCH (n:Program) WHERE n.ratio IN [{literals}] "
+                "RETURN n.designation AS name ORDER BY name",
+                {},
+            )
+        assert found == ["Quorra", "Tron", "Yori"]
+
+    def test_not_equal_keeps_neighboring_values(self) -> None:
+        value = self.REGRESSION_VALUES[0]
+        neighbor = math.nextafter(value, math.inf)
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", designation="Quorra", ratio=value)
+            graph.add_node("Program", designation="Rinzler", ratio=neighbor)
+            found = self.names(
+                graph,
+                "MATCH (n:Program) WHERE n.ratio <> $value "
+                "RETURN n.designation AS name ORDER BY name",
+                {"value": value},
+            )
+        assert found == ["Rinzler"]
+
+    def test_signed_zero_and_integer_zero_are_equal(self) -> None:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", designation="Quorra", zero=0.0)
+            graph.add_node("Program", designation="Tron", zero=-0.0)
+            graph.add_node("Program", designation="Yori", zero=0)
+            for value in (0.0, -0.0, 0):
+                found = self.names(
+                    graph,
+                    "MATCH (n:Program) WHERE n.zero = $value "
+                    "RETURN n.designation AS name ORDER BY name",
+                    {"value": value},
+                )
+                assert found == ["Quorra", "Tron", "Yori"]
+
+    def test_integer_and_float_equality_stays_numeric(self) -> None:
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", designation="Tron", cycles=36)
+            graph.add_node("Program", designation="Quorra", cycles=36.0)
+            graph.add_node("Program", designation="Rinzler", cycles=37)
+            for value in (36, 36.0):
+                found = self.names(
+                    graph,
+                    "MATCH (n:Program) WHERE n.cycles = $value "
+                    "RETURN n.designation AS name ORDER BY name",
+                    {"value": value},
+                )
+                assert found == ["Quorra", "Tron"]
+
+    def test_float_equality_compiles_to_exact_text(self) -> None:
+        parsed = Parser.parse_statement("MATCH (n:Program) WHERE n.ratio = 2.5 RETURN n")
+        match = next(clause for clause in parsed.clauses if isinstance(clause, Match))
+        compiled = Compiler(match).compile({})
+        assert "json_extract(n0.props, '$.\"ratio\"', '$.\"ratio\"') IN (?)" in compiled.sql
+        assert compiled.arguments == ("Program", "[2.5,2.5]")
+
+    def test_integer_equality_keeps_the_numeric_path(self) -> None:
+        parsed = Parser.parse_statement("MATCH (n:Program) WHERE n.cycles = 36 RETURN n")
+        match = next(clause for clause in parsed.clauses if isinstance(clause, Match))
+        compiled = Compiler(match).compile({})
+        assert "json_extract(n0.props, '$.\"cycles\"') = ?" in compiled.sql
+        assert compiled.arguments == ("Program", 36)

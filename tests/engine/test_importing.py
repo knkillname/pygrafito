@@ -226,16 +226,36 @@ class TestImportFiles(_ImportGraph):
         quorra = next(iter(graph.find_nodes("Program", designation="Quorra")))
         assert quorra["cycles"] == 37
 
-    def test_csv_quoted_field_with_newline(self, graph: Graph, tmp_path: pathlib.Path) -> None:
+    @pytest.mark.parametrize(
+        ("newline", "expected"),
+        [
+            (b"\n", "line one\nline two"),
+            (b"\r\n", "line one\r\nline two"),
+        ],
+    )
+    def test_csv_quoted_field_preserves_newlines(
+        self,
+        graph: Graph,
+        tmp_path: pathlib.Path,
+        newline: bytes,
+        expected: str,
+    ) -> None:
         path = tmp_path / "grid.csv"
-        path.write_text('designation,notes\n"Kevin Flynn","line one\nline two"\n', encoding="utf-8")
+        path.write_bytes(
+            b"designation,notes"
+            + newline
+            + b'"Kevin Flynn","line one'
+            + newline
+            + b'line two"'
+            + newline
+        )
         graph.import_file(
             path,
             "UNWIND $rows AS row CREATE (n:Program {designation: row.designation, "
             "notes: row.notes})",
         )
         node = next(iter(graph.find_nodes("Program", designation="Kevin Flynn")))
-        assert node["notes"] == "line one\nline two"
+        assert node["notes"] == expected
 
     def test_csv_header_only(self, graph: Graph, tmp_path: pathlib.Path) -> None:
         path = tmp_path / "grid.csv"
