@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-28
+
 ### Changed
 
 - Windows developers now get consistent guidance for the local checks: `scripts/verify` and the
