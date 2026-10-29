@@ -40,7 +40,8 @@ package, or a platform-specific wheel.
 
 Developer tooling is the exception: `scripts/verify` and the Git pre-push hook are POSIX shell
 programs. Run them through Git Bash on Windows, or run `hatch check` and `hatch test` directly.
-The test suite skips only those developer-tooling tests when no POSIX shell is available.
+On Windows, the verify-script stub tests skip with an explicit platform reason because their
+command stubs need POSIX executable files; the Git-hook tests still run through Git's shell.
 
 ## Google Colab
 

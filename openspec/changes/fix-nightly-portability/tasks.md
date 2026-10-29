@@ -34,7 +34,7 @@
 - [x] 5.2 Add shell command tests with Windows-shaped paths for import, export, restore, backup, and quoted paths containing spaces; verify the parser branch preserves the exact path and existing POSIX tests still pass.
 - [x] 5.3 Audit `.output` and `.once` file writes and add a regression test that the redirected file contains `\n` line endings; verify the test passes on the current platform and the code uses an explicit newline setting.
 - [x] 5.4 Normalize the failed-redirection regression to accept the platform's `OSError` subclass, and preserve the previous output target on both Linux and Windows; verify the session test no longer expects `IsADirectoryError` specifically.
-- [ ] 5.5 Account for the Windows console-script suffix when comparing `pygrafito` with `python -m pygrafito`, and fix any other `test_app` process-wiring failures shown by the Windows traceback; verify the process tests pass on Windows.
+- [x] 5.5 Account for the Windows console-script suffix when comparing `pygrafito` with `python -m pygrafito`, and fix any other `test_app` process-wiring failures shown by the Windows traceback; verify the process tests pass on Windows.
 - [x] 5.6 Update `docs/reference/cli.md` and the shell guide with native Windows path and redirected-newline behavior; add an `[Unreleased]` Fixed entry for the Windows shell fixes and verify the changelog wording is user-facing.
 
 ## 6. CSV newlines and SQL view documentation
@@ -52,14 +52,14 @@
 
 ## 8. POSIX developer tooling on Windows
 
-- [ ] 8.1 Update the pre-push and verify-script test harness to invoke shell programs through a POSIX shell when available and skip with an explicit platform reason otherwise; verify the tests pass or skip cleanly on Linux and are Windows-safe.
+- [x] 8.1 Update the pre-push and verify-script test harness to invoke shell programs through a POSIX shell when available and skip with an explicit platform reason otherwise; verify the tests pass or skip cleanly on Linux and are Windows-safe.
 - [x] 8.2 Update `docs/contributing/testing.md` and the verification guide to state that `scripts/verify` and the Git hook require a POSIX shell or Git Bash on Windows; verify the instructions match the test behavior.
 - [x] 8.3 Add an `[Unreleased]` Changed entry for the Windows developer-tooling guidance and verify the nightly workflow still runs the full library matrix.
 
 ## 9. Integration and verification
 
 - [x] 9.1 Run `hatch check --fix`, both supported `hatch test` environments, and `scripts/verify`; confirm the coverage gate and the pinned SQLite container pass.
-- [ ] 9.2 Reproduce the nightly runtime with a SQLite 3.50.4 build and run the affected predicate, query, and constraint tests under Python 3.13 and 3.14 on the macOS and Windows portability targets; confirm the regression tests pass on every supported combination.
+- [x] 9.2 Reproduce the nightly runtime with a SQLite 3.50.4 build and run the affected predicate, query, and constraint tests under Python 3.13 and 3.14 on the macOS and Windows portability targets; confirm the regression tests pass on every supported combination.
 - [x] 9.3 Run `hatch run docs:build` and fix every warning; confirm the updated guides and references build with the rest of the Sphinx site.
-- [ ] 9.4 Run the Windows nightly matrix on Python 3.13 and 3.14 and confirm the previous nightly failures are gone, with only explicitly marked POSIX-tooling skips remaining.
+- [x] 9.4 Run the Windows nightly matrix on Python 3.13 and 3.14 and confirm the previous nightly failures are gone, with only explicitly marked POSIX-tooling skips remaining.
 - [x] 9.5 Re-read the proposal, delta specs, design, and tasks; confirm the delivered behavior, documentation, changelog entries, and tests match without leftover placeholders.

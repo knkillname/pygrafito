@@ -4,9 +4,6 @@ on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
-  push:
-    branches:
-      - "fix-nightly-portability-verify"
 
 permissions:
   contents: read

@@ -59,8 +59,10 @@ scripts/verify --docs
 ```
 
 `scripts/verify` and the Git hook are POSIX shell programs. On Windows, run them through Git Bash
-or WSL. If no POSIX shell is available, the developer-tooling tests skip with an explicit platform
-reason; `hatch check` and `hatch test` still run natively.
+or WSL. The unit tests for the verify-script stub harness skip on Windows because their command
+stubs need POSIX executable files; the Git-hook tests still run through Git's shell. If no POSIX
+shell is available at all, the developer-tooling tests skip with an explicit platform reason;
+`hatch check` and `hatch test` still run natively.
 
 To stop using the hook, run `git config --unset core.hooksPath`.
 
