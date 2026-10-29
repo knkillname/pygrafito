@@ -559,7 +559,7 @@ class RelationshipRepository:
         if properties:
             for key, value in properties.items():
                 type_expression = self._codec.property_type_expression("relationships.props", key)
-                if isinstance(value, float) and not self._codec.needs_property_scan(key):
+                if isinstance(value, float) and self._codec.supports_exact_text(key):
                     clauses.append(f"{type_expression} = 'real'")
                     clauses.append(
                         f"{self._codec.exact_value_expression('relationships.props', key)} = ?"

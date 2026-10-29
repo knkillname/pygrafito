@@ -683,9 +683,9 @@ class ConstraintRegistry:
         """
         if row is None:
             return None
-        if self._codec.needs_property_scan(key):
-            return (int(typing.cast(int, row[0])), self.decode_value(row[1], str(row[2])))
-        return (int(typing.cast(int, row[0])), self._codec.decode_exact_value(str(row[1])))
+        if self._codec.supports_exact_text(key):
+            return (int(typing.cast(int, row[0])), self._codec.decode_exact_value(str(row[1])))
+        return (int(typing.cast(int, row[0])), self.decode_value(row[1], str(row[2])))
 
     def decode_value(self, raw: object, json_type: str) -> Value:
         """Rebuild a property value from SQLite's extracted value and type.

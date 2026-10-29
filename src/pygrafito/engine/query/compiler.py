@@ -315,7 +315,7 @@ class PredicateCompiler:
                 json_type,
                 int(validated),
             )
-        if isinstance(validated, float) and not self._codec.needs_property_scan(key):
+        if isinstance(validated, float) and self._codec.supports_exact_text(key):
             exact_expression = self._codec.exact_value_expression(f"{table}.props", key)
             candidates = self._codec.numeric_match_values(validated)
             placeholders = ", ".join("?" for _ in candidates)

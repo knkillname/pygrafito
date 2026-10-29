@@ -470,6 +470,18 @@ class TestExactRealUniqueness(_ConstraintTestCase):
         assert error.existing == holder.id
         assert [node["state"] for node in graph.find_nodes("Program")] == [value]
 
+    def test_special_key_duplicate_real_is_rejected(self, graph: Graph) -> None:
+        key = 'a"b'
+        value = self.REGRESSION_VALUES[0]
+        graph.create_node_uniqueness_constraint("Program", key)
+        holder = graph.add_node("Program", **{key: value})
+        with pytest.raises(ConstraintViolationError) as raised:
+            graph.add_node("Program", **{key: value})
+        assert raised.value.value == value
+        assert raised.value.existing == holder.id
+        graph.add_node("Program", **{key: math.nextafter(value, math.inf)})
+        assert len(list(graph.find_nodes("Program"))) == 2
+
     @pytest.mark.parametrize("value", REGRESSION_VALUES)
     def test_neighboring_reals_are_both_stored(self, graph: Graph, value: float) -> None:
         neighbor = math.nextafter(value, math.inf)

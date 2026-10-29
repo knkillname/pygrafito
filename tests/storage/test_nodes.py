@@ -233,6 +233,14 @@ class TestFind(_NodeTestCase):
         assert len(neighbor_found) == 1
         assert neighbor_found[0].id != node.id
 
+    def test_real_value_matches_a_special_key(self, repository: NodeRepository) -> None:
+        key = 'a"b'
+        value = 3.277095539246836e-284
+        node = repository.create(properties={key: value})
+        repository.create(properties={key: math.nextafter(value, math.inf)})
+        found = list(repository.find(properties={key: value}))
+        assert [item.id for item in found] == [node.id]
+
     def test_invalid_filter_rejected(self, repository: NodeRepository) -> None:
         mixed = typing.cast(Value, [1, 2.0])
         with pytest.raises(ValidationError):

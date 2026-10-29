@@ -5,6 +5,7 @@
 
 import json
 import math
+import sqlite3
 import typing
 from collections.abc import Mapping
 
@@ -24,6 +25,7 @@ class PropertyCodec:
     INTEGER_MAX: int = 2**63 - 1
     CONTROL_CHARACTER_LIMIT: int = 0x20
     EXACT_VALUE_PAIR: int = 2
+    PORTABLE_PATH_VERSION: tuple[int, int, int] = (3, 47, 0)
 
     def validate_value(self, value: object) -> Value:
         """Validate a scalar or homogeneous list of scalars.
@@ -324,13 +326,42 @@ class PropertyCodec:
             return self._scanned_property(props, property_key, "value")
         return f"json_extract({props}, {self.sql_json_path(property_key)})"
 
+    def supports_exact_text(self, key: str) -> bool:
+        """Report whether a key can be matched through exact JSON text.
+
+        A portable key always can. A key that contains a double quote or a
+        control character needs the quoted-label parser added in SQLite 3.47;
+        older runtimes keep the scalar scan fallback.
+
+        Parameters
+        ----------
+        key : str
+            Property key.
+
+        Returns
+        -------
+        bool
+            ``True`` when ``exact_value_expression`` can address the key
+            without a ``json_each`` scan.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        property_key = self.validate_identifier(key, "property key")
+        if not self.needs_property_scan(property_key):
+            return True
+        return sqlite3.sqlite_version_info >= self.PORTABLE_PATH_VERSION
+
     def exact_value_expression(self, props: str, key: str) -> str:
         """Render the exact stored JSON text for one property.
 
-        For a portable key this asks ``json_extract`` for the same path twice,
-        which returns a two-element JSON array carrying the stored number
-        lexeme instead of converting it to a SQL float. Keys that need a
-        ``json_each`` scan fall back to the extracted scalar.
+        For an addressable key this asks ``json_extract`` for the same path
+        twice, which returns a two-element JSON array carrying the stored
+        number lexeme instead of converting it to a SQL float. Keys that a
+        runtime older than SQLite 3.47 cannot address fall back to the
+        extracted scalar.
 
         Parameters
         ----------
@@ -343,8 +374,8 @@ class PropertyCodec:
         Returns
         -------
         str
-            An expression that yields exact JSON text for a portable key, or
-            the extracted scalar for a key without a portable path.
+            An expression that yields exact JSON text for an addressable key,
+            or the extracted scalar for a key without a supported path.
 
         Raises
         ------
@@ -352,7 +383,7 @@ class PropertyCodec:
             If the key is not a non-empty string or contains a null character.
         """
         property_key = self.validate_identifier(key, "property key")
-        if self.needs_property_scan(property_key):
+        if not self.supports_exact_text(property_key):
             return self.property_value_expression(props, property_key)
         path = self.sql_json_path(property_key)
         return f"json_extract({props}, {path}, {path})"
@@ -360,9 +391,9 @@ class PropertyCodec:
     def exact_comparison_value(self, key: str, value: Value) -> int | float | str:
         """Return the bind value that matches an exact property comparison.
 
-        For a portable key the result is the canonical two-element JSON array
-        text that ``exact_value_expression`` produces, which preserves the
-        exact spelling of a real value. A key that needs a ``json_each`` scan
+        For an addressable key the result is the canonical two-element JSON
+        array text that ``exact_value_expression`` produces, which preserves
+        the exact spelling of a real value. A key without a supported path
         keeps the scalar comparison value.
 
         Parameters
@@ -375,8 +406,8 @@ class PropertyCodec:
         Returns
         -------
         int | float | str
-            The scalar for a scanned key, or the two-element array text for a
-            portable key.
+            The scalar for an unsupported key, or the two-element array text
+            for an addressable key.
 
         Raises
         ------
@@ -384,7 +415,7 @@ class PropertyCodec:
             If the key or value is not storable.
         """
         validated = self.validate_value(value)
-        if self.needs_property_scan(key):
+        if not self.supports_exact_text(key):
             return self.comparison_value(validated)
         return self._dumps([validated, validated])
 

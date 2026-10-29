@@ -157,6 +157,24 @@ class TestExactNumericPredicates:
             )
         assert names == ["Quorra"]
 
+    def test_regression_value_matches_a_special_key(self) -> None:
+        key = 'a"b'
+        value = self.REGRESSION_VALUES[0]
+        quoted = "`" + key.replace("`", "``") + "`"
+        with Graph.open(":memory:") as graph:
+            graph.add_node("Program", designation="Quorra", **{key: value})
+            graph.add_node(
+                "Program",
+                designation="Rinzler",
+                **{key: math.nextafter(value, math.inf)},
+            )
+            names = self.names(
+                graph,
+                f"MATCH (n:Program) WHERE n.{quoted} = $value RETURN n.designation AS name",
+                {"value": value},
+            )
+        assert names == ["Quorra"]
+
     def test_regression_values_match_through_in(self) -> None:
         with Graph.open(":memory:") as graph:
             names = ("Quorra", "Tron", "Yori")

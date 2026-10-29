@@ -319,6 +319,11 @@ class TestVerifyScript:
         tuple[dict[str, str], pathlib.Path]
             Process environment and call-log path.
         """
+        if os.name == "nt":
+            pytest.skip(
+                "the verify-script stubs need POSIX executable files; "
+                "run scripts/verify in Git Bash"
+            )
         bin_dir = tmp_path / "bin"
         bin_dir.mkdir()
         system_bin = tmp_path / "system-bin"

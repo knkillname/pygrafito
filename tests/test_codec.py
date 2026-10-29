@@ -373,11 +373,24 @@ class TestExactEquality(_CodecTestCase):
     def test_exact_expression_falls_back_to_a_scanned_key(
         self,
         property_codec: PropertyCodec,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 46, 0))
         key = 'a"b'
         expression = property_codec.exact_value_expression("nodes.props", key)
         fallback = property_codec.property_value_expression("nodes.props", key)
         assert expression == fallback
+
+    def test_exact_expression_uses_a_special_key_path_on_sqlite_347(
+        self,
+        property_codec: PropertyCodec,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 47, 0))
+        expression = property_codec.exact_value_expression("nodes.props", 'a"b')
+        assert expression.startswith("json_extract(nodes.props")
+        assert expression.endswith('\'$."a\\"b"\', \'$."a\\"b"\')')
+        assert property_codec.supports_exact_text('a"b')
 
     @pytest.mark.parametrize(
         ("value", "expected"),
@@ -402,10 +415,39 @@ class TestExactEquality(_CodecTestCase):
     def test_exact_comparison_value_falls_back_to_a_scanned_key(
         self,
         property_codec: PropertyCodec,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 46, 0))
         key = 'a"b'
         assert property_codec.exact_comparison_value(key, 2.5) == 2.5
         assert property_codec.exact_comparison_value(key, [1, 2]) == "[1,2]"
+
+    def test_exact_comparison_value_uses_the_path_on_sqlite_347(
+        self,
+        property_codec: PropertyCodec,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(sqlite3, "sqlite_version_info", (3, 47, 0))
+        assert property_codec.exact_comparison_value('a"b', 2.5) == "[2.5,2.5]"
+
+    @pytest.mark.parametrize(
+        ("version", "expected"),
+        [
+            ((3, 46, 0), False),
+            ((3, 47, 0), True),
+            ((3, 53, 4), True),
+        ],
+    )
+    def test_supports_exact_text_for_special_keys(
+        self,
+        property_codec: PropertyCodec,
+        monkeypatch: pytest.MonkeyPatch,
+        version: tuple[int, int, int],
+        expected: bool,
+    ) -> None:
+        monkeypatch.setattr(sqlite3, "sqlite_version_info", version)
+        assert property_codec.supports_exact_text('a"b') is expected
+        assert property_codec.supports_exact_text("cycles")
 
     @pytest.mark.parametrize(
         ("value", "expected"),
