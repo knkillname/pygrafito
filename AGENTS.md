@@ -81,6 +81,7 @@ Keep Ruff, Pyrefly, pytest, and coverage configuration in `pyproject.toml`; do n
 - Releases rewrite and move the `[Unreleased]` entries into a new `## [X.Y.Z] - YYYY-MM-DD` section using the end-user rule above, then run `hatch version <version>`.
 - `hatch version` is the only supported way to change the version; `pyproject.toml` reads it dynamically from `src/pygrafito/__about__.py`.
 - Keep an empty `## [Unreleased]` section at the top after every release.
+- After pushing a release tag, do not block on the PyPI publish/deploy job. Report the tag, the passing build and CI runs, and the release workflow URL; the deployment continues in the background.
 
 ## Documentation
 
