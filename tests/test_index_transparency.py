@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: MIT
 """Tests that a declared index never changes query results or ordering."""
 
+import math
+
 import pytest
 
 from pygrafito import Graph
@@ -10,6 +12,12 @@ from pygrafito import Graph
 
 class TestIndexTransparency:
     """Compare statement results with and without a declared index."""
+
+    REGRESSION_VALUES: tuple[float, ...] = (
+        2.7710821668887726e-173,
+        3.277095539246836e-284,
+        1.6287812207021506e-109,
+    )
 
     @staticmethod
     def seed(graph: Graph) -> None:
@@ -129,6 +137,90 @@ class TestIndexTransparency:
             assert [node.id for node in plain.find_nodes("Program", cycles=36)] == [
                 node.id for node in indexed.find_nodes("Program", cycles=36)
             ]
+        finally:
+            plain.close()
+            indexed.close()
+
+    @classmethod
+    def seed_real(cls, graph: Graph) -> None:
+        """Populate a graph with tiny reals and their neighbors.
+
+        Parameters
+        ----------
+        graph : Graph
+            Graph to populate.
+        """
+        names = ("Quorra", "Tron", "Yori")
+        neighbors = ("Rinzler", "Sark", "Dumont")
+        for name, neighbor, value in zip(names, neighbors, cls.REGRESSION_VALUES, strict=True):
+            graph.add_node("Program", designation=name, ratio=value)
+            graph.add_node(
+                "Program",
+                designation=neighbor,
+                ratio=math.nextafter(value, math.inf),
+            )
+
+    def test_real_equality_matches_before_and_after_the_index(self) -> None:
+        graph = Graph.open(":memory:")
+        try:
+            self.seed_real(graph)
+            before: dict[str, list[object]] = {}
+            after: dict[str, list[object]] = {}
+            for value in self.REGRESSION_VALUES:
+                before[str(value)] = [
+                    node["designation"] for node in graph.find_nodes("Program", ratio=value)
+                ]
+            graph.create_node_index("ratio")
+            for value in self.REGRESSION_VALUES:
+                after[str(value)] = [
+                    node["designation"] for node in graph.find_nodes("Program", ratio=value)
+                ]
+            assert before == after
+            assert all(len(names) == 1 for names in after.values())
+        finally:
+            graph.close()
+
+    def test_real_gql_equality_matches_with_and_without_the_index(self) -> None:
+        plain = Graph.open(":memory:")
+        indexed = Graph.open(":memory:")
+        try:
+            for graph in (plain, indexed):
+                self.seed_real(graph)
+            indexed.create_node_index("ratio")
+            statement = (
+                "MATCH (n:Program) WHERE n.ratio = $value "
+                "RETURN n.designation AS name ORDER BY name"
+            )
+            values = [
+                value
+                for item in self.REGRESSION_VALUES
+                for value in (item, math.nextafter(item, math.inf))
+            ]
+            for value in values:
+                expected = [row["name"] for row in plain.query(statement, {"value": value})]
+                actual = [row["name"] for row in indexed.query(statement, {"value": value})]
+                assert actual == expected
+                assert len(expected) == 1
+        finally:
+            plain.close()
+            indexed.close()
+
+    def test_real_range_matches_with_and_without_the_index(self) -> None:
+        plain = Graph.open(":memory:")
+        indexed = Graph.open(":memory:")
+        try:
+            for graph in (plain, indexed):
+                self.seed_real(graph)
+            indexed.create_node_index("ratio")
+            statement = (
+                "MATCH (n:Program) WHERE n.ratio > $value "
+                "RETURN n.designation AS name ORDER BY name"
+            )
+            for value in self.REGRESSION_VALUES:
+                expected = [row["name"] for row in plain.query(statement, {"value": value})]
+                actual = [row["name"] for row in indexed.query(statement, {"value": value})]
+                assert actual == expected
+                assert expected
         finally:
             plain.close()
             indexed.close()

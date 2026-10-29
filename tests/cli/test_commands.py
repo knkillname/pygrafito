@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from pygrafito import Graph, NotFoundError
+from pygrafito.cli.arguments import CommandArguments
 from pygrafito.cli.formatting import OutputMode
 from tests.cli.support import Fixtures, Harness
 
@@ -818,3 +819,70 @@ class TestImportCommand:
         assert "while importing" in error
         assert "row 2" in error
         assert "0" in output
+
+
+class TestWindowsPaths:
+    """Verify dot commands keep native Windows path separators."""
+
+    @pytest.fixture(autouse=True)
+    def windows_mode(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """Use Windows parsing and a temporary working directory.
+
+        Parameters
+        ----------
+        monkeypatch : pytest.MonkeyPatch
+            Fixture used to change the parser mode and working directory.
+        tmp_path : Path
+            Temporary working directory.
+        """
+        monkeypatch.setattr(CommandArguments, "WINDOWS", True)
+        monkeypatch.chdir(tmp_path)
+
+    def test_export_import_and_restore_keep_backslashes(self, tmp_path: Path) -> None:
+        snapshot = Path(r"Grid Files\snapshot.jsonl")
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        harness = Harness()
+        try:
+            code, output, _ = harness.run(
+                "CREATE (n:Program {designation: 'Quorra'});\n"
+                f'.export "{snapshot}"\n'
+                f'.restore "{snapshot}" --replace\n'
+                "MATCH (n:Program) RETURN n.designation AS name;\n"
+            )
+        finally:
+            harness.close()
+        assert code == 0, output
+        assert snapshot.exists()
+        assert "Quorra" in output
+        with Graph.open(":memory:") as graph:
+            graph.restore_jsonl(snapshot)
+            assert [node["designation"] for node in graph.find_nodes("Program")] == ["Quorra"]
+
+    def test_import_reads_a_windows_shaped_path(self, tmp_path: Path) -> None:
+        source = Path(r"Grid Files\programs.csv")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text("designation\nTron\n", encoding="utf-8")
+        harness = Harness()
+        try:
+            code, output, _ = harness.run(
+                f'.import "{source}" --statement '
+                '"UNWIND $rows AS row CREATE (n:Program {designation: row.designation})"\n'
+                "MATCH (n:Program) RETURN n.designation AS name;\n"
+            )
+        finally:
+            harness.close()
+        assert code == 0, output
+        assert "Tron" in output
+
+    def test_backup_accepts_a_quoted_windows_path_with_spaces(self, tmp_path: Path) -> None:
+        source = tmp_path / "grid.db"
+        Fixtures.seed(source)
+        destination = Path(r"Grid Files\backup.db")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        harness = Harness(source)
+        try:
+            code, output, _ = harness.run(f'.backup "{destination}"\n')
+        finally:
+            harness.close()
+        assert code == 0, output
+        assert destination.exists()

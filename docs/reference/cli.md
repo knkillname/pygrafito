@@ -177,6 +177,14 @@ grid.db> .output off
 ```
 
 A redirection that cannot open its path reports an error and keeps the previous target.
+Redirected files always use `\n` line endings, so the bytes match on Linux, macOS, and Windows.
+
+## Path arguments
+
+Path arguments keep the host platform's separators. On Windows, an unquoted path such as
+`C:\grid\snapshot.jsonl` is treated as one value and its backslashes are not escapes. Quote a
+path that contains spaces, for example `.backup "C:\Grid Files\backup.db"`. The same rules
+apply to `.import`, `.export`, `.restore`, `.backup`, `.open`, `.read`, `.output`, and `.once`.
 
 
 ## Session commands

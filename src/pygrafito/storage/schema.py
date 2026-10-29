@@ -21,6 +21,7 @@ class Schema:
 
     VERSION: int = 2
     MINIMUM_SQLITE_VERSION: tuple[int, int, int] = (3, 38, 0)
+    MISSING_FUNCTION_MARKER: str = "no such function"
     GRAPH_TABLES: frozenset[str] = frozenset(
         {"nodes", "node_labels", "relationships", "relationship_labels"}
     )
@@ -277,6 +278,8 @@ class Schema:
                 """SELECT json_valid('{"a":1}'), json_type('{"a":1}', '$.a')"""
             ).fetchone()
         except OperationalError as error:
+            if cls.MISSING_FUNCTION_MARKER not in str(error).lower():
+                raise
             message = "the SQLite runtime does not provide the JSON1 functions"
             raise UnsupportedSqliteError(message) from error
         if row is None or row[0] != 1 or row[1] != "integer":

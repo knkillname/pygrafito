@@ -5,6 +5,7 @@
 
 import json
 import math
+import sqlite3
 import typing
 from collections.abc import Mapping
 
@@ -23,6 +24,8 @@ class PropertyCodec:
     INTEGER_MIN: int = -(2**63)
     INTEGER_MAX: int = 2**63 - 1
     CONTROL_CHARACTER_LIMIT: int = 0x20
+    EXACT_VALUE_PAIR: int = 2
+    PORTABLE_PATH_VERSION: tuple[int, int, int] = (3, 47, 0)
 
     def validate_value(self, value: object) -> Value:
         """Validate a scalar or homogeneous list of scalars.
@@ -322,6 +325,178 @@ class PropertyCodec:
         if self.needs_property_scan(property_key):
             return self._scanned_property(props, property_key, "value")
         return f"json_extract({props}, {self.sql_json_path(property_key)})"
+
+    def supports_exact_text(self, key: str) -> bool:
+        """Report whether a key can be matched through exact JSON text.
+
+        A portable key always can. A key that contains a double quote or a
+        control character needs the quoted-label parser added in SQLite 3.47;
+        older runtimes keep the scalar scan fallback.
+
+        Parameters
+        ----------
+        key : str
+            Property key.
+
+        Returns
+        -------
+        bool
+            ``True`` when ``exact_value_expression`` can address the key
+            without a ``json_each`` scan.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        property_key = self.validate_identifier(key, "property key")
+        if not self.needs_property_scan(property_key):
+            return True
+        return sqlite3.sqlite_version_info >= self.PORTABLE_PATH_VERSION
+
+    def exact_value_expression(self, props: str, key: str) -> str:
+        """Render the exact stored JSON text for one property.
+
+        For an addressable key this asks ``json_extract`` for the same path
+        twice, which returns a two-element JSON array carrying the stored
+        number lexeme instead of converting it to a SQL float. Keys that a
+        runtime older than SQLite 3.47 cannot address fall back to the
+        extracted scalar.
+
+        Parameters
+        ----------
+        props : str
+            SQL expression that yields the stored property object, such as
+            ``nodes.props`` or ``NEW.props``.
+        key : str
+            Exact property key.
+
+        Returns
+        -------
+        str
+            An expression that yields exact JSON text for an addressable key,
+            or the extracted scalar for a key without a supported path.
+
+        Raises
+        ------
+        ValidationError
+            If the key is not a non-empty string or contains a null character.
+        """
+        property_key = self.validate_identifier(key, "property key")
+        if not self.supports_exact_text(property_key):
+            return self.property_value_expression(props, property_key)
+        path = self.sql_json_path(property_key)
+        return f"json_extract({props}, {path}, {path})"
+
+    def exact_comparison_value(self, key: str, value: Value) -> int | float | str:
+        """Return the bind value that matches an exact property comparison.
+
+        For an addressable key the result is the canonical two-element JSON
+        array text that ``exact_value_expression`` produces, which preserves
+        the exact spelling of a real value. A key without a supported path
+        keeps the scalar comparison value.
+
+        Parameters
+        ----------
+        key : str
+            Exact property key.
+        value : Value
+            Value used in a property predicate.
+
+        Returns
+        -------
+        int | float | str
+            The scalar for an unsupported key, or the two-element array text
+            for an addressable key.
+
+        Raises
+        ------
+        ValidationError
+            If the key or value is not storable.
+        """
+        validated = self.validate_value(value)
+        if not self.supports_exact_text(key):
+            return self.comparison_value(validated)
+        return self._dumps([validated, validated])
+
+    def numeric_match_values(self, value: int | float) -> tuple[int | float, ...]:
+        """List the stored numeric values a GQL constant matches.
+
+        The dialect keeps integers and floats in one numeric family, so a
+        float constant also matches the canonical spelling of its exact
+        integer form when that form fits in the signed 64-bit range. Both
+        signed-zero spellings represent the same value.
+
+        Parameters
+        ----------
+        value : int | float
+            Numeric query constant.
+
+        Returns
+        -------
+        tuple[int | float, ...]
+            Values whose canonical JSON text a stored number may use to match
+            the constant.
+
+        Raises
+        ------
+        ValidationError
+            If the value is not a storable integer or float.
+        """
+        validated = self.validate_value(value)
+        if isinstance(validated, bool) or not isinstance(validated, (int, float)):
+            message = "numeric match values require an integer or a float"
+            raise ValidationError(message)
+        if isinstance(validated, int):
+            candidates: list[int | float] = [validated]
+            as_float = float(validated)
+            if math.isfinite(as_float) and int(as_float) == validated:
+                candidates.append(as_float)
+            return tuple(candidates)
+        if validated == 0.0:
+            values: list[int | float] = [-0.0, 0.0]
+        else:
+            values = [validated]
+        if validated.is_integer():
+            integer = int(validated)
+            if self.INTEGER_MIN <= integer <= self.INTEGER_MAX:
+                values.append(integer)
+        return tuple(values)
+
+    def decode_exact_value(self, payload: str) -> Value:
+        """Decode one property reported as exact JSON text.
+
+        ``exact_value_expression`` renders a two-element JSON array for a
+        portable key. The array preserves the stored number lexeme, so parsing
+        it recovers the value that was written rather than a rounded neighbor.
+
+        Parameters
+        ----------
+        payload : str
+            Exact JSON text returned by ``exact_value_expression``.
+
+        Returns
+        -------
+        Value
+            The decoded property value.
+
+        Raises
+        ------
+        ValidationError
+            If the text is not a two-element JSON array of storable values.
+        """
+        try:
+            decoded: object = json.loads(payload)
+        except json.JSONDecodeError as error:
+            message = "stored exact value is not valid JSON"
+            raise ValidationError(message) from error
+        if not isinstance(decoded, list) or len(decoded) != self.EXACT_VALUE_PAIR:
+            message = "stored exact value is not a two-element JSON array"
+            raise ValidationError(message)
+        if decoded[0] != decoded[1]:
+            message = "stored exact value does not repeat one value"
+            raise ValidationError(message)
+        return self.validate_value(decoded[0])
 
     def portable_index_columns(self, key: str) -> str | None:
         """Render the index columns for one property key.

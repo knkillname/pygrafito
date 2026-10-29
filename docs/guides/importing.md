@@ -94,8 +94,9 @@ invalid JSON, and non-finite numbers are rejected with the line number.
 
 Every CSV field is a string. Convert it in the statement with `toInteger`, `toFloat`, or
 `toString`. The first record is a header; duplicate header names and records with the wrong field
-count are rejected. Blank lines are skipped, and quoted fields, escaped quotes, and embedded
-newlines follow the standard CSV rules.
+count are rejected. Blank lines are skipped, and quoted fields and escaped quotes follow the
+standard CSV rules. A newline inside a quoted field is preserved exactly: an LF sequence stays LF
+and a CRLF sequence stays CRLF on every host platform.
 
 ```python
 import pathlib

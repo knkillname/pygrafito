@@ -297,7 +297,8 @@ class TestSubprocess:
         assert matching[0].value == "pygrafito.cli.app:App.main"
 
     def test_console_script_matches_the_module(self) -> None:
-        script = Path(sys.executable).with_name("pygrafito")
+        suffix = ".exe" if sys.platform == "win32" else ""
+        script = Path(sys.executable).with_name(f"pygrafito{suffix}")
         assert script.exists()
         completed = subprocess.run(
             [str(script), "--help"],

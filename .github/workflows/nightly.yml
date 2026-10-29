@@ -33,6 +33,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
 
+      - name: Show SQLite version
+        run: |
+          python -c "import sqlite3, sys; print(f'SQLite {sqlite3.sqlite_version} on Python {sys.version.split()[0]}')"
+
       - name: Set up uv
         uses: astral-sh/setup-uv@v6
         with:
@@ -45,7 +49,7 @@ jobs:
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Test without coverage
-        run: hatch test -py ${{ matrix.python }} -- --no-cov
+        run: hatch test -py ${{ matrix.python }} -- --no-cov -rs
 
   notify:
     name: Report portability failure

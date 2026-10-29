@@ -343,6 +343,51 @@
           "properties": {}
         }
       ]
+    },
+    "tron-precision": {
+      "nodes": [
+        {
+          "handle": "quorra",
+          "labels": [
+            "Program"
+          ],
+          "properties": {
+            "designation": "Quorra",
+            "precision": 2.7710821668887726e-173
+          }
+        },
+        {
+          "handle": "tron",
+          "labels": [
+            "Program"
+          ],
+          "properties": {
+            "designation": "Tron",
+            "precision": 3.277095539246836e-284
+          }
+        },
+        {
+          "handle": "yori",
+          "labels": [
+            "Program"
+          ],
+          "properties": {
+            "designation": "Yori",
+            "precision": 1.6287812207021506e-109
+          }
+        },
+        {
+          "handle": "rinzler",
+          "labels": [
+            "Program"
+          ],
+          "properties": {
+            "designation": "Rinzler",
+            "precision": 2.771082166888773e-173
+          }
+        }
+      ],
+      "relationships": []
     }
   },
   "cases": [
@@ -412,6 +457,28 @@
         "rows": [
           {
             "name": "Rinzler"
+          }
+        ]
+      },
+      "tags": [
+        "canonical"
+      ]
+    },
+    {
+      "name": "filter-matches-tiny-real",
+      "feature": "filter",
+      "fixture": "tron-precision",
+      "query": "MATCH (n:Program) WHERE n.precision IN [2.7710821668887726e-173, 3.277095539246836e-284, 1.6287812207021506e-109] RETURN n.designation AS name ORDER BY name",
+      "expect": {
+        "rows": [
+          {
+            "name": "Quorra"
+          },
+          {
+            "name": "Tron"
+          },
+          {
+            "name": "Yori"
           }
         ]
       },

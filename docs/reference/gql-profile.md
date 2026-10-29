@@ -463,6 +463,14 @@ The mixed-quantifier rejection already has a focused test and is also listed und
 - The Python `paths()` API keeps its relationship-unique, bounded trail contract. The target path
   semantics do not change it.
 
+## Stored numeric equality
+
+Equality and `IN` compare a numeric property value by the exact JSON number text stored for it.
+The result does not depend on how the SQLite JSON parser converts that text, so a very small or
+very large real matches itself and its neighboring floats remain distinct. Integers and floats
+stay one numeric family: `36` and `36.0` compare equal, and both signed-zero spellings represent
+the same value. This rule covers `=` and `IN`; range operators keep SQLite's numeric conversion.
+
 ## Query budget
 
 `WALK` is not enabled until the query budget exists. The budget is a safety valve for cyclic
@@ -698,7 +706,7 @@ rejected-forms table.
 | `REMOVE` | Canonical GQL | supported | implemented | None | remove-removes-a-property |
 | `DELETE`, `DETACH DELETE`, `NODETACH DELETE` | Canonical GQL | supported | implemented | None | nodetach-delete-removes-a-disconnected-node |
 | `FOR` with ordinality/offset | Canonical GQL | supported | implemented | None | for-ordinality-binds-one-based-position |
-| `FILTER` | Canonical GQL | supported | implemented | None | filter-stage-alias |
+| `FILTER` | Canonical GQL | supported | implemented | None | filter-stage-alias, filter-matches-tiny-real |
 | `LET` | Canonical GQL | supported | implemented | None | let-adds-a-binding |
 | `NEXT` | Canonical GQL | supported | implemented | `YIELD` supported; no-`YIELD` and write-only segments accepted for Cypher compatibility | next-carries-an-intermediate-return |
 | `FINISH` | Canonical GQL | supported | implemented | None | finish-ends-a-read-without-a-result |

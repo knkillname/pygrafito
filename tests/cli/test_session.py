@@ -114,12 +114,23 @@ class TestOutputState:
         assert path.read_text(encoding="utf-8") == "first\n"
         assert harness.output.getvalue() == "second\n"
 
+    @pytest.mark.parametrize("method", ["set_output", "set_once"])
+    def test_redirected_output_uses_lf(self, tmp_path: Path, method: str) -> None:
+        path = tmp_path / "redirected.txt"
+        harness = Harness()
+        try:
+            getattr(harness.session, method)(str(path))
+            harness.session.emit_lines(["first", "second"])
+        finally:
+            harness.close()
+        assert path.read_bytes() == b"first\nsecond\n"
+
     def test_failed_redirection_keeps_target(self, tmp_path: Path) -> None:
         path = tmp_path / "out.txt"
         harness = Harness()
         try:
             harness.session.set_output(str(path))
-            with pytest.raises(IsADirectoryError):
+            with pytest.raises(OSError, match=r"Is a directory|Permission denied"):
                 harness.session.set_output(str(tmp_path))
             harness.session.emit("still redirected")
         finally:

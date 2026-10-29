@@ -7,6 +7,7 @@ import inspect
 
 import pygrafito.cli
 import pygrafito.cli.app
+import pygrafito.cli.arguments
 import pygrafito.cli.commands
 import pygrafito.cli.formatting
 import pygrafito.cli.reader
@@ -21,6 +22,7 @@ class TestCliPackage:
         modules = (
             pygrafito.cli,
             pygrafito.cli.app,
+            pygrafito.cli.arguments,
             pygrafito.cli.commands,
             pygrafito.cli.formatting,
             pygrafito.cli.reader,

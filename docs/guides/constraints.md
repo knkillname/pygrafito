@@ -94,6 +94,11 @@ with Graph.open(":memory:") as graph:
 
 Absent properties are never values, so any number of elements in the scope may omit the key.
 
+Real values compare by the exact number text that was stored. A tiny value such as
+`2.7710821668887726e-173` collides with itself and stays distinct from the next representable
+float, even when the runtime's SQLite JSON parser would round one of the literals. A violation
+reports that exact stored value together with the element that already holds it.
+
 ## Diagnose a violation
 
 `ConstraintViolationError` carries `kind`, `scope`, `key`, `value`, and `existing`. `existing` is
